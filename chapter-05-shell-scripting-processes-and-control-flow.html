@@ -1,0 +1,893 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="7fb0dfc447337fbe798805900efde00ae052c119dcd5c6c1d2a4871f4428f07f"><title>Shell scripting: processes, input, and control flow · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>Shell scripting: processes, input, and control flow</h1>
+<p class="lead">A parameter sweep runs the Jacobi solver of this book for four grid sizes, \(N=16,32,64,128\), with tolerance \(10^{-6}\) and an iteration limit of 5000. A script that ignores the exit status of the solver prints four lines with 515, 1657, 5000 and 5000 iterations; its own exit status is that of its last run only. Two of the four runs, \(N=64\) and \(N=128\), stopped at the limit with final changes of \(1.4\times10^{-6}\) and \(2.9\times10^{-5}\), which are 1.4 and 29 times the tolerance. Nothing in the output tells the reader which lines are results and which are failures. The disk-monitoring script of the second lecture has a second, unrelated cost: by the count derived in this chapter, its loop creates 7 processes for each line of the <code>df</code> table, and on this machine a 300-line table took between 0.7 and 1.7 s in that loop in four runs, while one <code>awk</code> process took 0.001 to 0.003 s, mostly its own start-up. This chapter defines the model in which a shell script runs, with processes, an environment, and an exit status for every command. It derives what each construct of the two lectures does inside that model, tests the lectures' statements with 12 verified listings, and builds the sweep script that records every outcome.</p>
+<p class="source-note">Grounded in two recordings of the NPTEL course <em>High Performance Scientific Computing</em> (Prof. Shivasubramanian Gopalakrishnan, IIT Bombay): <a href="https://www.youtube.com/watch?v=DRDzYNVw7K4">W2L1, Understanding Shell Scripting: Parent-Child Processes and User Input Handling</a>, and <a href="https://www.youtube.com/watch?v=h5Labe97yWM">W2L2, Shell Scripting Tutorial for Beginners</a>. <strong>Lecture material:</strong> what a shell script is and why scripts matter on HPC systems; the structure of a script (editor, interpreter line, execute permission, running it); command substitution with <code>$(date)</code> and arithmetic with <code>$((5 + 2))</code>; variables, <code>env</code>, <code>export</code> and the difference for child processes, <code>unset</code>, modification of <code>PATH</code> and the variables for libraries and headers; <code>read</code>; <code>if</code>/<code>elif</code>/<code>else</code> with file tests and numeric tests (file existence, a number against 5, a grade from marks); <code>for</code> and <code>while</code> loops; functions with arguments, the exit status <code>$?</code>, and recursion (factorial); a disk-space monitoring script that combines a pipeline, <code>awk</code>, <code>sed</code>, a <code>while</code> loop and a threshold test. <strong>Research extensions:</strong> the POSIX Shell Command Language (execution environments, expansions, exit status, command search, <code>test</code>); the GNU Bash manual (environment, exit status, arithmetic, pipelines, <code>local</code>, <code>wait</code>, <code>read</code>); the Linux <code>execve(2)</code> and <code>execvp(3)</code> manual pages (interpreter scripts, the environment of a new program, the <code>/bin/sh</code> fallback); the POSIX.1-2024 <code>test</code> page (string operators); the <code>ld.so(8)</code> and GCC manuals (search variables for libraries and headers); the Slurm <code>sbatch</code> manual (what a batch script is and which environment it receives). <strong>Original teaching constructions:</strong> the formal model of this chapter (execution environments, the inheritance rule (5.1), the wrap-around rule (5.2), the eight-bit status rule (5.3), the iteration count (5.4), the process-count rule (5.5)); the running case, a parameter sweep with a status-checked collector; the corrections of the lecture's statements about <code>env</code>, <code>return</code>, the <code>PATH</code> position, comparison operators and "continuous" monitoring; all twelve listings and the measurements in them; the six exercises.</p>
+
+<h2 id="model">The objects of the chapter and the running case</h2>
+<p>The chapter studies programs written in the language of the shell, and it describes them with four kinds of object. All four are defined here and used unchanged in every later section.</p>
+<p><strong>Processes.</strong> A <em>process</em> is a running instance of a program. It has a process identifier (PID), a parent process, an address space, a working directory, a set of open files, a file-creation mask, and an <em>environment</em>: a finite list of name–value pairs of strings that the process received when its program started. Three system calls create, replace and collect processes. <code>fork</code> creates a copy of the calling process. <code>exec</code> replaces the program of the calling process with another program and gives the new program its argument list and its environment (<a href="https://man7.org/linux/man-pages/man2/execve.2.html">execve(2)</a>, Linux man-pages 6.19 of 2026-02-08, "DESCRIPTION": the arrays <code>argv</code> and <code>envp</code> are "passed as the environment of the new program"). <code>wait</code> lets a parent obtain the termination status of a child. Chapter 2 treats these calls; this chapter needs only these three.</p>
+<p><strong>Shell execution environments.</strong> A <em>shell</em> is a program that reads text, splits it into words, performs <em>expansions</em> on the words, and runs the commands that result. A <em>shell script</em> is a file of such text. The POSIX standard lists what a <em>shell execution environment</em> contains (<a href="https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html">POSIX.1-2017, Shell Command Language</a>, §2.12): open files, the working directory, the file-creation mask, traps, shell parameters and variables, functions, options, and aliases. This chapter tracks one part of it, the set \(V\) of shell variables, each a pair of a name and a string, together with the set \(X\) of names that carry the <em>export attribute</em> (the symbol \(X\) is local to this chapter). The set \(X\) matters because the standard states that the variables with the export attribute are the ones passed to a command that the shell starts (§2.12, "Variables with the export attribute, along with those explicitly exported for the duration of the command, shall be passed to the utility environment variables").</p>
+<p><strong>Commands and their three execution modes.</strong> A <em>simple command</em> is a list of words after expansion; the first word is the command name and the others are its arguments (§2.9.1). Bash resolves the name in this order (<a href="https://www.gnu.org/software/bash/manual/bash.html">GNU Bash manual</a> 5.3, §3.7.2): a shell function, then a shell builtin, then, for a name without a slash, the first executable file with that name in the directories listed in <code>PATH</code>. POSIX §2.9.1 puts the special built-ins (<code>export</code>, <code>return</code>, <code>set</code>, <code>.</code> and others) ahead of functions, and Bash follows that order in its POSIX mode (a function named <code>export</code> is accepted by Bash and rejected by <code>bash --posix</code> with "is a special builtin"). A function or a builtin runs <em>inside the shell process</em> and creates no process. An external program runs as a new process: the shell forks, the child execs the program with the exported variables as its environment, and the shell waits. A <em>subshell environment</em> is a duplicate of the shell's execution environment; Bash builds it as a forked copy of the shell process that does not exec (Bash manual §3.7.3), and this chapter calls such a process a <em>subshell</em>. The standard requires a subshell environment for command substitution, for commands grouped in parentheses, for background commands, and for every stage of a multi-stage pipeline, where the standard allows an implementation to run some or all stages in the current environment instead (§2.12). The standard states the key property of a subshell: "Changes made to the subshell environment shall not affect the shell environment."</p>
+<p><strong>Exit status.</strong> Every command ends with an <em>exit status</em>, a small non-negative integer. The convention has these fixed points: 0 means success; 127 means the command was not found; 126 means the file was found but cannot be executed; a command that a signal with number \(k\) terminated reports a value above 128, and Bash uses \(128+k\) (§2.8.2; Bash manual §3.7.5). Conditions in <code>if</code> and <code>while</code> test an exit status, not a Boolean expression. This is the most consequential fact of the chapter and Section "Exit status" derives its consequences.</p>
+<p>Two relations summarise the model. A child process starts with the environment</p>
+\[
+E_{\text{child}}=\{(n,v)\in V:\ n\in X,\ n\notin\operatorname{names}(A)\}\ \cup\ A,\tag{5.1}
+\]
+<p>where \(A\) is the set of assignments written in front of the command (<code>NAME=value command</code>); an assignment in \(A\) overrides an exported variable of the same name. Nothing the child does to its own copy changes \(V\) or \(X\) of the parent. Information reaches the parent from a child only through the exit status, through files, pipes and other output that the child writes, and through signals; the next sections check each consequence of (5.1) with a run. The second relation concerns cost. Let \(\kappa\) be the wall-clock time to create one process and wait for it to end. A construct that creates \(P\) processes costs about \(P\kappa\) on top of the work in those processes, and the construct does not appear to a reader of the script as a process creation at all. The section on the monitoring script derives \(P\) for the lecture's loop and measures \(\kappa\).</p>
+<p><strong>The running case</strong> is a parameter sweep. The solver is the Jacobi iteration of the book's heat problem (<code>jacobi_step</code>, <code>u</code>, <code>unew</code>, <code>N</code>, <code>tol</code>, <code>max_iter</code>; chapter 9 derives the method; this chapter treats the program as a black box). Its command line is <code>./jacobi N tol max_iter</code>. It prints one line <code>N iterations change</code>, where <code>change</code> is the largest change of any interior value in the last sweep, and it exits with status 0 if <code>change</code> fell below <code>tol</code>, with status 2 if <code>max_iter</code> sweeps ran first, and with status 64 for bad arguments. The sweep script must run the solver for a list of grid sizes, record one row per run, and report honestly which runs failed. That specification needs every construct of the two lectures: scripts and their interpreter line, variables, quoting, <code>read</code> or arguments, <code>if</code> and <code>case</code> on exit statuses, <code>for</code> loops, functions, and pipelines with <code>awk</code>.</p>
+<p>All sessions and listings ran on one machine: an Intel Core i5-12450H laptop under Windows 11, with every program run in a WSL 2 Ubuntu 24.04 guest. The processor is hybrid: 4 performance cores with 2 hardware threads each and 4 efficient cores with 1 thread each, 8 cores and 12 logical processors (Intel ARK, as stated in the authoring brief of this book; the ARK page itself could not be opened for this chapter, see the sidecar). The guest shows 6 cores with 2 threads each and 12 logical processors; that view is synthetic. The shell is GNU Bash 5.2.21, <code>/bin/sh</code> is dash 0.5.12, and the awk is GNU Awk 5.2.1. The Bash manual cited below documents version 5.3 (18 May 2025); every statement taken from it was also run on 5.2.21 in this chapter. Timing listings use <code>data-check="returncode"</code>; their printed output is one sample run on this machine, and the prose gives the range of earlier runs where runs differ. The guest's <code>/mnt/c</code> is a 9p mount without permission metadata: every file there has mode 0777 and <code>chmod</code> changes nothing. Every listing that depends on permission bits therefore works in a directory created by <code>mktemp -d</code> under <code>/tmp</code>, an ext4 file system.</p>
+<pre><code class="language-bash">$ bash --version | head -1
+GNU bash, version 5.2.21(1)-release (x86_64-pc-linux-gnu)
+$ ls -l /bin/sh | awk '{print $9, $10, $11}'
+/bin/sh -&gt; dash
+$ awk --version | head -1
+GNU Awk 5.2.1, API 3.2, PMA Avon 8-g1, (GNU MPFR 4.2.1, GNU MP 6.3.0)
+$ nproc
+12
+$ lscpu | grep -E 'Model name|Thread|Core|Socket'
+Model name:                           12th Gen Intel(R) Core(TM) i5-12450H
+Thread(s) per core:                   2
+Core(s) per socket:                   6
+Socket(s):                            1
+$ df -T /tmp /mnt/c | awk '{print $1, $2, $7}'
+Filesystem Type Mounted
+/dev/sdd ext4 /
+C:\ 9p /mnt/c
+</code></pre>
+
+<h2 id="script">A script is a file of commands: the interpreter line, the execute bit and three ways to run it <a class="timestamp" href="https://www.youtube.com/watch?v=DRDzYNVw7K4&amp;t=105s">W2L1 1:45</a></h2>
+<p>The lecture defines a shell script as a file that contains a series of commands, executed by the shell, which it calls the command interpreter of Linux. It lists the uses that motivate scripts on HPC systems: automating repetitive tasks, monitoring a system, batch processing, manipulating data and taking backups. It names the shells that exist (Bash, <code>sh</code>, Zsh, Ksh, Csh, Tcsh, dash, fish) and the properties that distinguish them (ease of use, scripting power, customization, performance, portability), and it chooses Bash for the course. The workflow it demonstrates has four steps: create <code>hello.sh</code> in an editor, put <code>#!/bin/bash</code> on the first line followed by <code>echo "Hello, World"</code>, make the file executable with <code>chmod +x</code>, and run <code>./hello.sh</code>. The lecture says the extension <code>.sh</code> is a convention that marks a shell script, and that the first line states which shell the script uses.</p>
+<p>The model of the previous section turns this workflow into three different mechanisms, and the lecture presents only the first.</p>
+<p><strong>Direct execution, <code>./hello.sh</code>.</strong> The command name contains a slash, so the shell skips the search through <code>PATH</code> and asks the kernel to execute the file (POSIX §2.9.1, "Command Search and Execution"). The kernel's <code>execve</code> accepts a file that has execute permission and is either a binary executable or a text file whose first line has the form <code>#!interpreter [optional-arg]</code>. For such a file it runs <code>interpreter [optional-arg] path arg...</code>, so the interpreter receives the script's path as an argument and reads the script itself (execve(2), "Interpreter scripts"). The kernel, not the shell, reads the <code>#!</code> line, and the kernel does not look at the extension. The interpreter line is therefore a property of direct execution only. POSIX leaves its meaning open: "If the first line of a file of shell commands starts with the characters "#!", the results are unspecified" (§2.1). On Linux the entire text after the interpreter name is passed as one argument, and the text after <code>#!</code> is limited to 255 characters since Linux 5.1 and to 127 before (execve(2), Linux-specific notes on interpreter scripts).</p>
+<p><strong>Running through an interpreter, <code>bash hello.sh</code>.</strong> Here <code>bash</code> is the program that the kernel executes and <code>hello.sh</code> is only an argument. The kernel checks the execute bit of <code>bash</code>, not of <code>hello.sh</code>; Bash needs read permission on the script. The first line is then an ordinary comment, because <code>#</code> starts a comment in the shell language.</p>
+<p><strong>Sourcing, <code>. ./hello.sh</code>.</strong> The builtin <code>.</code> (also spelled <code>source</code> in Bash) reads the commands of the file and runs them in the current shell. No process is created, so the script can change the variables, the working directory and the function definitions of the caller. Every script run by the first two mechanisms is a child process and cannot.</p>
+<p>The listing below runs one child script through all three mechanisms and reports whether the child's process identifier equals the caller's. The caller exports its own PID as <code>CALLER</code>, and the child compares <code>$$</code>, the PID of the shell that executes it, with that value. It then removes the execute bit to show that the second mechanism still works and the first fails with status 126, and it runs a script that has no interpreter line. The script needs a file system with real permission bits, so it works in a directory under <code>/tmp</code>. Every line of its output is deterministic.</p>
+<pre><code class="language-bash" data-file="exec_modes.sh" data-run="bash exec_modes.sh">#!/bin/bash
+# exec_modes.sh: run one child script in four ways and report what each way does.
+work=$(mktemp -d) &amp;&amp; cd "$work" || exit 1       # a real Linux file system: chmod works here
+
+cat &gt; child.sh &lt;&lt;'END'
+#!/bin/bash
+if [ "$$" = "$CALLER" ]; then echo "same process as the caller"; else echo "new process"; fi
+END
+chmod +x child.sh
+export CALLER=$$                                  # the caller's process id, exported to children
+
+printf '%-22s' "./child.sh";       ./child.sh
+printf '%-22s' "bash child.sh";    bash child.sh
+printf '%-22s' ". ./child.sh";     . ./child.sh
+chmod -x child.sh
+printf '%-22s' "bash child.sh (-x)"; bash child.sh
+./child.sh; echo "status of ./child.sh without the x bit: $?"
+
+printf 'echo "no shebang line"\n' &gt; plain.sh; chmod +x plain.sh
+./plain.sh; echo "status of ./plain.sh: $?"
+cd / &amp;&amp; rm -rf "$work"
+</code></pre>
+<pre><code class="output">./child.sh            new process
+bash child.sh         new process
+. ./child.sh          same process as the caller
+bash child.sh (-x)    new process
+status of ./child.sh without the x bit: 126
+no shebang line
+status of ./plain.sh: 0</code></pre>
+<p>The output matches the model. <code>./child.sh</code> and <code>bash child.sh</code> run the child in a new process. The sourced script reports "same process as the caller". Without the execute bit, <code>bash child.sh</code> still runs, and <code>./child.sh</code> fails with "Permission denied" and status 126, the code that §2.8.2 reserves for a file that is found but not executable. The script <code>plain.sh</code> has no interpreter line and ran with status 0, although a direct <code>execve</code> of such a file fails with <code>ENOEXEC</code>. The shell handles that failure itself: POSIX §2.9.1 and Bash manual §3.7.2 state that when the execution fails because the file is not in executable format, the shell assumes it is a shell script and runs it with a shell. The fallback hides a missing interpreter line, and the interpreter it picks depends on the caller. Bash runs the file with Bash. Programs that start commands through the C library's <code>execvp</code> or <code>execlp</code> (for example <code>env</code> and <code>find -exec</code>) also catch <code>ENOEXEC</code>, but they run the file with <code>/bin/sh</code>, which is dash on Ubuntu (<a href="https://man7.org/linux/man-pages/man3/execvp.3.html">execvp(3)</a>, DESCRIPTION: "these functions will execute the shell (/bin/sh) with the path of the file as its first argument"). A separate test on this machine used a file <code>plain.sh</code> that prints <code>$BASH_VERSION</code> and has no interpreter line. <code>./plain.sh</code> printed <code>5.2.21(1)-release</code>; <code>env ./plain.sh</code> and <code>find . -name plain.sh -exec {} \;</code> printed an empty value, so dash ran it, and all three ended with status 0. A program that calls <code>execve</code> directly gets the error: Python's <code>subprocess.run(["./plain.sh"])</code> raised <code>OSError: [Errno 8] Exec format error</code>. A script written in Bash therefore needs its <code>#!/bin/bash</code> line.</p>
+<p>The next listing checks the statements about the interpreter line directly. The first script has the interpreter <code>/bin/cat</code> and a file name that does not end in <code>.sh</code>; if the kernel reads the line and passes the script's path, executing it must print the file. The second script uses the common but non-portable form <code>#!/usr/bin/env bash -e</code>, which tests the Linux rule that everything after the interpreter name is one argument. The third uses <code>#!/usr/bin/env bash</code>, which finds <code>bash</code> through <code>PATH</code>. The listing sets <code>LC_ALL=C</code> so that the error text has a fixed wording and sends the error output to the same stream as the standard output so that the captured output contains it.</p>
+<pre><code class="language-bash" data-file="interp_line.sh" data-run="bash interp_line.sh">#!/bin/bash
+# interp_line.sh: the kernel, not the shell, reads the "#!" line of an executed script.
+export LC_ALL=C                                   # fixed wording of error messages
+work=$(mktemp -d) &amp;&amp; cd "$work" || exit 1
+
+printf '#!/bin/cat\nthis line is printed by cat\n' &gt; show.txt
+chmod +x show.txt
+echo "--- ./show.txt, interpreter /bin/cat:"
+./show.txt
+
+printf '#!/usr/bin/env bash -e\necho never reached\n' &gt; two_words.sh
+chmod +x two_words.sh
+echo "--- ./two_words.sh, interpreter line with two words after env:"
+./two_words.sh 2&gt;&amp;1; echo "status: $?"
+
+printf '#!/usr/bin/env bash\necho "bash found through PATH: $0"\n' &gt; via_env.sh
+chmod +x via_env.sh
+echo "--- ./via_env.sh:"
+./via_env.sh; echo "status: $?"
+cd / &amp;&amp; rm -rf "$work"
+</code></pre>
+<pre><code class="output">--- ./show.txt, interpreter /bin/cat:
+#!/bin/cat
+this line is printed by cat
+--- ./two_words.sh, interpreter line with two words after env:
+/usr/bin/env: 'bash -e': No such file or directory
+/usr/bin/env: use -[v]S to pass options in shebang lines
+status: 127
+--- ./via_env.sh:
+bash found through PATH: ./via_env.sh
+status: 0</code></pre>
+<p>Executing <code>show.txt</code> prints its own two lines: the kernel started <code>/bin/cat</code> with the script's path, as execve(2) describes, and the extension played no part. The second script fails with status 127, because <code>env</code> received the single argument <code>bash -e</code> and searched for a program of that name; the message of GNU <code>env</code> names the remedy, the <code>-S</code> option. The third script works, and it reports <code>./via_env.sh</code> as <code>$0</code>. The cost of <code>env</code> is that the script now runs whichever <code>bash</code> comes first in the caller's <code>PATH</code>; the section on <code>PATH</code> shows how a user changes that. Scripts for a scheduler need extra care for this reason. The Slurm manual states that <code>#SBATCH</code> lines are read by Slurm and are comments to the shell: "#SBATCH directives are read directly by Slurm, so shell-specific syntax including variable names will be read as literal text. Once the first non-comment, non-whitespace line has been reached in the script, no more #SBATCH directives will be processed" (<a href="https://slurm.schedmd.com/sbatch.html">Slurm <code>sbatch</code> manual</a>, "DESCRIPTION", page of version 26.05, retrieved 2026-10-26). A batch script is thus the kind of file this section describes, with a second reader of its comment lines. Chapter 30 treats schedulers.</p>
+<p><strong>A warning for Windows users of WSL.</strong> On <code>/mnt/c</code> an execute-bit test always succeeds (see the first section), so the listing works under <code>/tmp</code>.</p>
+
+<h2 id="substitution">Command substitution and arithmetic expansion <a class="timestamp" href="https://www.youtube.com/watch?v=DRDzYNVw7K4&amp;t=600s">W2L1 10:00</a></h2>
+<p>The lecture's second example prints <code>Date is: $(date)</code> and shows that the shell replaces <code>$(date)</code> with the current date, and its third example prints <code>5 + 2 = $((5 + 2))</code> and obtains <code>5 + 2 = 7</code>. It says that a <code>$</code> followed by brackets makes the interpreter run something, and that the dollar sign has several uses that appear later. The two forms are different expansions with different costs.</p>
+<p><strong>Command substitution</strong>, <code>$(command)</code>, runs the command in a subshell and replaces the text <code>$(command)</code> with the standard output of the command, after removing all newlines at the end of the output (POSIX §2.6.3). Embedded newlines stay, and unless the substitution is in double quotes they are later treated as separators between words. The subshell is a forked process, which has two consequences that the next sections use. Whatever the command assigns to variables is lost when the subshell ends (the last line of the output of <code>env_demo.sh</code> in the next section shows it), and the substitution costs one process creation, which Section "The monitoring script" prices.</p>
+<p><strong>Arithmetic expansion</strong>, <code>$((expression))</code>, evaluates an integer expression inside the shell. POSIX requires only signed integer arithmetic of the C type <code>long</code> and allows extensions (§2.6.4). Bash evaluates "in the largest fixed-width integers available, with no check for overflow, though division by 0 is trapped" (Bash manual §6.5), with the operators and precedence of the C language, and it reads a constant with a leading 0 as octal. On this machine the integers have 64 bits. Let \(w=2^{64}\). Then the value of every addition, subtraction, multiplication, exponentiation and left shift is the true result reduced to the interval \([-w/2,\,w/2)\) by adding or subtracting multiples of \(w\):</p>
+\[
+\operatorname{wrap}(z)=z-w\left\lfloor \frac{z+w/2}{w}\right\rfloor,\qquad w=2^{64}. \tag{5.2}
+\]
+<p>Division truncates toward zero, as in C, so that \(-7/2=-3\), and the remainder takes the sign of the dividend. Equation (5.2) predicts \(2^{62}=4\,611\,686\,018\,427\,387\,904\), which is below \(w/2=2^{63}\), \(\operatorname{wrap}(2^{63})=-2^{63}\), and \(\operatorname{wrap}(2^{64})=0\). A variable that holds text is evaluated as an expression when it is named inside <code>$((…))</code>, which the manual states ("The value of a variable is evaluated as an arithmetic expression when it is referenced"); a variable that is expanded with a dollar sign is replaced by its text first. If <code>x</code> holds <code>1+1</code>, then <code>$((x * 3))</code> is \((1+1)\cdot3=6\) and <code>$(( $x * 3 ))</code> is \(1+1\cdot3=4\). The listing checks each statement, and it feeds three invalid expressions to a fresh shell to show how the errors read. The output is deterministic, with the shell's own prefix of script name and line number removed by <code>sed</code>.</p>
+<pre><code class="language-bash" data-file="arith.sh" data-run="bash arith.sh">#!/bin/bash
+# arith.sh: what $(...) and $((...)) compute, and where $((...)) surprises.
+echo "5 + 2 = $((5 + 2))"
+echo "7 / 2 = $((7 / 2)),  -7 / 2 = $((-7 / 2)),  7 % 3 = $((7 % 3))"
+echo "2**62 = $((2 ** 62)),  2**63 = $((2 ** 63)),  2**64 = $((2 ** 64))"
+x='1+1'
+echo "x='1+1':  \$((x * 3)) = $((x * 3));   \$(( \$x * 3 )) = $(( $x * 3 ))"
+echo "date of the epoch plus one day: $(date -u -d @86400 +%F)"
+for expr in '08 + 1' '1.5 + 1' '1 / 0'; do
+    printf '%-8s -&gt; ' "$expr"
+    bash -c "echo \$(( $expr ))" 2&gt;&amp;1 | sed 's/^bash: line [0-9]*: //'
+done
+# a number read from a user with a leading zero is octal
+n=010
+echo "n=010; \$((n + 1)) = $((n + 1)); \$((10#\$n + 1)) = $((10#$n + 1))"
+</code></pre>
+<pre><code class="output">5 + 2 = 7
+7 / 2 = 3,  -7 / 2 = -3,  7 % 3 = 1
+2**62 = 4611686018427387904,  2**63 = -9223372036854775808,  2**64 = 0
+x='1+1':  $((x * 3)) = 6;   $(( $x * 3 )) = 4
+date of the epoch plus one day: 1970-01-02
+08 + 1   -&gt; 08: value too great for base (error token is "08")
+1.5 + 1  -&gt; 1.5 + 1 : syntax error: invalid arithmetic operator (error token is ".5 + 1 ")
+1 / 0    -&gt; 1 / 0 : division by 0 (error token is "0 ")
+n=010; $((n + 1)) = 9; $((10#$n + 1)) = 11</code></pre>
+<p>Every prediction holds: \(2^{62}\) is exact, \(2^{63}\) becomes \(-9\,223\,372\,036\,854\,775\,808\), \(2^{64}\) becomes 0, and \(-7/2\) is \(-3\). The value of <code>x='1+1'</code> is 6 by name and 4 by text. The constant <code>08</code> is an error because a leading 0 selects octal and 8 is not an octal digit; the constant <code>010</code> is 8, so <code>$((n + 1))</code> with <code>n=010</code> is 9, and the prefix <code>10#</code> forces base 10 and gives 11. A decimal fraction is a syntax error: the shell has no floating-point arithmetic, so a script that needs one calls <code>awk</code> or <code>bc</code>, as the monitoring script of the lecture calls <code>awk</code>.</p>
+<p>The consequence for scripts that read numbers from users is concrete. The lecture's addition script reads <code>num1</code> and <code>num2</code> and prints <code>$((num1 + num2))</code>. A user who types <code>08</code> gets the error above, a user who types <code>1+1</code> gets the sum of 2 and the second number, and a user who types a number above \(2^{63}-1\) gets a wrapped result with no message. The boundary of the lecture's example is therefore the set of inputs that are decimal integers without a leading zero and below \(2^{63}\); the section on <code>read</code> shows how to enforce it.</p>
+
+<h2 id="environment">Variables, the environment and child processes <a class="timestamp" href="https://www.youtube.com/watch?v=DRDzYNVw7K4&amp;t=832s">W2L1 13:52</a></h2>
+<p>The lecture defines a variable as an entity that stores a number or a string for later use in the script. Its first example assigns <code>name="Pitter"</code> and prints <code>"Hello, $name!"</code>; its second assigns the output of a command, <code>current_time=$(date +%T)</code>, and prints it (the slide's terminal shows <code>07:58:11</code>). The syntax has a rule that the lecture does not state and that decides whether the examples work: an assignment is one word, <code>name=value</code>, with no blank on either side of the equals sign. The shell recognises an assignment only in that form (POSIX §2.9.1). The session below runs the failures, and then the quoting rules of POSIX §2.2 and §2.6.5 to §2.6.6: the result of an unquoted expansion is split into words at blanks and then expanded as a filename pattern, and double quotes prevent both, while single quotes also prevent the expansion of <code>$</code>. Each command was run in a fresh shell; the shell's prefix with the line number was shortened to <code>bash:</code>.</p>
+<pre><code class="language-bash">$ name = Pitter; echo "status $?"
+bash: name: command not found
+status 127
+$ greeting=hello world; echo "status $?"
+bash: world: command not found
+status 127
+$ name="Pitter Parker"; echo Hello, $name.; echo "Hello, $name."; echo 'Hello, $name.'
+Hello, Pitter Parker.
+Hello, Pitter Parker.
+Hello, $name.
+$ f="run 16.dat"; [ -f $f ]; echo $?; [ -f "$f" ]; echo $?
+bash: [: run: binary operator expected
+2
+0
+$ echo *.dat; echo "*.dat"; echo '*.dat'
+run 16.dat run 32.dat
+*.dat
+*.dat
+</code></pre>
+<p>With spaces around <code>=</code>, the shell runs a command called <code>name</code> with the arguments <code>=</code> and <code>Pitter</code>, and reports status 127. In <code>greeting=hello world</code>, the assignment is a prefix of the command <code>world</code>, which does not exist. The unquoted <code>$f</code> became the two words <code>run</code> and <code>16.dat</code>, so <code>[</code> received <code>-f run 16.dat</code> and failed with status 2, while <code>"$f"</code> stayed one word and the test succeeded. The rule that follows is mechanical: put every expansion of a variable in double quotes unless splitting is the intention. The lecture's scripts quote the variables in their <code>echo</code> lines and do not quote them in the tests of the second lecture (<code>[ $num -gt 5 ]</code>); the section on exit status shows what that costs.</p>
+<p><strong>The environment.</strong> The lecture shows <code>env</code>, which lists the variables of the terminal, and introduces <code>export</code> with two variables: <code>NAME1=Rakesh</code> without <code>export</code> and <code>export NAME2=Mahesh</code>. Its slide states that the first is set "in current shell session only, but not available in child processes" and the second is available. The demonstration has a script <code>var4.sh</code> that sets both variables and runs <code>bash child.sh</code>, and the child's output shows <code>Name1 =</code> empty and <code>Name2 = Mahesh</code> (slide at W2L1 24:15). The lecture calls the script that starts another script the parent and the started script the child. This is exactly rule (5.1) of the model: the child starts with the exported variables, and the other variables of the parent do not exist for it.</p>
+<p>Rule (5.1) has more consequences than the lecture's example, and each one can be tested. (a) A child that changes an inherited variable changes only its own copy. (b) An assignment in front of a command, <code>NAME3=once ./child.sh</code>, puts <code>NAME3</code> into the environment of that command only (POSIX §2.9.1; Bash manual §3.7.4). (c) <code>env</code> is an external program, so it prints its own environment, which is the exported subset \(X\); <code>set</code> is a builtin that prints all variables. (d) <code>unset</code> removes a variable from \(V\), and with it from \(X\). (e) A subshell is a copy, so assignments inside <code>$( … )</code> are lost when it ends. The listing runs all five; the child script lives in a temporary directory, and <code>declare -p</code> prints the export attribute of each variable.</p>
+<pre><code class="language-bash" data-file="env_demo.sh" data-run="bash env_demo.sh">#!/bin/bash
+# env_demo.sh: which variables a child process receives, and what it can change.
+work=$(mktemp -d) &amp;&amp; cd "$work" || exit 1
+cat &gt; child.sh &lt;&lt;'END'
+#!/bin/bash
+echo "  child sees: NAME1=[$NAME1] NAME2=[$NAME2] NAME3=[$NAME3]"
+NAME2=changed_by_child                       # a change inside the child
+END
+chmod +x child.sh
+
+NAME1=Rakesh                                  # shell variable, not exported
+export NAME2=Mahesh                           # exported: part of the environment of children
+echo "parent before:"; ./child.sh
+echo "  parent after the child ran: NAME2=[$NAME2]"
+echo "prefix assignment on one command:"; NAME3=once ./child.sh
+echo "  parent afterwards: NAME3=[$NAME3]"
+
+echo "env lists NAME1? $(env | grep -c '^NAME1=')    env lists NAME2? $(env | grep -c '^NAME2=')"
+echo "set lists NAME1? $(set | grep -c '^NAME1=')    set lists NAME2? $(set | grep -c '^NAME2=')"
+declare -p NAME1 NAME2
+
+unset NAME2
+echo "after unset NAME2: [$NAME2]"; ./child.sh
+echo "subshell changes do not return: $( NAME1=inside; echo "$NAME1" ) then $NAME1"
+cd / &amp;&amp; rm -rf "$work"
+</code></pre>
+<pre><code class="output">parent before:
+  child sees: NAME1=[] NAME2=[Mahesh] NAME3=[]
+  parent after the child ran: NAME2=[Mahesh]
+prefix assignment on one command:
+  child sees: NAME1=[] NAME2=[Mahesh] NAME3=[once]
+  parent afterwards: NAME3=[]
+env lists NAME1? 0    env lists NAME2? 1
+set lists NAME1? 1    set lists NAME2? 1
+declare -- NAME1="Rakesh"
+declare -x NAME2="Mahesh"
+after unset NAME2: []
+  child sees: NAME1=[] NAME2=[] NAME3=[]
+subshell changes do not return: inside then Rakesh</code></pre>
+<p>Each prediction holds. In the first run the child sees <code>NAME2</code> (exported) and neither <code>NAME1</code> nor <code>NAME3</code>; it changed <code>NAME2</code> to another value, and the parent still prints <code>Mahesh</code> (a). With the prefix assignment the child sees <code>NAME3=once</code> and the parent has no value for it afterwards (b). <code>env | grep -c</code> counts 0 lines for <code>NAME1</code> and 1 for <code>NAME2</code>, while <code>set</code> lists both (c); <code>declare -p</code> shows the attribute as <code>-x</code> for the exported variable and <code>--</code> for the other. After <code>unset NAME2</code> the variable is empty in the parent and in the child (d), and the assignment <code>NAME1=inside</code> in a subshell leaves <code>NAME1</code> as <code>Rakesh</code> in the parent (e).</p>
+<p>Two statements of the lecture need correction. First, the lecture says that <code>env</code> lists "all the variables which have been set" in the shell. By (c), it lists only the environment; a variable such as <code>NAME1</code>, which is set and not exported, does not appear. Second, the lecture ties the length of the list to the remark that Linux treats everything as a file, so that many variables are set while files are handled. Neither source supports that explanation. The Bash manual states that a program is given "an array of strings called the environment", and that on invocation the shell "creates a parameter for each name found, automatically marking it for export to child processes" (§3.7.4). The list is long because each process inherits the environment of its parent, and the chain of parents reaches back to the login session, which sets many names. Because Bash marks every inherited variable for export, a later assignment <code>PATH=/new:$PATH</code> without the word <code>export</code> still changes the environment of children, and the session below shows it: the child shell prints the changed value.</p>
+<pre><code class="language-bash">$ PATH=/usr/bin:/bin:/zzz; bash -c 'echo $PATH'
+/usr/bin:/bin:/zzz
+</code></pre>
+<p><strong>Why the environment matters on an HPC system.</strong> The lecture's own motivation is that a user who installs an application must make its binaries, libraries and headers visible to the shell. Rule (5.1) is also what carries those settings into a batch job. The default of <code>sbatch</code> is <code>--export=ALL</code>: "All of the user's environment will be loaded"; with <code>--export=NIL</code> only the <code>SLURM_*</code> and SPANK variables are defined and the "User must use absolute path to the binary to be executed" (<code>sbatch</code> manual, option <code>--export</code>, version 26.05, retrieved 2026-10-26; <code>NONE</code> additionally loads the user's environment on the execution node). A variable that the submitting user set without <code>export</code> is not in the job's environment; chapter 30 treats the scheduler.</p>
+
+<h3 id="path">PATH and the other search variables <a class="timestamp" href="https://www.youtube.com/watch?v=DRDzYNVw7K4&amp;t=1617s">W2L1 26:57</a></h3>
+<p>The lecture explains <code>PATH</code> as the variable that tells the system which directories hold binaries. Its slide shows <code>export PATH=/home/master/Desktop:$PATH</code>, and the printed value afterwards begins with <code>/home/master/Desktop</code>; the speech calls this appending or prepending. The slide's command <em>prepends</em>. The distinction decides which program runs, because the search goes through the directories in order and stops at the first executable file with the requested name (POSIX XBD §8.3, "PATH": "The list shall be searched from beginning to end … until an executable file with the specified name and appropriate execution permissions is found"). A directory placed first shadows every command of the same name in later directories. The listing creates a directory with an executable named <code>date</code> that prints <code>my own date</code> and checks which program runs after a prepend and after an append. It then sets <code>PATH</code> to a directory that does not exist, which is the failure that the lecture warns about when it says that overwriting the default path can leave the system unusable in that shell.</p>
+<pre><code class="language-bash" data-file="path_demo.sh" data-run="bash path_demo.sh">#!/bin/bash
+# path_demo.sh: how the shell finds a command, and what changing PATH does.
+work=$(mktemp -d) &amp;&amp; cd "$work" || exit 1
+show() { sed "s|$work|&lt;work&gt;|g"; }                     # hide the random directory name
+mkdir mybin
+printf '#!/bin/bash\necho "my own date"\n' &gt; mybin/date
+chmod +x mybin/date
+
+date &gt; /dev/null                                    # run date once: bash now remembers its location
+echo "1. before:         $(command -v date);  date -u -d @0 +%F prints: $(date -u -d @0 +%F)"
+export PATH="$work/mybin:$PATH"                        # prepend: the new directory is searched first
+echo "2. after prepend:  $(command -v date | show);  date -u -d @0 +%F prints: $(date -u -d @0 +%F)"
+export PATH="${PATH#"$work"/mybin:}"                   # remove the first entry again
+export PATH="$PATH:$work/mybin"                        # append instead: the system date is found first
+echo "3. after append:   $(command -v date);  date -u -d @0 +%F prints: $(date -u -d @0 +%F)"
+echo "type -a date:"; type -a date | show | sed 's/^/   /'
+
+( PATH=/nonexistent; ls /; echo "status: $?" ) 2&gt;&amp;1 | sed 's/^.*line [0-9]*: //'
+( PATH=/nonexistent; /bin/ls / &gt; /dev/null; echo "status with a full path: $?" )
+cd / &amp;&amp; rm -rf "$work"
+</code></pre>
+<pre><code class="output">1. before:         /usr/bin/date;  date -u -d @0 +%F prints: 1970-01-01
+2. after prepend:  &lt;work&gt;/mybin/date;  date -u -d @0 +%F prints: my own date
+3. after append:   /usr/bin/date;  date -u -d @0 +%F prints: 1970-01-01
+type -a date:
+   date is /usr/bin/date
+   date is /bin/date
+   date is &lt;work&gt;/mybin/date
+ls: command not found
+status: 127
+status with a full path: 0</code></pre>
+<p>Prepending makes <code>command -v date</code> report the new directory and makes <code>date</code> print <code>my own date</code>; appending leaves <code>/usr/bin/date</code> in front. <code>type -a date</code> lists every match in search order. With <code>PATH=/nonexistent</code>, even <code>ls</code> is not found and the status is 127, while a command given by a full path, <code>/bin/ls</code>, still runs: a name that contains a slash skips the search (POSIX §2.9.1). Bash also remembers the location of each command it has found in a hash table and searches again only when the remembered location fails (Bash manual §3.7.2; POSIX §2.9.1, "an implementation may remember its location … unless the PATH variable has been the subject of an assignment"), so assigning <code>PATH</code> resets that memory; the listing runs <code>date</code> once before the prepend, and the prepended program is still the one that runs afterwards. Two more properties matter for safety. An empty entry in <code>PATH</code>, as in <code>/bin::/usr/bin</code> or a trailing colon, means the current directory (XBD §8.3), and <code>export PATH=/new:$PATH</code> produces a trailing colon when <code>PATH</code> was empty; a script run in an untrusted directory could then be found before a system command. And a prepended directory should hold only commands that the user wants to shadow the system's.</p>
+<p>The lecture's slide names two more variables: <code>LD_LIBRARY_PATH</code> "application library file paths" and <code>INCLUDE_PATH</code> "application header file paths". The first matches its definition: the dynamic loader searches the directories of <code>LD_LIBRARY_PATH</code> "at execution time" for ELF libraries (<a href="https://man7.org/linux/man-pages/man8/ld.so.8.html">ld.so(8)</a>, Linux man-pages 6.19 of 2026-08-03, "ENVIRONMENT"). The second is not a variable of gcc. The GCC manual lists <code>CPATH</code>, <code>C_INCLUDE_PATH</code>, <code>CPLUS_INCLUDE_PATH</code> and <code>OBJC_INCLUDE_PATH</code> for header files, and <code>LIBRARY_PATH</code> for libraries at link time (<a href="https://gcc.gnu.org/onlinedocs/gcc/Environment-Variables.html">GCC manual, Environment Variables</a>, retrieved 2026-10-26; the page is not tied to a version number). The session below uses a file <code>m.c</code> with the two lines <code>#include &lt;answer.h&gt;</code> and <code>int main(void){return ANSWER;}</code>, and a file <code>h/answer.h</code> with the line <code>#define ANSWER 42</code>. It compiles <code>m.c</code> with gcc 13.3, once with <code>INCLUDE_PATH=h</code> and once with <code>CPATH=h</code>.</p>
+<pre><code class="language-bash">$ INCLUDE_PATH=h gcc -c m.c; echo "status $?"
+m.c:1:10: fatal error: answer.h: No such file or directory
+    1 | #include &lt;answer.h&gt;
+      |          ^~~~~~~~~~
+compilation terminated.
+status 1
+$ CPATH=h gcc -c m.c; echo "status $?"
+status 0
+</code></pre>
+<p>On this gcc, <code>INCLUDE_PATH</code> has no effect and <code>CPATH</code> works. The slide's variable names may suit other tools; for the compiler of this course the working names are <code>CPATH</code> (headers), <code>LIBRARY_PATH</code> (libraries at link time) and <code>LD_LIBRARY_PATH</code> (libraries at run time). All three reach a compiler or a program only if they are exported, by rule (5.1).</p>
+
+<h2 id="input">Reading input with <code>read</code> <a class="timestamp" href="https://www.youtube.com/watch?v=DRDzYNVw7K4&amp;t=1853s">W2L1 30:53</a></h2>
+<p>The lecture's last topic of the first recording replaces a fixed assignment by input from the user. The script prints a prompt with <code>echo "Enter your name:"</code>, runs <code>read name</code>, and prints <code>"Hello, $name!"</code>; a second script runs <code>read num1 num2</code> and prints <code>$((num1 + num2))</code> (slide terminal: input <code>4 8</code>, output <code>The sum of 4 and 8 is: 12</code>). The lecture describes <code>read</code> as waiting for the user and storing the value in the variable.</p>
+<p>The definition is more exact. <code>read</code> reads <em>one line</em> from its standard input, not from the keyboard in particular, and splits it into fields at the characters of <code>IFS</code> (blank, tab, newline by default). It assigns the first field to the first name, the second to the second, and so on; the last name receives the rest of the line, including its inner separators. Leading and trailing separators are removed. Its exit status is 0 if it read a line and 1 at end of input, which is what lets <code>while read</code> terminate. The option <code>-r</code> stops <code>read</code> from treating a backslash as an escape, and <code>IFS=</code> in front of it keeps the leading and trailing blanks; the option <code>-p</code> prints a prompt only if the input comes from a terminal (Bash manual, <code>read</code>). The next session runs these statements, with the input supplied by <code>printf</code> or <code>echo</code>.</p>
+<pre><code class="language-bash">$ echo "4 8" | { read a b; echo "[$a][$b]"; }
+[4][8]
+$ echo "4 8 15" | { read a b; echo "[$a][$b]"; }
+[4][8 15]
+$ echo "4" | { read a b; echo "[$a][$b]"; }
+[4][]
+$ printf "  4   8  \n" | { read a; echo "[$a]"; }
+[4   8]
+$ printf "  4   8  \n" | { IFS= read -r a; echo "[$a]"; }
+[  4   8  ]
+$ printf "no newline" | { read a; echo "status $? [$a]"; }
+status 1 [no newline]
+$ printf "" | { read a; echo "status $? [$a]"; }
+status 1 []
+</code></pre>
+<p>Three fields into two names leave <code>8 15</code> in the second name, and one field into two names leaves the second empty. A last line without a newline is stored and still returns status 1. The lecture's addition script therefore fails if the user types three numbers: <code>num2</code> holds the text <code>8 15</code>, and <code>$((num1 + num2))</code> stops with <code>syntax error in expression (error token is "15")</code>. The boundary of <code>read</code> is that it delivers text and never a number; every check of its value belongs to the script, and the section on exit status adds the checks to the lecture's grading script.</p>
+
+<h2 id="status">Exit status: what <code>if</code> really tests <a class="timestamp" href="https://www.youtube.com/watch?v=h5Labe97yWM&amp;t=6s">W2L2 0:06</a></h2>
+<p>The second recording starts with conditional statements. The lecture gives the general form, <code>if [condition]; then … elif [condition]; then … else … fi</code>, and three examples. The first tests whether a file exists with <code>[ -f "file1" ]</code>: the script prints <code>File does not exist.</code>, then the lecture creates the file with <code>touch file1</code> and the script prints <code>File exists.</code> The second compares a number held in <code>num</code> with 5 using <code>-gt</code> and <code>==</code> and prints one of three messages for the values 10, 5 and 3. The third reads marks with <code>read</code> and prints grade A for 90 or more, B for 80 or more and C otherwise; the lecture runs it with 95, 45 and 80 and obtains A, C and B. The lecture says that the condition gives a binary true or false and that the branch for the first true condition runs.</p>
+<p>The statement is correct for these examples and incomplete as a description of the language. <code>if</code> does not evaluate a Boolean expression. POSIX defines it over command lists: "The if compound-list shall be executed; if its exit status is zero, the then compound-list shall be executed and the command shall complete. Otherwise, each elif compound-list shall be executed, in turn, and if its exit status is zero …" (§2.9.4, "The if Conditional Construct"). The <code>while</code> loop has the same form: it repeats while its condition list has zero exit status (§2.9.4, "The while Loop"). The square bracket is therefore a command, a name like <code>grep</code>, which the shell resolves by the usual search: it is a builtin and also a file, <code>/usr/bin/[</code>. Its last argument must be <code>]</code>, and it needs a blank on each side because it is a word. The standard defines <code>test</code>, the same utility without the brackets, by its exit status: 0 if the expression is true, 1 if it is false, and greater than 1 if an error occurred (<a href="https://pubs.opengroup.org/onlinepubs/9699919799/utilities/test.html">POSIX <code>test</code></a>, "EXIT STATUS").</p>
+<p><strong>The status as a number.</strong> The exit status is the low eight bits of the value that a process reports when it ends. The standard requires the shell to report "the full eight bits" (§2.8.2), so for <code>exit n</code> and for <code>return n</code></p>
+\[
+s = n \bmod 256,\qquad\text{and Bash reports } 128+k \text{ for a process ended by signal } k. \tag{5.3}
+\]
+<p>Equation (5.3) predicts that <code>exit 300</code> gives 44 and that a command killed by signal 9 gives 137. The first listing of this section runs the conventions of §2.8.2 beside the statuses of the common utilities: <code>grep</code> returns 0 for a match, 1 for no match and 2 for an error. It then runs the constructions that the lecture's tests rely on, with the shell's prefix of script name and line number removed. The listing sets <code>LC_ALL=C</code> for fixed message wording, and it writes the messages of <code>[</code> to the captured stream. Where a test runs inside a pipeline, the listing reads its status from the Bash array <code>PIPESTATUS</code>, which holds the exit status of each command of the last pipeline; Chapter 4 explains it with <code>pipefail</code>.</p>
+<pre><code class="language-bash" data-file="status_demo.sh" data-run="bash status_demo.sh">#!/bin/bash
+# status_demo.sh: if tests an exit status; [ is a command; the lecture's == and &gt; under test.
+export LC_ALL=C
+work=$(mktemp -d) &amp;&amp; cd "$work" || exit 1
+printf 'alpha\nbeta\n' &gt; f.txt
+
+echo "-- exit statuses"
+true;                    echo "true: $?"
+false;                   echo "false: $?"
+grep -q beta f.txt;      echo "grep finds beta: $?"
+grep -q gamma f.txt;     echo "grep misses gamma: $?"
+grep -q beta missing.txt 2&gt;/dev/null; echo "grep on a missing file: $?"
+nosuchcommand 2&gt;/dev/null; echo "command not found: $?"
+printf '#!/bin/bash\n' &gt; noexec.sh; chmod -x noexec.sh
+./noexec.sh 2&gt;/dev/null; echo "found, not executable: $?"
+{ bash -c 'kill -9 $$'; } 2&gt;/dev/null; echo "killed by signal 9: $?"
+bash -c 'exit 300'; echo "exit 300 becomes: $?"
+
+echo "-- if tests a command, not an expression"
+if grep -q beta f.txt; then echo "if + grep: beta found"; fi
+type [ | head -1
+/usr/bin/[ 3 -gt 2 ]; echo "/usr/bin/[ 3 -gt 2 ]: $?"
+num=
+msg() { sed 's/^.*line [0-9]*: //'; }                  # drop the script name and line number
+{ [ $num -gt 5 ]; echo "num empty, unquoted: $?"; } 2&gt;&amp;1 | msg
+{ [ "$num" -gt 5 ]; echo "num empty, quoted: $?"; } 2&gt;&amp;1 | msg
+[ -f "f.txt" ] &amp;&amp; echo "-f f.txt: regular file exists"
+
+echo "-- == and &gt; inside [ ]"
+[ 5 == 5 ]; echo "bash [ 5 == 5 ]: $?"
+dash -c '[ 5 == 5 ]' 2&gt;&amp;1 | sed 's/^dash: 1: //'; echo "dash [ 5 == 5 ]: ${PIPESTATUS[0]}"
+[ 5 = 5 ]; echo "[ 5 = 5 ]: $?"
+[ 10 &gt; 9 ]; echo "[ 10 &gt; 9 ]: $?   file created by the redirection: $(ls | grep -c '^9$')"
+[[ 10 &gt; 9 ]]; echo "[[ 10 &gt; 9 ]] (string order): $?"
+(( 10 &gt; 9 )); echo "(( 10 &gt; 9 )) (numbers): $?"
+cd / &amp;&amp; rm -rf "$work"
+</code></pre>
+<pre><code class="output">-- exit statuses
+true: 0
+false: 1
+grep finds beta: 0
+grep misses gamma: 1
+grep on a missing file: 2
+command not found: 127
+found, not executable: 126
+killed by signal 9: 137
+exit 300 becomes: 44
+-- if tests a command, not an expression
+if + grep: beta found
+[ is a shell builtin
+/usr/bin/[ 3 -gt 2 ]: 0
+[: -gt: unary operator expected
+num empty, unquoted: 2
+[: : integer expression expected
+num empty, quoted: 2
+-f f.txt: regular file exists
+-- == and &gt; inside [ ]
+bash [ 5 == 5 ]: 0
+[: 5: unexpected operator
+dash [ 5 == 5 ]: 2
+[ 5 = 5 ]: 0
+[ 10 &gt; 9 ]: 0   file created by the redirection: 1
+[[ 10 &gt; 9 ]] (string order): 1
+(( 10 &gt; 9 )) (numbers): 0</code></pre>
+<p>The values agree with (5.3): <code>exit 300</code> gives 44 and the killed shell gives 137. The statuses 126 and 127 appear for the non-executable file and the missing command, as the standard prescribes, and <code>grep</code> distinguishes no match (1) from a missing file (2). The line <code>/usr/bin/[ 3 -gt 2 ]</code> shows that the bracket is a file that runs as a separate program. The two empty-variable cases are the ones that the lecture's tests meet when <code>num</code> or <code>marks</code> is empty. POSIX defines <code>test</code> by the number of arguments (<code>test</code>, "OPERANDS"): with three arguments, the middle one decides which binary operator applies; with two, the first must be <code>!</code> or a unary primary, or "produce unspecified results". An unquoted empty variable disappears, so <code>[ $num -gt 5 ]</code> has the two arguments <code>-gt</code> and <code>5</code>: Bash reports <code>unary operator expected</code> and returns 2. The quoted form has three arguments, an empty first operand, and reports <code>integer expression expected</code>, also with status 2. Quoting changes the message, not the result; both are errors, and <code>if</code> treats every non-zero status as false.</p>
+<p>That consequence reaches the lecture's grading script. The next listing runs the script of the slide and a checked version. The script of the slide receives five inputs: three valid marks, an empty line and the text <code>abc</code>. The checked version reads with <code>-r</code>, rejects everything that is not a string of one to three digits by the pattern <code>''|*[!0-9]*|????*</code> of a <code>case</code> statement (the pattern <code>????*</code> matches any string of four or more characters), rejects values above 100, and exits with status 65, the value that <code>sysexits.h</code> names <code>EX_DATAERR</code> ("data format error"); the solver of the sweep uses 64, <code>EX_USAGE</code> ("command line usage error"), for bad command-line arguments. The listing prints the status after each run.</p>
+<pre><code class="language-bash" data-file="read_demo.sh" data-run="bash read_demo.sh">#!/bin/bash
+# read_demo.sh: the lecture's grade script, fed three kinds of input, and a checked version.
+work=$(mktemp -d) &amp;&amp; cd "$work" || exit 1
+
+cat &gt; grade.sh &lt;&lt;'END'
+#!/bin/bash
+echo "Enter your marks:"
+read marks
+if [ $marks -ge 90 ]; then
+  echo "Grade: A"
+elif [ $marks -ge 80 ]; then
+  echo "Grade: B"
+else
+  echo "Grade: C"
+fi
+END
+
+cat &gt; grade_checked.sh &lt;&lt;'END'
+#!/bin/bash
+read -r -p "Enter your marks: " marks
+case $marks in
+    ''|*[!0-9]*|????*) echo "not 1 to 3 digits: '$marks'" &gt;&amp;2; exit 65 ;;
+esac
+if [ "$marks" -gt 100 ]; then echo "out of range: $marks" &gt;&amp;2; exit 65; fi
+if   [ "$marks" -ge 90 ]; then echo "Grade: A"
+elif [ "$marks" -ge 80 ]; then echo "Grade: B"
+else                           echo "Grade: C"; fi
+END
+chmod +x grade.sh grade_checked.sh
+
+for input in 95 80 45 '' abc; do
+    echo "== grade.sh with input [$input]"
+    printf '%s\n' "$input" | ./grade.sh 2&gt;&amp;1 | sed 's/^.*line [0-9]*: //'; echo "   status ${PIPESTATUS[1]}"
+done
+for input in 95 '' abc 250 99999999999999999999; do
+    echo "== grade_checked.sh with input [$input]"
+    printf '%s\n' "$input" | ./grade_checked.sh 2&gt;&amp;1; echo "   status $?"
+done
+cd / &amp;&amp; rm -rf "$work"
+</code></pre>
+<pre><code class="output">== grade.sh with input [95]
+Enter your marks:
+Grade: A
+   status 0
+== grade.sh with input [80]
+Enter your marks:
+Grade: B
+   status 0
+== grade.sh with input [45]
+Enter your marks:
+Grade: C
+   status 0
+== grade.sh with input []
+Enter your marks:
+[: -ge: unary operator expected
+[: -ge: unary operator expected
+Grade: C
+   status 0
+== grade.sh with input [abc]
+Enter your marks:
+[: abc: integer expression expected
+[: abc: integer expression expected
+Grade: C
+   status 0
+== grade_checked.sh with input [95]
+Grade: A
+   status 0
+== grade_checked.sh with input []
+not 1 to 3 digits: ''
+   status 65
+== grade_checked.sh with input [abc]
+not 1 to 3 digits: 'abc'
+   status 65
+== grade_checked.sh with input [250]
+out of range: 250
+   status 65
+== grade_checked.sh with input [99999999999999999999]
+not 1 to 3 digits: '99999999999999999999'
+   status 65</code></pre>
+<p>The valid inputs 95, 80 and 45 give A, B and C, as in the lecture. The empty line and <code>abc</code> make <code>[</code> fail twice, once in each test, and the script still prints <code>Grade: C</code> and ends with status 0: invalid input receives the lowest grade without an error that a caller could detect. The checked version separates the cases: it prints a message on the error stream and returns 65 for the empty line, for <code>abc</code>, for 250 and for the 20-digit number. The length limit is not decoration: a first version of this script that tested only for digits accepted the 20-digit number, then <code>[</code> failed three times with <code>integer expression expected</code>, and the script printed <code>Grade: C</code> with status 0, the same silent failure as the lecture's script. The pattern needs no arithmetic and so has none of the octal, wrap-around and expression hazards of the section on arithmetic: after it, the string consists of one to three digits. A number with a leading zero such as <code>008</code> passes, and <code>[ 008 -ge 90 ]</code> compares it in decimal; only <code>$((…))</code> reads it as octal.</p>
+<p><strong>Comparison operators.</strong> The lecture writes <code>-gt</code> and says that signs can be used instead; its second example uses <code>==</code> for equality. The <code>test</code> of POSIX.1-2017 has the integer operators <code>-eq</code>, <code>-ne</code>, <code>-gt</code>, <code>-ge</code>, <code>-lt</code>, <code>-le</code> and only <code>=</code> and <code>!=</code> for strings; there is no <code>==</code> (its rationale records that the string comparisons of the Korn shell's <code>[[ ]]</code> were not carried into <code>test</code>). POSIX.1-2024 added <code>s1 &lt; s2</code> and <code>s1 &gt; s2</code>, which compare strings in the collation order of the locale, not numbers (<a href="https://pubs.opengroup.org/onlinepubs/9799919799/utilities/test.html">POSIX.1-2024 <code>test</code></a>: the operators "were later added to this standard once support for them became widespread"); inside <code>[ ]</code> they must be quoted or escaped (<code>[ "$a" \&gt; "$b" ]</code>), because an unquoted <code>&gt;</code> is a redirection. The last block of the listing above shows the consequences on this machine. Bash accepts <code>[ 5 == 5 ]</code>, and dash, which is <code>/bin/sh</code> on Ubuntu, rejects it with <code>unexpected operator</code> and status 2: a script that tests with <code>==</code> works under <code>bash script.sh</code> and fails under <code>sh script.sh</code>. The sign <code>&gt;</code> is not a comparison at all in <code>[ 10 &gt; 9 ]</code>: it is the redirection of standard output to a file named <code>9</code>, and the test that remains is <code>[ 10 ]</code>, a non-empty string, true; the listing finds the file <code>9</code>. Inside Bash's <code>[[ ]]</code>, <code>&gt;</code> compares strings in the order of the locale (Bash manual §6.4), so <code>[[ 10 &gt; 9 ]]</code> is false because <code>1</code> sorts before <code>9</code>, while <code>(( 10 &gt; 9 ))</code> compares numbers. The integer operators of <code>[</code> are the portable choice for numbers.</p>
+<p>The file test of the lecture is exact: <code>-f pathname</code> is true if the path names an existing regular file (POSIX <code>test</code>), so <code>-f</code> is false for a directory, and <code>-e</code> would be true for both.</p>
+
+<h2 id="loops">Loops: <code>for</code>, <code>while</code> and the process boundary of a pipeline <a class="timestamp" href="https://www.youtube.com/watch?v=h5Labe97yWM&amp;t=880s">W2L2 14:40</a></h2>
+<p>The lecture introduces loops as a way to run a block of code several times and gives two. The first is <code>for i in 1 2 3 4 5; do echo "Number: $i"; done</code>. The second sets <code>count=1</code> and runs <code>while [ $count -le 5 ]; do echo "Count: $count"; count=$((count + 1)); done</code>; the lecture traces the first iterations on the slide (1 ≤ 5 true, 2 ≤ 5 true, …) and shows the output <code>Count: 1</code> to <code>Count: 5</code>. It then states a rule of choice: use <code>for</code> if the number of iterations is known beforehand, and use <code>while</code> if the iteration should stop on a condition. The slide's code box ends the loop with <code>Done</code> in capital initial, and the terminal capture below it shows <code>done</code>; the keyword is case-sensitive, so the slide has a typing error.</p>
+<p>POSIX gives the exact semantics (§2.9.4). A <code>for</code> loop first expands the list of words after <code>in</code> into items and then runs the body once per item with the variable set to that item. A <code>while</code> loop runs its condition list, stops if the status is non-zero, runs the body, and repeats. The rule of choice follows: <code>for</code> iterates over a list that exists before the first iteration, and <code>while</code> re-evaluates a command before every iteration. The count of iterations of the lecture's <code>while</code> loop can be derived. Let the loop be <code>while [ $c -le b ]; do …; c=$((c + d)); done</code> with an integer step \(d\gt0\), a bound \(b\) and start value \(c_0\). Iteration \(k=0,1,2,\dots\) runs exactly when \(c_0+kd\le b\), that is \(k\le (b-c_0)/d\). The number of such \(k\) is</p>
+\[
+n_{\text{iter}}=\max\!\left(0,\ \left\lfloor\frac{b-c_0}{d}\right\rfloor+1\right). \tag{5.4}
+\]
+<p>The quantity \(b-c\) is an integer that decreases by \(d\) in every iteration, so the loop ends. If the body forgets the update of <code>c</code>, that argument fails, and the loop runs forever. Equation (5.4) predicts 5 iterations for \(c_0=1\) with \(b=5\) and \(d=1\), 3 iterations for \(c_0=3\), and none for \(c_0=6\). The listing below checks the three values, and then it tests two properties of the loops that the lecture does not mention.</p>
+<p>First, the list of a <code>for</code> loop is split into words. A loop over <code>$(ls)</code> splits a file name that contains a blank into two items, while the pattern <code>*.dat</code> expands to one item per file; the sweep script of the last section loops over <code>$SIZES</code> without quotes because splitting is its purpose, and the list contains only digits. Second, a loop at the end of a pipeline runs in a subshell. POSIX states that each command of a pipeline is in a subshell environment (§2.12; as an extension, any or all commands may run in the current environment), and Bash runs the last command in a subshell unless its <code>lastpipe</code> option is set and job control is off (Bash manual §3.2.3). A variable that the loop sets is lost. Reading from a process substitution, <code>done &lt; &lt;(printf …)</code>, keeps the loop in the current shell.</p>
+<pre><code class="language-bash" data-file="loops_demo.sh" data-run="bash loops_demo.sh">#!/bin/bash
+# loops_demo.sh: the lecture's for and while loops, word splitting in a for list, and loops in pipelines.
+work=$(mktemp -d) &amp;&amp; cd "$work" || exit 1
+
+echo "-- for over a list (lecture)"
+for i in 1 2 3 4 5; do echo -n "$i "; done; echo
+echo "-- while with a counter (lecture): iterations for start values 1, 3, 6"
+for start in 1 3 6; do
+    count=$start; iterations=0
+    while [ $count -le 5 ]; do count=$((count + 1)); iterations=$((iterations + 1)); done
+    echo "start $start: $iterations iterations, final count $count"
+done
+
+echo "-- a for list is split into words before the loop starts"
+touch "run 16.dat" "run 32.dat"
+echo "unquoted \$(ls):"; for f in $(ls); do echo "  [$f]"; done
+echo "glob *.dat:";     for f in *.dat; do echo "  [$f]"; done
+
+echo "-- a loop at the end of a pipeline runs in a subshell"
+total=0
+printf '3\n4\n5\n' | while read -r v; do total=$((total + v)); done
+echo "total after the pipeline: $total"
+total=0
+while read -r v; do total=$((total + v)); done &lt; &lt;(printf '3\n4\n5\n')
+echo "total with process substitution: $total"
+cd / &amp;&amp; rm -rf "$work"
+</code></pre>
+<pre><code class="output">-- for over a list (lecture)
+1 2 3 4 5 
+-- while with a counter (lecture): iterations for start values 1, 3, 6
+start 1: 5 iterations, final count 6
+start 3: 3 iterations, final count 6
+start 6: 0 iterations, final count 6
+-- a for list is split into words before the loop starts
+unquoted $(ls):
+  [run]
+  [16.dat]
+  [run]
+  [32.dat]
+glob *.dat:
+  [run 16.dat]
+  [run 32.dat]
+-- a loop at the end of a pipeline runs in a subshell
+total after the pipeline: 0
+total with process substitution: 12</code></pre>
+<p>The iteration counts are 5, 3 and 0, as (5.4) predicts, and the final value of <code>count</code> is 6 in all three cases. The loop over <code>$(ls)</code> produces four items for the two files (<code>run</code>, <code>16.dat</code>, <code>run</code>, <code>32.dat</code>), and the pattern produces two. The sum of 3, 4 and 5 is 12 when the loop reads from a process substitution and 0 after the pipeline. The lecture's disk-monitoring script ends in <code>| while read output; do … done</code>, so any counter that it incremented in the loop would be lost in the same way.</p>
+
+<h2 id="functions">Functions, return values and recursion <a class="timestamp" href="https://www.youtube.com/watch?v=h5Labe97yWM&amp;t=1357s">W2L2 22:37</a></h2>
+<p>The lecture presents functions as a way to modularise code. It defines <code>my_function() { echo "This is a function."; }</code> and calls it by name; it stresses that the definition is one thing and the call another, and shows that the script prints nothing when the call line is absent. It then defines <code>add() { sum=$(( $1 + $2 )); return $sum; }</code>, calls <code>add 5 10</code>, prints <code>$?</code>, "the exit status of the last executed command", and obtains 15. Its last example is the factorial, written recursively with command substitution: <code>factorial() { if [ $1 -le 1 ]; then echo 1; else prev=$(factorial $(( $1 - 1 ))); echo $(( $1 * prev )); fi; }</code>, which prints <code>Factorial of 5 is: 120</code>.</p>
+<p>A function runs in the current shell. Bash resolves a function name before a builtin and before a file (Bash manual §3.7.2; POSIX §2.9.1 keeps the special built-ins ahead of functions), replaces the positional parameters <code>$1</code>, <code>$2</code> during the call, and runs the body without creating a process. Two properties follow from the model of the first section, and the lecture's examples contain both. <strong>Variables are global.</strong> The function <code>add</code> sets <code>sum</code> in the caller's environment, because the body runs in the caller's shell; <code>local</code> limits a variable to the function and its callees (Bash manual, <code>local</code>). <strong>Results travel by status or by output.</strong> <code>return n</code> sets the status of the call to \(n \bmod 256\) by (5.3), and the standard leaves a value above 255 unspecified (POSIX, <code>return</code>, "EXIT STATUS"). The lecture's claim that <code>return</code> returns the value of the sum holds only for sums from 0 to 255. A function that must return a larger number or a string writes it to standard output and the caller captures it with <code>$(…)</code>, which costs a subshell.</p>
+<p>The recursion of the factorial adds a cost and a range limit. Each call of <code>factorial</code> runs inside a command substitution, so each level of recursion is a new subshell: <code>factorial 5</code> runs in 5 processes, one per call. The values have the range limit of (5.2). The product \(n!\) exceeds \(2^{63}-1\) at \(n=21\), where \(21!=51\,090\,942\,171\,709\,440\,000\) and \(\operatorname{wrap}(21!)=21!-3\cdot2^{64}=-4\,249\,290\,049\,419\,214\,848\). The result becomes 0 at a definite \(n\): by Legendre's formula, the exponent of 2 in \(n!\) is \(\sum_{i\ge1}\lfloor n/2^i\rfloor\), because \(\lfloor n/2^i\rfloor\) counts the multiples of \(2^i\) up to \(n\), each of which adds one factor 2. If \(n=\sum_j b_j2^j\) with bits \(b_j\), then \(\lfloor n/2^i\rfloor=\sum_{j\ge i}b_j2^{j-i}\), and the sum over \(i\ge1\) is \(\sum_j b_j(2^j-1)=n-s_2(n)\), where \(s_2(n)=\sum_j b_j\) is the number of 1 bits of \(n\). So the exponent is \(n-s_2(n)\), and \(n!\equiv0\pmod{2^{64}}\) as soon as that exponent is at least 64. For \(n=65=1000001_2\) the exponent is \(65-2=63\), so \(65!\equiv2^{63}\pmod{2^{64}}\) and the wrapped value is \(-2^{63}\); for \(n=66=1000010_2\) it is \(66-2=64\), so the result is 0. The listing tests the statements about <code>return</code>, global variables and recursion, and the claim that <code>local x=$(cmd)</code> hides the status of <code>cmd</code>, which the Bash manual explains by the return status of <code>local</code> itself: zero unless <code>local</code> is used outside a function, an invalid name is given, or the name is read-only. Every factorial call appends its <code>$BASHPID</code>, the PID of the shell process that runs it, to a file, and the listing counts the distinct values.</p>
+<pre><code class="language-bash" data-file="functions_demo.sh" data-run="bash functions_demo.sh">#!/bin/bash
+# functions_demo.sh: the lecture's add and factorial functions, and the limits of "return".
+work=$(mktemp -d) &amp;&amp; cd "$work" || exit 1
+
+add() {                              # lecture: result through the exit status
+    sum=$(( $1 + $2 ))
+    return $sum
+}
+add 5 10;     echo "add 5 10:     \$? = $?"
+add 200 100;  echo "add 200 100:  \$? = $?   (300 mod 256 = $((300 % 256)))"
+
+add_out() { echo $(( $1 + $2 )); }   # result through standard output
+echo "add_out 200 100 = $(add_out 200 100)"
+
+echo "-- variables are global unless declared local"
+setter()  { v=changed; }
+setter_l() { local v=changed; }
+v=original; setter_l; echo "after setter_l: v=$v"; setter; echo "after setter:   v=$v"
+echo "-- local with command substitution hides the status"
+f_bad()  { local x=$(false); echo "f_bad: \$? = $?"; }
+f_good() { local x; x=$(false); echo "f_good: \$? = $?"; }
+f_bad; f_good
+
+echo "-- factorial (lecture): one subshell per call"
+factorial() {
+    echo "$BASHPID" &gt;&gt; pids.txt
+    if [ "$1" -le 1 ]; then
+        echo 1
+    else
+        prev=$(factorial $(( $1 - 1 )))
+        echo $(( $1 * prev ))
+    fi
+}
+echo "factorial 5 = $(factorial 5)"
+echo "distinct process ids that ran the function: $(sort -u pids.txt | wc -l); this shell's own pid among them: $(grep -c "^$$\$" pids.txt)"
+for n in 20 21 65 66; do echo "factorial $n = $(factorial $n)"; done
+cd / &amp;&amp; rm -rf "$work"
+</code></pre>
+<pre><code class="output">add 5 10:     $? = 15
+add 200 100:  $? = 44   (300 mod 256 = 44)
+add_out 200 100 = 300
+-- variables are global unless declared local
+after setter_l: v=original
+after setter:   v=changed
+-- local with command substitution hides the status
+f_bad: $? = 0
+f_good: $? = 1
+-- factorial (lecture): one subshell per call
+factorial 5 = 120
+distinct process ids that ran the function: 5; this shell's own pid among them: 0
+factorial 20 = 2432902008176640000
+factorial 21 = -4249290049419214848
+factorial 65 = -9223372036854775808
+factorial 66 = 0</code></pre>
+<p>The function <code>add</code> returns 15 for 5 and 10 and 44 for 200 and 100, which is \(300 \bmod 256\); printing the result with <code>echo</code> gives 300. Without <code>local</code>, the function <code>setter</code> overwrites the caller's <code>v</code>, and <code>setter_l</code> does not. The line <code>local x=$(false)</code> reports status 0, and the split form <code>local x; x=$(false)</code> reports 1, so a check of <code>$?</code> after the combined form never sees a failure. The 5 calls of <code>factorial 5</code> ran in 5 distinct processes, none of them the main shell. The results are exact for \(n=20\), negative for \(n=21\), equal to \(-2^{63}\) for \(n=65\), and 0 for \(n=66\), all as the derivation predicts. The recursive factorial of the lecture is a correct program for \(0\le n\le20\) and a silent error beyond; an iterative loop would avoid the subshells, not the wrap-around.</p>
+
+<h2 id="monitor">The monitoring script and the price of a process <a class="timestamp" href="https://www.youtube.com/watch?v=h5Labe97yWM&amp;t=1938s">W2L2 32:18</a></h2>
+<p>The lecture ends with a "real-life" script that monitors the disk space of a system and warns when the use of a partition reaches a threshold. The script of the slide, with its line breaks adjusted, is:</p>
+<pre><code class="language-bash">THRESHOLD=90
+df -h | awk 'NR&gt;1 {print $5 " " $1}' | while read output; do
+  usage=$(echo $output | awk '{print $1}' | sed 's/%//')
+  partition=$(echo $output | awk '{print $2}')
+  if [ $usage -ge $THRESHOLD ]; then
+    echo "Warning: Disk usage for $partition is at $usage%"
+  fi
+done
+</code></pre>
+<p>The lecture reads it in three steps. The pipeline from <code>df</code> through <code>awk</code> prints, for every line after the header, the use percentage and the device name; the output goes through a pipe to a <code>while</code> loop, which "continuously" monitors the partitions; inside the loop two command substitutions extract the percentage without its <code>%</code> sign and the device name, and the test compares the percentage with the threshold. On the lecture's machine the terminal shows a table in which <code>/dev/sda1</code> mounted on <code>/boot</code> is at 98 %, and the script prints <code>Warning: Disk usage for /dev/sda1 is at 98%</code>. The lecture adds that a real system runs many such scripts in the background, and that the aim of the course is to let the learner write scripts that run jobs and collect results.</p>
+<p>Three statements of this reading need correction or measurement. <strong>First, the loop does not monitor continuously.</strong> It runs once for each line of one <code>df</code> table and ends when the table ends. Each run of the script is a single check. Monitoring over time needs a second loop around it with a delay, or a scheduler that starts the script periodically. <strong>Second, the script assumes that the use column is a number followed by <code>%</code>.</strong> With <code>df -a</code>, pseudo filesystems such as <code>/proc</code> print <code>-</code> as their use (checked on this machine), and then <code>[ $usage -ge $THRESHOLD ]</code> is an error by the rules of the section on exit status. <strong>Third, the script is expensive for what it does.</strong> To count what the loop costs, count the processes. A command substitution runs in a subshell, which is one process; the pipeline inside it has one process per stage, and Bash runs each stage of a pipeline in its own forked process (Bash manual §3.2.3). The <code>echo</code> is a builtin but, as a pipeline stage, runs in a forked process. A command substitution with a pipeline of \(k\ge2\) stages therefore creates \(1+k\) processes, and a loop that runs it for \(R\) input lines (records) creates</p>
+\[
+P=R\sum_{j}(1+k_j)\quad\text{processes, with } k_j \text{ the stages of the } j\text{-th substitution}. \tag{5.5}
+\]
+<p>For the lecture's loop the two substitutions have \(k=3\) (<code>echo | awk | sed</code>) and \(k=2\) (<code>echo | awk</code>), so \(P=R(4+3)=7R\); the <code>[</code> test and the arithmetic of the loop add none. A single <code>awk</code> process that reads the table and compares the numbers needs one process in total. The listing counts the processes directly, from the PIDs of two probe processes that bracket the command: Linux assigns process identifiers in sequence, so the difference of the two probes, minus the identifiers that one probe consumes, is the number of processes created in between. The count is exact only if nothing else on the system starts a process or a thread in the meantime, which is why the timing and counting listing is checked by its return code. The listing also measures \(\kappa\), the cost of creating one process and waiting for it, as the time of 1000 runs of <code>/bin/true</code>, and it compares the lecture's loop with one <code>awk</code> on a table of 300 lines. The printed output is one sample run on this machine; four runs gave a loop time of 0.67 to 1.66 s, \(\kappa\) of 0.59 to 0.81 ms, and an <code>awk</code> time of 0.001 to 0.003 s.</p>
+<pre><code class="language-bash" data-file="fork_cost.sh" data-run="bash fork_cost.sh" data-check="returncode">#!/bin/bash
+# fork_cost.sh: count the processes a command creates and time one process creation.
+# Timings and process counts are one sample run; the check is the return code.
+work=$(mktemp -d) &amp;&amp; cd "$work" || exit 1
+TIMEFORMAT=%R                                       # make the time keyword print seconds only
+
+probe() { sh -c 'echo $$'; }                        # the process id of a fresh process
+spawned() {                                         # processes created while "$@" runs
+    local a b base
+    a=$(probe); b=$(probe); base=$((b - a))         # ids consumed by one probe when nothing runs
+    a=$(probe); "$@" &gt; /dev/null 2&gt;&amp;1; b=$(probe)
+    echo $(( b - a - base ))
+}
+
+line='98% /dev/sda1'
+usage_line() { usage=$(echo $line | awk '{print $1}' | sed 's/%//'); }
+partition_line() { partition=$(echo $line | awk '{print $2}'); }
+echo "processes: usage=\$(echo | awk | sed)        $(spawned usage_line)"
+echo "processes: partition=\$(echo | awk)          $(spawned partition_line)"
+echo "processes: one awk                          $(spawned awk 'BEGIN{}')"
+echo "processes: builtin arithmetic x=\$((1+1))     $(spawned eval 'x=$((1+1))')"
+
+n=1000
+t_ext=$( { time for ((i = 0; i &lt; n; i++)); do /bin/true; done; } 2&gt;&amp;1 )
+t_bin=$( { time for ((i = 0; i &lt; 100000; i++)); do true; done; } 2&gt;&amp;1 )
+echo "$n x /bin/true (fork + exec + wait): $t_ext s = $(awk -v t="$t_ext" -v n=$n 'BEGIN{printf "%.2f", 1000*t/n}') ms each"
+echo "100000 x builtin true:               $t_bin s = $(awk -v t="$t_bin" 'BEGIN{printf "%.2f", 1e6*t/100000}') us each"
+
+for ((i = 0; i &lt; 300; i++)); do echo "$((i % 100))% /dev/sda$i"; done &gt; table.txt
+THRESHOLD=90
+t_lec=$( { time while read -r output; do
+    usage=$(echo $output | awk '{print $1}' | sed 's/%//')
+    partition=$(echo $output | awk '{print $2}')
+    [ "$usage" -ge $THRESHOLD ] &amp;&amp; echo "W $partition" &gt; /dev/null
+done &lt; table.txt; } 2&gt;&amp;1 )
+t_awk=$( { time awk -v t=$THRESHOLD '{u=$1; sub(/%/,"",u); if (u+0&gt;=t) print "W", $2 &gt; "/dev/null"}' table.txt; } 2&gt;&amp;1 )
+echo "300 table lines, lecture loop: $t_lec s;  one awk: $t_awk s"
+cd / &amp;&amp; rm -rf "$work"
+</code></pre>
+<pre><code class="output">processes: usage=$(echo | awk | sed)        4
+processes: partition=$(echo | awk)          3
+processes: one awk                          1
+processes: builtin arithmetic x=$((1+1))     0
+1000 x /bin/true (fork + exec + wait): 0.594 s = 0.59 ms each
+100000 x builtin true:               0.136 s = 1.36 us each
+300 table lines, lecture loop: 1.511 s;  one awk: 0.001 s</code></pre>
+<p>The counts are 4, 3, 1 and 0 in every run, which agrees with (5.5): the substitution with three stages creates 4 processes, the one with two stages 3, a single <code>awk</code> 1, and the arithmetic expansion none. The sample gives \(\kappa=0.59\) ms for a process that does nothing; a builtin <code>true</code> costs 1.4 µs in the same sample, 440 times less. The prediction for the lecture's loop on 300 lines is \(P\kappa=300\times7\times0.59\ \mathrm{ms}=1.24\) s. The sample measured 1.51 s, and the four runs measured from 0.54 to 1.34 times the 1.24 s prediction. The model is therefore right in order of magnitude and not in detail. Of the 7 processes per line, 4 are copies of the shell that do not run another program, and 3 start <code>awk</code> or <code>sed</code>; \(\kappa\) was measured for a process that does the second, so a difference of tens of percent is expected, and the variation between runs of the same program (0.67 s against 1.66 s) is larger than any single model error. One <code>awk</code> took 1 ms in the sample for all 300 lines, which is the resolution of <code>TIMEFORMAT=%R</code> and about the start-up time of <code>awk</code>. The loop was therefore at least about 200 times slower in every run, and the ratio grows with the number of lines.</p>
+<p>The consequence for HPC work follows from (5.5) and is an extrapolation of the model, not a measurement. A table of \(10^6\) lines costs \(7\times10^6\) processes in the lecture's loop, and with \(\kappa=0.59\) ms that is \(4.1\times10^3\) s, about 69 minutes; one <code>awk</code> pass cannot be scaled from the 300-line time, because 1 to 3 ms is the start-up of the <code>awk</code> process itself (an empty <code>awk 'BEGIN{}'</code> took 0.002 s here). Measured directly on \(10^6\) generated lines, the same <code>awk</code> program took 0.29 to 0.37 s in three runs, about \(10^4\) times less than the loop's estimate. A shell loop that creates processes per record is acceptable for a few dozen records, such as the cases of a sweep, and it is the wrong tool for a log file. The comparison does not say that <code>awk</code> is better than the shell. It says that the cost of a shell script is the number of processes it creates, and that this number is not visible in the text of the script.</p>
+<p>The next listing runs the lecture's script on the table of the slide, as a function that reads the table from standard input so that the output is fixed, and compares it with a one-process version that also skips lines without a percentage. A last test adds a line whose use column is <code>-</code>.</p>
+<pre><code class="language-bash" data-file="monitor.sh" data-run="bash monitor.sh">#!/bin/bash
+# monitor.sh: the lecture's disk-space script, run on a fixed sample, and a one-process version.
+THRESHOLD=90
+sample() {                           # five of the seven df lines on the lecture's slide (1K blocks); the two omitted tmpfs lines are below 2 %
+cat &lt;&lt;'END'
+Filesystem     1K-blocks     Used Available Use% Mounted on
+devtmpfs         1914728        0   1914728   0% /dev
+tmpfs            1930524        8   1930516   1% /dev/shm
+tmpfs            1930524    12748   1917776   1% /run
+/dev/sda3       23796376 12403964  11392412  53% /
+/dev/sda1         303780   297376      6404  98% /boot
+END
+}
+
+lecture_version() {                  # the lecture's pipeline, reading the table from standard input
+    awk 'NR&gt;1 {print $5 " " $1}' | while read output; do
+        usage=$(echo $output | awk '{print $1}' | sed 's/%//')
+        partition=$(echo $output | awk '{print $2}')
+        if [ $usage -ge $THRESHOLD ]; then
+            echo "Warning: Disk usage for $partition is at $usage%"
+        fi
+    done
+}
+
+one_process_version() {              # same decision in one awk process; skips lines without a percentage
+    awk -v t="$THRESHOLD" 'NR &gt; 1 &amp;&amp; $5 ~ /^[0-9]+%$/ { u = $5; sub(/%/, "", u)
+        if (u + 0 &gt;= t) printf "Warning: Disk usage for %s is at %s%%\n", $1, u }'
+}
+
+echo "== lecture version, lecture sample";     sample | lecture_version
+echo "== one-process version, lecture sample"; sample | one_process_version
+bad=$(sample; echo "/dev/loop9      1000      10       990    - /snap/x")
+echo "== a filesystem that reports '-' as its use"
+echo "lecture version:";     echo "$bad" | lecture_version 2&gt;&amp;1 | sed 's/^.*line [0-9]*: //'
+echo "one-process version:"; echo "$bad" | one_process_version
+</code></pre>
+<pre><code class="output">== lecture version, lecture sample
+Warning: Disk usage for /dev/sda1 is at 98%
+== one-process version, lecture sample
+Warning: Disk usage for /dev/sda1 is at 98%
+== a filesystem that reports '-' as its use
+lecture version:
+Warning: Disk usage for /dev/sda1 is at 98%
+[: -: integer expression expected
+one-process version:
+Warning: Disk usage for /dev/sda1 is at 98%</code></pre>
+<p>On the lecture's table both versions print the same single warning, <code>/dev/sda1</code> at 98 %. With a line whose use is <code>-</code>, the lecture's version prints the warning and then the error <code>integer expression expected</code> from <code>[</code>, which does not stop the loop; the one-process version ignores the line. The correction of the lecture's statement is therefore a precise one: the script is correct for a table whose use column is always numeric, performs one check per run, and spends most of its time in process creation.</p>
+
+<h2 id="sweep">The parameter sweep: every construct together</h2>
+<p>This section builds the running case with the constructs of the two lectures, and with two that the lectures do not treat, <code>case</code> and background processes with <code>wait</code>. The specification is the one in the first section: run <code>./jacobi N tol max_iter</code> for a list of sizes, record one row per run with the iteration count, the final change and a label, and report failure through the exit status of the sweep.</p>
+<p><strong>Why the naive script is wrong.</strong> The first loop of the listing below runs the solver for each size and prints its output. It has the form of every sweep script that a beginner writes, and it fails silently for two of the four sizes. The reason is stated by the model: the output of a command is data and the exit status is a separate channel, and a loop that only prints the output discards the channel that carries the failure. The exit status of the solver is available in <code>$?</code> only until the next command runs, because each command overwrites it (POSIX §2.5.2: <code>?</code> expands to the exit status of the most recent pipeline). The function <code>run_case</code> therefore reads <code>$?</code> as the very next command after the substitution. The variables are declared on a line of their own, <code>local n=$1 out status label</code>, and assigned on the next lines, because <code>local out=$(…)</code> would return the status of <code>local</code> (the result of the section on functions).</p>
+<p>The function maps the status to a label with a <code>case</code> statement (0 to <code>converged</code>, 2 to <code>iteration_limit</code>, everything else to <code>error</code>), splits the output of the solver into positional parameters with <code>set -- $out</code>, and writes one row to its own file <code>rows/N.csv</code>. The files exist because of the process model. A second part of the script runs the same cases as background processes with <code>&amp;</code> and collects their statuses with <code>wait</code>. A background command runs in a subshell, so a variable that <code>run_case</code> sets there is lost (rule (5.1), and the pipeline result of the section on loops), and only a file survives. The Bash manual states what <code>wait</code> returns: "the exit status of the last id", where each id is a process identifier. The script saves <code>$!</code>, the PID of the last background command, in a list, and it calls <code>wait</code> for each in turn. Finally, the script collects the rows in numeric order of \(N\) with <code>sort -t, -k1,1n</code> and compares the CSV files of the two modes with <code>cmp</code>. It ends with <code>exit 1</code> if any row has the label <code>iteration_limit</code>, so that a caller, for example a batch script or <code>make</code>, sees the failure. The script contains its own copy of the solver source, <code>jacobi_cli.c</code>, and builds it with <code>gcc -O2</code>; the solver is the book's serial Jacobi kernel with the canonical <code>IDX</code> layout, the top edge held at 1 and the other edges at 0.</p>
+<pre><code class="language-bash" data-file="sweep.sh" data-run="bash sweep.sh; echo &quot;sweep exit status $?&quot;">#!/bin/bash
+# sweep.sh: run the Jacobi solver for several grid sizes and collect one CSV row per run.
+# The solver contract: "./jacobi N tol max_iter" prints "N iterations change" and exits with
+#   0 = converged, 2 = iteration limit reached, 64 = bad arguments.
+work=$(mktemp -d) &amp;&amp; cd "$work" || exit 1
+TOL=1e-6; MAX_ITER=5000; SIZES="16 32 64 128"
+
+build_solver() {
+cat &gt; jacobi.c &lt;&lt;'END'
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+
+#define IDX(i, j) ((i) * (N + 2) + (j))
+
+static double jacobi_step(int N, const double *u, double *unew)
+{
+    double change = 0.0;
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            unew[IDX(i, j)] = 0.25 * (u[IDX(i - 1, j)] + u[IDX(i + 1, j)]
+                                    + u[IDX(i, j - 1)] + u[IDX(i, j + 1)]);
+            double d = fabs(unew[IDX(i, j)] - u[IDX(i, j)]);
+            if (d &gt; change) change = d;
+        }
+    return change;
+}
+
+int main(int argc, char **argv)
+{
+    if (argc != 4) { fprintf(stderr, "usage: %s N tol max_iter\n", argv[0]); return 64; }
+    int N = atoi(argv[1]), max_iter = atoi(argv[3]);
+    double tol = atof(argv[2]);
+    if (N &lt; 1 || max_iter &lt; 1 || !(tol &gt; 0.0)) { fprintf(stderr, "bad argument\n"); return 64; }
+    size_t cells = (size_t)(N + 2) * (N + 2);
+    double *u = calloc(cells, sizeof *u), *unew = calloc(cells, sizeof *unew);
+    for (int j = 0; j &lt; N + 2; j++) u[IDX(0, j)] = unew[IDX(0, j)] = 1.0;   /* top edge u = 1 */
+    int iter = 0;
+    double change = 1.0;
+    while (iter &lt; max_iter &amp;&amp; change &gt;= tol) {
+        change = jacobi_step(N, u, unew);
+        double *t = u; u = unew; unew = t;
+        iter++;
+    }
+    printf("%d %d %.3e\n", N, iter, change);
+    free(u); free(unew);
+    return change &lt; tol ? 0 : 2;
+}
+END
+    gcc -O2 -o jacobi jacobi.c -lm || exit 1
+}
+
+naive_sweep() {                       # ignores the exit status of the solver
+    for n in $SIZES; do ./jacobi $n $TOL $MAX_ITER; done
+}
+
+run_case() {                          # run_case N: write one CSV row to rows/N.csv, return the solver status
+    local n=$1 out status label
+    out=$(./jacobi "$n" "$TOL" "$MAX_ITER"); status=$?    # status of the solver, not of "local"
+    case $status in
+        0) label=converged ;;
+        2) label=iteration_limit ;;
+        *) label=error ;;
+    esac
+    set -- $out                       # split "N iterations change" into $1 $2 $3
+    echo "$n,${2:-NA},${3:-NA},$label" &gt; "rows/$n.csv"
+    return $status
+}
+
+collect() { cat rows/*.csv | sort -t, -k1,1n; }
+
+build_solver
+echo "== naive sweep: one line per run, nothing says which run failed"
+naive_sweep
+
+mkdir rows
+echo "== checked sweep, one case after the other"
+for n in $SIZES; do run_case "$n"; echo "   N=$n solver status $?"; done
+collect &gt; sequential.csv; cat sequential.csv
+
+rm -f rows/*.csv
+echo "== the same cases as background processes"
+pids=""
+for n in $SIZES; do run_case "$n" &amp; pids="$pids $!"; done
+set -- $SIZES
+for pid in $pids; do wait "$pid"; echo "   N=$1 status of the background process $?"; shift; done
+collect &gt; parallel.csv
+cmp -s sequential.csv parallel.csv &amp;&amp; echo "parallel and sequential CSV files are identical"
+
+echo "== iterations per doubling of N, from the converged rows"
+awk -F, '$4 == "converged" { if (prev) printf "N=%d: %d iterations, ratio to N=%d: %.2f\n", $1, $2, $1 / 2, $2 / prev
+                             else printf "N=%d: %d iterations\n", $1, $2; prev = $2 }' sequential.csv
+grep -q iteration_limit sequential.csv &amp;&amp; { echo "sweep incomplete: some runs hit the limit" &gt;&amp;2; status=1; }
+cd / &amp;&amp; rm -rf "$work"
+exit ${status:-0}
+</code></pre>
+<pre><code class="output">== naive sweep: one line per run, nothing says which run failed
+16 515 9.979e-07
+32 1657 9.956e-07
+64 5000 1.374e-06
+128 5000 2.929e-05
+== checked sweep, one case after the other
+   N=16 solver status 0
+   N=32 solver status 0
+   N=64 solver status 2
+   N=128 solver status 2
+16,515,9.979e-07,converged
+32,1657,9.956e-07,converged
+64,5000,1.374e-06,iteration_limit
+128,5000,2.929e-05,iteration_limit
+== the same cases as background processes
+   N=16 status of the background process 0
+   N=32 status of the background process 0
+   N=64 status of the background process 2
+   N=128 status of the background process 2
+parallel and sequential CSV files are identical
+== iterations per doubling of N, from the converged rows
+N=16: 515 iterations
+N=32: 1657 iterations, ratio to N=16: 3.22
+sweep exit status 1</code></pre>
+<p>The naive sweep prints four lines that look alike: <code>16 515</code>, <code>32 1657</code>, <code>64 5000</code> and <code>128 5000</code>. The checked sweep shows that the solver returned status 0 for \(N=16\) and \(N=32\) and status 2 for \(N=64\) and \(N=128\); the rows of the CSV file carry the labels <code>converged</code> for the first two and <code>iteration_limit</code> for the last two, with final changes of \(1.374\times10^{-6}\) and \(2.929\times10^{-5}\), against the tolerance \(10^{-6}\). The background run gives the same four statuses, in the order in which the script waits for them, and its CSV file is identical to the sequential one. The iteration counts of the converged rows grow by the factor 3.22 from \(N=16\) to \(N=32\). A separate run of the solver with a limit of 100 000 iterations, which is not a listing of this chapter, gave 163, 515, 1657, 5272 and 16 148 iterations for \(N=8,16,32,64,128\), so the limit of 5000 lies between the need at \(N=32\) and at \(N=64\) and the sweep fails where the arithmetic says it must. Chapter 9 derives the growth of the iteration count with \(N\). The status of the whole sweep is 1, the value printed by the last line of the output; the message that explains it goes to the error stream, which this listing's check does not capture.</p>
+<p><strong>What the sweep establishes and what it does not.</strong> The construct establishes one property: every run of the solver contributes exactly one row, with a label derived from its exit status, so the CSV file cannot present a failed run as a result. The property rests on three facts of the model: the status is a separate channel, <code>$?</code> is read before any other command runs, and rows reach the parent through files. It does not establish that the solver is correct, that a converged run is accurate (the stopping rule bounds the last change, not the error), or that the runs are independent of one another. The background mode starts all cases at once. That is acceptable for 4 cases and unsuitable for 200: the machine has 12 logical processors of different speeds, a job scheduler allocates them to jobs and not to processes of one script, and the runs compete for memory bandwidth, so timings from concurrent runs are not timings of single runs. A sweep that measures performance runs its cases one after the other, and a sweep with many cases uses the scheduler's own mechanisms (chapter 30).</p>
+
+<h2 id="limits">What the model establishes and what it does not</h2>
+<p>The table lists the statements of the lectures that this chapter tested, including the two explanations that the lectures give for their own observations, with the status that the tests gave them.</p>
+<div class="table-wrap"><table>
+<caption>Table 5.1. Statements of the lectures and their status in this chapter.</caption>
+<thead><tr><th scope="col">Statement of the lectures</th><th scope="col">Status</th><th scope="col">Evidence in this chapter</th></tr></thead>
+<tbody>
+<tr><td>A shell script is a file of commands that the shell executes; the extension <code>.sh</code> marks it (W2L1).</td><td>Confirmed; the extension is a convention only</td><td><code>interp_line.sh</code>: a file named <code>show.txt</code> with an interpreter line runs.</td></tr>
+<tr><td>The first line tells which shell the script uses (W2L1).</td><td>Refined</td><td>The kernel reads it on direct execution only; <code>bash child.sh</code> ignores it; POSIX §2.1 leaves it unspecified; without it, the interpreter depends on the caller (<code>exec_modes.sh</code>; <code>env</code> and <code>find -exec</code> use <code>/bin/sh</code>).</td></tr>
+<tr><td>Make the file executable with <code>chmod +x</code> and run <code>./hello.sh</code> (W2L1).</td><td>Confirmed for direct execution</td><td>Without the bit, <code>./child.sh</code> gives status 126 and <code>bash child.sh</code> still works; on WSL's <code>/mnt/c</code> every file is executable.</td></tr>
+<tr><td><code>$(date)</code> runs the command and <code>$((5 + 2))</code> computes 7 (W2L1).</td><td>Confirmed; boundaries added</td><td>A subshell and one process for <code>$(…)</code>; 64-bit wrap-around (5.2), octal constants and no fractions for <code>$((…))</code> (<code>arith.sh</code>).</td></tr>
+<tr><td><code>env</code> lists all the variables set in the shell (W2L1).</td><td>Refined</td><td><code>env</code> lists the exported subset; <code>set</code> lists all (<code>env_demo.sh</code>, counts 0 and 1 against 1 and 1).</td></tr>
+<tr><td>The long list of variables arises because Linux treats everything as a file (W2L1, speech).</td><td>Not supported</td><td>The environment is inherited from the parent at <code>exec</code> (execve(2); Bash manual §3.7.4).</td></tr>
+<tr><td>A variable without <code>export</code> is not available to child processes, and one with <code>export</code> is (W2L1).</td><td>Confirmed</td><td>Rule (5.1); <code>env_demo.sh</code>: child sees <code>NAME2</code> only; a child's change does not return.</td></tr>
+<tr><td><code>export PATH=…:$PATH</code> adds a directory; the speech calls it appending or prepending (W2L1).</td><td>The slide prepends; the position decides which program runs</td><td><code>path_demo.sh</code>: prepended <code>date</code> shadows <code>/usr/bin/date</code>, appended does not.</td></tr>
+<tr><td>Overwriting <code>PATH</code> can make the shell unusable (W2L1).</td><td>Confirmed</td><td><code>PATH=/nonexistent</code>: <code>ls</code> gives status 127; <code>/bin/ls</code> still runs.</td></tr>
+<tr><td><code>INCLUDE_PATH</code> holds the paths of header files (W2L1, slide).</td><td>Not for gcc 13.3</td><td>Session: <code>INCLUDE_PATH=h</code> has no effect, <code>CPATH=h</code> works; GCC manual, Environment Variables.</td></tr>
+<tr><td><code>read</code> stores the input in a variable (W2L1).</td><td>Confirmed; boundaries added</td><td>Text only; surplus fields go to the last name; status 1 at end of input; invalid marks received grade C with status 0 (<code>read_demo.sh</code>).</td></tr>
+<tr><td>A condition gives a binary true or false (W2L2).</td><td>Refined</td><td><code>if</code> tests the exit status of a command; an error status of 2 counts as false (<code>status_demo.sh</code>).</td></tr>
+<tr><td>Signs can be used instead of <code>-gt</code>; <code>==</code> tests equality (W2L2).</td><td>Partly true</td><td><code>==</code> works in Bash and fails in dash, and POSIX.1-2017 <code>test</code> has only <code>=</code>; <code>&gt;</code> inside <code>[ ]</code> is a redirection, and the string operators that POSIX.1-2024 added compare strings, not numbers (<code>status_demo.sh</code>).</td></tr>
+<tr><td>Use <code>for</code> when the number of iterations is known, <code>while</code> when a condition decides (W2L2).</td><td>Consistent</td><td>Iteration count (5.4) for <code>while</code>; <code>for</code> iterates over a list expanded before the first pass (POSIX §2.9.4).</td></tr>
+<tr><td>A function that is defined and not called does not run (W2L2).</td><td>Consistent with POSIX §2.9.5; shown by the lecture's terminal capture, not re-tested here</td><td>POSIX §2.9.5: a function runs when invoked as a command; the lecture's terminal shows no output for the script without the call.</td></tr>
+<tr><td>A function returns its value with <code>return</code> and the caller reads <code>$?</code> (W2L2).</td><td>True only from 0 to 255</td><td>Rule (5.3): <code>add 200 100</code> gives 44 (<code>functions_demo.sh</code>).</td></tr>
+<tr><td>The recursive factorial prints 120 for 5 (W2L2).</td><td>Confirmed; range limited</td><td>Exact up to \(n=20\); \(n=21\) is negative, \(n=65\) is \(-2^{63}\), \(n=66\) is 0; 5 processes for \(n=5\).</td></tr>
+<tr><td>The <code>while</code> loop of the monitoring script "continuously" monitors the partitions (W2L2, speech).</td><td>Not supported</td><td>The loop ends with the input; one check per run (<code>monitor.sh</code>).</td></tr>
+<tr><td>The monitoring script reports a use of 98 % for <code>/dev/sda1</code> (W2L2).</td><td>Confirmed on the slide's table</td><td><code>monitor.sh</code>; and 7 processes per table line by (5.5) (<code>fork_cost.sh</code>).</td></tr>
+</tbody></table></div>
+<p>The model of execution environments establishes five things. A child process starts with the exported variables and the working directory of its parent, and changes in the child do not return (5.1). The status of a command is a separate channel of eight bits (5.3), and the conditions of <code>if</code> and <code>while</code> read it. Integer arithmetic in the shell wraps modulo \(2^{64}\) (5.2). A loop with start value \(c_0\), bound \(b\) and step \(d\) runs a computable number of times (5.4). The number of processes that a construct creates can be counted (5.5), and it dominates the cost of loops that process many records.</p>
+<p>The model leaves out most of the language. It does not cover signals and traps, job control, the options <code>set -e</code>, <code>set -u</code> and <code>pipefail</code>, here-documents beyond their use in the listings, arrays, parameter-expansion operators, and the interactive features of Bash (history, completion, aliases). It describes Bash 5.2.21 and dash 0.5.12 on one Linux kernel (6.6.87.2, WSL 2), and it states POSIX behaviour only where §-numbers are cited; the behaviours of other shells (Zsh, Ksh, fish) were not tested. The Bash manual cited is for version 5.3, and the runs are on 5.2.21. The process counts of (5.5) come from a PID-difference probe that is exact only on an otherwise quiet system, and they were measured for Bash only; the value of \(\kappa\) is one machine under WSL 2, where process creation goes through a virtualised kernel, and it is not a property of Linux in general. The lecture's terminals show the prompt <code>[root@localhost …]#</code>, so its examples ran as user <code>root</code>; this chapter ran as an ordinary user, and nothing in the results depends on the difference except the execute-bit tests, which need a file system with permission bits.</p>
+<p>A script that is correct in this chapter's sense is still not a correct experiment. The sweep records which runs converged, and it does not check that the solver is right, that the stopping rule bounds the error, or that timing runs were free of interference; those questions belong to chapters 9, 10 and 16.</p>
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> From the rules of POSIX §2.12 derive the number of processes that <code>x=$(a | b | c)</code> creates when <code>a</code>, <code>b</code> and <code>c</code> are external programs, and explain why <code>x=$(a)</code> with one external program gives a different count. A loop reads \(R=10^{4}\) lines (records) and runs, per line, <code>f=$(echo "$line" | cut -d, -f2)</code> and <code>g=$(echo "$line" | tr a-z A-Z | cut -c1-3)</code>. Use (5.5) and \(\kappa=0.59\) ms to estimate the time, and state the range that the check of the section on the monitoring script allows.</p>
+<details><summary>Solution</summary>
+<p>The substitution runs its command in a subshell (§2.6.3), which is one process. A pipeline of three stages runs each stage in a subshell environment (§2.12), so three more processes are created; the count is \(1+3=4\), and the measurement for <code>echo | awk | sed</code> in <code>fork_cost.sh</code> gave 4. The shell does not wait for the stages one by one, but the count does not depend on that. For one external program the measurement gave 1: a substitution whose command is a single simple command needs only the forked subshell to become that program, so no second process exists (the count of <code>x=$(/bin/echo hi)</code> was 1 in a separate probe, and of <code>x=$(echo hi | cat)</code> it was 3, in line with \(1+k\) for \(k=2\)). Rule (5.5) therefore holds for \(k\ge2\). For the loop: the first substitution has \(k=2\), 3 processes, and the second has \(k=3\), 4 processes, so \(P=R(3+4)=7\times10^{4}\) processes. At \(\kappa=0.59\) ms this is 41 s. The check of the section on the monitoring script found measured times between 0.54 and 1.34 of its 1.24 s prediction, which gives about 22 s to 55 s here. A single <code>awk -F, '{print $2, toupper(substr($0,1,3))}'</code> would run in one process.</p>
+</details>
+<p><strong>Exercise 2 (compute).</strong> Give the output of each line and the reason. (a) <code>echo $((2**63 - 1 + 1))</code>. (b) <code>f() { return 1000; }; f; echo $?</code>. (c) <code>c=3; while [ $c -le 100 ]; do c=$((c + 7)); done; echo $c</code>, and the number of iterations. (d) The smallest \(n\) for which the recursive <code>factorial</code> of the lecture prints a negative number, and the smallest \(n\) for which it prints 0.</p>
+<details><summary>Solution</summary>
+<p>(a) Each operation wraps by (5.2): <code>2**63</code> is already \(-2^{63}\), subtracting 1 gives \(2^{63}-1\), and adding 1 gives \(-2^{63}\) again. The result equals \(\operatorname{wrap}(2^{63})\) because every step is exact modulo \(2^{64}\): the output is \(-9223372036854775808\). (b) By (5.3), \(1000 \bmod 256=232\), so 232 (POSIX leaves a value above 255 unspecified; Bash 5.2.21 gave 232). (c) By (5.4) with \(c_0=3\), \(b=100\), \(d=7\): \(\lfloor 97/7\rfloor+1=14\) iterations, and the final value is \(3+14\cdot7=101\); a run of these lines in a separate check printed 101 and 14. (d) The true value of \(n!\) first exceeds \(2^{63}-1\approx9.22\times10^{18}\) at \(n=21\), because \(20!=2.43\times10^{18}\) and \(21!=5.11\times10^{19}\). The wrapped value \(21!-3\cdot2^{64}=-4\,249\,290\,049\,419\,214\,848\) is negative, so \(n=21\). The value is 0 when \(2^{64}\) divides \(n!\). The exponent of 2 in \(n!\) is \(n-s_2(n)\) (Legendre), which is 63 for \(n=64\) (\(s_2=1\)) and for \(n=65\) (\(s_2=2\)), and 64 for \(n=66\). The exponent never decreases when \(n\) grows by 1, so 66 is the smallest \(n\) with result 0; \(65!\) is \(2^{63}\) times an odd number, which wraps to \(-2^{63}\). The listing <code>functions_demo.sh</code> printed these values for 21, 65 and 66.</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> A student writes: "If a parent exports a variable, the child can use it to hand a result back to the parent." Show with a short script that the claim is false, and name the channels through which a result can reach the parent.</p>
+<details><summary>Solution</summary>
+<p>Take the pair of scripts of <code>env_demo.sh</code>: the parent runs <code>export NAME2=Mahesh</code> and starts <code>child.sh</code>, whose last line is <code>NAME2=changed_by_child</code>. After the child ends the parent prints <code>NAME2=[Mahesh]</code>. By (5.1), the child received a copy of the exported variable and changed the copy. The channels that do reach the parent are the following. (i) The exit status, which carries 8 bits by (5.3). (ii) The standard output of the child, captured with <code>$(…)</code> or a pipe; the cost is a subshell. (iii) A file that the child writes and the parent reads, as the sweep does with <code>rows/N.csv</code>. (iv) Sourcing: <code>. ./child.sh</code> runs the commands in the parent's own shell, so no child exists and the variable changes in place (<code>exec_modes.sh</code> shows the same process). Channel (iv) has the price that the script can also change the working directory and every other variable of the caller.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> The function below is meant to print the number of lines with <code>ERROR</code> in a file and to report an unreadable file. Its author says that it works. For the files <code>log1.txt</code> (two <code>ERROR</code> lines), <code>log0.txt</code> (none) and <code>missing.txt</code> (absent) predict the output, find the assumption that fails, and write a corrected version.</p>
+<pre><code class="language-bash">count_bad() {
+    local n=$(grep -c ERROR "$1")
+    if [ $? -ne 0 ]; then echo "grep failed"; fi
+    echo "$n"
+}</code></pre>
+<details><summary>Solution</summary>
+<p>The assumption is that <code>$?</code> after <code>local n=$(…)</code> is the status of <code>grep</code>. It is the status of <code>local</code>, which is zero unless <code>local</code> is used outside a function, receives an invalid name, or names a read-only variable (Bash manual); the status of the substitution is discarded. The run on this machine printed <code>2</code> for <code>log1.txt</code>, <code>0</code> for <code>log0.txt</code>, and for <code>missing.txt</code> only the message of <code>grep</code> from its own error stream and an empty count: the text <code>grep failed</code> is never printed. A second defect hides behind the first. <code>grep -c</code> exits with 1 when it finds no match, so a corrected test of "status not zero" would report <code>log0.txt</code>, a valid file with zero errors, as a failure. A corrected version separates the declaration from the assignment, reads the status at once, and treats only 2 as an error:</p>
+<pre><code class="language-bash">count_good() {
+    local n s
+    n=$(grep -c ERROR "$1" 2&gt;/dev/null); s=$?
+    if [ "$s" -eq 2 ]; then echo "cannot read $1" &gt;&amp;2; return 2; fi
+    echo "$n"
+}</code></pre>
+<p>It printed 2 and status 0 for <code>log1.txt</code>, 0 and status 0 for <code>log0.txt</code>, and <code>cannot read missing.txt</code> with status 2 for the absent file.</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> The sweep of the last section must now cover 40 grid sizes from \(N=16\) to \(N=1024\). In a separate run on this machine, \(N=64\) with 5272 iterations took 0.02 s and \(N=128\) with 16 148 iterations took 0.28 s. Choose a failure policy (stop at the first failed case, continue and report, or retry with a larger limit), choose between sequential and concurrent execution, and justify both with the numbers. Estimate the time of the \(N=1024\) case from the counts 515, 1657, 5272 and 16 148 iterations for \(N=16,32,64,128\), state what the estimate assumes, and then check it against the measurements in the solution.</p>
+<details><summary>Solution</summary>
+<p>The cost of a case is about \(t_u\,K(N)\,N^2\), with \(K(N)\) the iterations, \(N^2\) the cell updates per sweep and \(t_u\) the time per cell update. From the two measurements, \(K N^2\) grows from \(5272\cdot64^2=2.2\times10^{7}\) to \(16148\cdot128^2=2.6\times10^{8}\) updates, a factor 12.3, and the times grow by a factor 14 (0.02 s to 0.28 s; the 0.02 s value has one digit, so the factors agree within its resolution). The counts for \(N=16\) to 128 grow by 3.22, 3.18 and 3.06 per doubling. <em>Estimate.</em> If \(K\) keeps growing by about 3.1 per doubling, then \(K(1024)\approx16\,148\cdot3.1^{3}=4.8\times10^{5}\), the work is \(4.8\times10^{5}\cdot1024^2=5.0\times10^{11}\) updates, about 1900 times the work at \(N=128\), and at the same \(t_u\) the time is about \(0.28\times1900\approx530\) s. <em>Check.</em> The same solver, run without an iteration limit, gave 45 651 iterations at \(N=256\) in 3.63 s and 108 997 iterations at \(N=512\) in 51.4 s (one run each on this machine). The growth factors per doubling are then 2.83 and 2.39, not 3.1. A run at \(N=1024\) gave 193 751 iterations (a factor 1.78) and 677 s; it is one run on a loaded machine and was not repeated. So the estimate is 2.5 times too high in iterations (\(4.8\times10^{5}\) against \(1.94\times10^{5}\)), and it is close in time only because \(t_u\) rose as well: \(t_u\) is about 1.1 ns at \(N=128\), 1.2 ns at 256, 1.8 ns at 512 and 3.3 ns at 1024. Two errors of opposite sign cancel in the product. A reason for the falling growth factor, not tested here, is the one the sweep section states: the stopping test bounds the last change, not the error, and for a fixed error the last change shrinks with \(h^2\), so larger grids stop at a larger relative error. A reason for the rising \(t_u\), also not isolated, is the cache: the two arrays of \(N=128\) hold \(2\cdot130^2\cdot8\) B = 0.27 MB, which fits in one L2 cache of 1.25 MiB (7.5 MiB in 6 instances, as the guest reports), and the two arrays of \(N=1024\) hold \(2\cdot1026^2\cdot8\) B = 16.8 MB, more than the 12 MiB L3 cache that the guest reports. <em>Failure policy:</em> a failing case spends its whole limit before it fails, so a failure at the limit \(K_{\max}\) costs \(t_u\,K_{\max}\,N^2\), and the expensive cases are the ones most likely to fail if the limit is fixed. Stopping at the first failure would discard the cheap sizes that are already valid, so the policy is to continue, label every row by its status (as <code>run_case</code> does), and exit with a non-zero status at the end. Retrying with a larger limit is a decision for a person, because it multiplies the cost of the failed case. A limit set in advance from the growth model, \(K_{\max}(2N)\approx1.5\cdot3.1\,K(N)\), is safe, and the observed factors 2.83, 2.39 and 1.78 show how far it overestimates the need, so the cost of a failure at that limit exceeds the cost of a success by a factor that grows with \(N\); a limit taken from the measured count of the next smaller size is tighter. <em>Concurrency:</em> if the result is the iteration count and the final change, the cases are independent and may run concurrently, but 40 background processes on 12 logical processors of different speeds give no benefit beyond about 12 and make the largest case compete with the others for memory bandwidth; a bounded number of concurrent cases, for example with <code>xargs -P</code> or a scheduler array, is the design. If the result is a run time, the cases must run one after the other.</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement).</strong> Write a script that measures the time per iteration of three loops: <code>x=hi</code> (\(10^{4}\) iterations), <code>x=$(echo hi)</code> (\(10^{4}\)) and <code>x=$(/bin/echo hi)</code> (\(10^{3}\)). Predict, before you run it, the process count of each loop body from (5.5), and whether each cost per iteration is below, near or above \(\kappa=0.59\) ms. Run it three times and compare.</p>
+<details><summary>Solution</summary>
+<p>A script needs only the <code>time</code> keyword of Bash with <code>TIMEFORMAT=%R</code>, as in <code>fork_cost.sh</code>:</p>
+<pre><code class="language-bash">TIMEFORMAT=%R
+a=$( { time for ((i = 0; i &lt; 10000; i++)); do x=hi; done; } 2&gt;&amp;1 )
+b=$( { time for ((i = 0; i &lt; 10000; i++)); do x=$(echo hi); done; } 2&gt;&amp;1 )
+c=$( { time for ((i = 0; i &lt; 1000; i++)); do x=$(/bin/echo hi); done; } 2&gt;&amp;1 )
+echo "assignment: $a s; \$(echo hi): $b s; \$(/bin/echo hi): $c s"</code></pre>
+<p>Prediction: the assignment creates no process, so its cost is the cost of the interpreter, well below \(\kappa\), at most a few microseconds. <code>$(echo hi)</code> creates one process (a single simple command: only the forked subshell) that does not <code>exec</code>, so the cost should be below \(\kappa\), which includes an <code>exec</code>. <code>$(/bin/echo hi)</code> creates one process that also executes a program, so it should be near \(\kappa\) or above, because it also creates a pipe and reads the output. The count of 0, 1 and 1 processes was confirmed with the PID probe of <code>fork_cost.sh</code> (a separate run gave 0, 1, 1 in three repetitions). Three runs on this machine gave: assignment 0.012 to 0.015 s for \(10^4\) iterations, 1.2 to 1.5 µs each; <code>$(echo hi)</code> 4.4 to 5.8 s for \(10^4\), 0.44 to 0.58 ms each; <code>$(/bin/echo hi)</code> 0.95 to 1.9 s for \(10^3\), 0.95 to 1.9 ms each. The predictions agree in direction: 1.2 to 1.5 µs is below \(\kappa\) by a factor of about 400, the forked subshell without <code>exec</code> costs 0.75 to 0.98 of \(\kappa\), and the process that executes a program costs 1.6 to 3.2 times \(\kappa\). The first two agree with the model. The last is larger than the prediction of "near \(\kappa\) or above", and this chapter did not isolate how much of the excess is the pipe and the reading of the output and how much is the start of <code>/bin/echo</code> compared with <code>/bin/true</code>.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li>Recordings: <a href="https://www.youtube.com/watch?v=DRDzYNVw7K4">W2L1, Understanding Shell Scripting: Parent-Child Processes and User Input Handling</a> (slides: contents; what a shell script is; creating and running scripts, the interpreter line, <code>chmod</code>; <code>date</code> and arithmetic examples; variables, command substitution, <code>env</code>, <code>export</code>, <code>unset</code>, <code>PATH</code>, <code>read</code>); <a href="https://www.youtube.com/watch?v=h5Labe97yWM">W2L2, Shell Scripting Tutorial for Beginners</a> (slides: <code>if</code>/<code>elif</code>/<code>else</code>, <code>for</code> and <code>while</code>, functions with arguments and return values, factorial, the disk-space monitoring script, recap), NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay, 2025.</li>
+<li>The Open Group, <a href="https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html">Shell Command Language</a>, POSIX.1-2017 (IEEE Std 1003.1-2017, 2018 edition). §2.1 (an interpreter line "#!" gives unspecified results); §2.2 (quoting); §2.5.2 (special parameter <code>?</code>); §2.6.3 (command substitution runs in a subshell environment and removes trailing newlines); §2.6.4 (arithmetic expansion: only signed long integers required); §2.6.5 and §2.6.6 (field splitting and pathname expansion); §2.8.2 (exit status 126, 127, the full eight bits, above 128 for a signal); §2.9.1 (simple commands, assignments in front of a command, command search, the ENOEXEC fallback, remembering of locations); §2.9.2 (pipelines); §2.9.4 (<code>if</code>, <code>for</code>, <code>while</code>); §2.9.5 (functions); §2.12 (shell execution environment, subshell environment, export attribute); §2.14 (<code>export</code>, <code>return</code>: a value above 255 is unspecified).</li>
+<li>The Open Group, <a href="https://pubs.opengroup.org/onlinepubs/9699919799/utilities/test.html"><code>test</code></a>, POSIX.1-2017 (Issue 7, 2018 edition). Operands (integer operators, only <code>=</code> and <code>!=</code> for strings, the evaluation by number of arguments, <code>-f</code> and <code>-e</code>), exit status (0, 1, greater than 1), rationale (the Korn-shell string comparisons were not carried into <code>test</code>).</li>
+<li>The Open Group, <a href="https://pubs.opengroup.org/onlinepubs/9799919799/utilities/test.html"><code>test</code></a>, POSIX.1-2024 (Issue 8). The operators <code>s1 &gt; s2</code> and <code>s1 &lt; s2</code> (true if <code>s1</code> collates after or before <code>s2</code> in the current locale) are part of <code>test</code>; the rationale states that they were later added once support became widespread. Only this operator list and its rationale were read; no other change between the editions was checked.</li>
+<li>The Open Group, <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap08.html">Environment Variables</a>, POSIX.1-2017 XBD chapter 8, §8.3, <code>PATH</code>: search from beginning to end, first executable file wins, a zero-length prefix means the current directory.</li>
+<li>Free Software Foundation, <a href="https://www.gnu.org/software/bash/manual/bash.html">Bash Reference Manual</a>, version 5.3 (18 May 2025), read as extracted text. §3.2.3 (each command of a pipeline in its own subshell; <code>lastpipe</code>); §3.5.5 and §6.5 (arithmetic: fixed-width integers, no overflow check, octal constants, variables evaluated as expressions); §3.7.2 (command search order and the hash table, the fallback to a shell script); §3.7.3 (subshell environments); §3.7.4 (environment, automatic export of inherited variables, prefix assignments); §3.7.5 (exit status, 128+N); §4.2 (<code>local</code>, <code>read</code> options); §7.2 (<code>wait</code>); §6.4 (string comparison in <code>[[</code>); Bash Variables (<code>BASHPID</code>). The runs of this chapter are on Bash 5.2.21.</li>
+<li>M. Kerrisk et al., <a href="https://man7.org/linux/man-pages/man2/execve.2.html">execve(2)</a>, Linux man-pages 6.19 (2026-02-08). Description (program replaced; <code>envp</code> is the environment of the new program); interpreter scripts (<code>#!interpreter [optional-arg]</code>, execute permission, the arguments the interpreter receives, the single argument on Linux, the 255-character limit since Linux 5.1, 127 before).</li>
+<li>M. Kerrisk et al., <a href="https://man7.org/linux/man-pages/man3/execvp.3.html">execvp(3)</a> (exec(3) page, Linux man-pages): if the attempted <code>execve</code> failed with <code>ENOEXEC</code>, these functions execute the shell (<code>/bin/sh</code>) with the path of the file as its first argument.</li>
+<li>M. Kerrisk et al., <a href="https://man7.org/linux/man-pages/man8/ld.so.8.html">ld.so(8)</a>, Linux man-pages 6.19 (2026-08-03), <code>LD_LIBRARY_PATH</code>: directories searched for ELF libraries at execution time.</li>
+<li>Free Software Foundation, <a href="https://gcc.gnu.org/onlinedocs/gcc/Environment-Variables.html">Using the GNU Compiler Collection, Environment Variables</a> (retrieved 2026-10-26): <code>CPATH</code>, <code>C_INCLUDE_PATH</code>, <code>CPLUS_INCLUDE_PATH</code> for header search; <code>LIBRARY_PATH</code> for link-time library search.</li>
+<li>SchedMD, <a href="https://slurm.schedmd.com/sbatch.html">Slurm Workload Manager, sbatch</a>, page of version 26.05 (retrieved 2026-10-26). <code>#SBATCH</code> lines are read by Slurm and are literal text to the shell; they stop at the first non-comment line; option <code>--export</code>: default <code>ALL</code> loads the user's environment, <code>NIL</code> and <code>NONE</code> pass only <code>SLURM_*</code> and SPANK variables.</li>
+<li>Intel, Product Specifications (ARK) for the Core i5-12450H: 4 performance cores with 2 threads, 4 efficient cores with 1 thread, 12 threads, as stated in the authoring brief of this book; the page was not opened for this chapter.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-04-processes-text-memory-and-networking.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-06-hpc-components-and-node-architecture.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

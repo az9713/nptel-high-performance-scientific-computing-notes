@@ -1,0 +1,430 @@
+{
+  "chapter": 5,
+  "title": "Shell scripting: processes, input, and control flow",
+  "status": "revised after review round 2",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "DRDzYNVw7K4",
+      "label": "W2L1",
+      "playlist_index": 9,
+      "duration_seconds": 2093
+    },
+    {
+      "video_id": "h5Labe97yWM",
+      "label": "W2L2",
+      "playlist_index": 10,
+      "duration_seconds": 2622
+    }
+  ],
+  "frames_viewed": {
+    "DRDzYNVw7K4": [
+      "f0003",
+      "f0004",
+      "f0005",
+      "f0006",
+      "f0010",
+      "f0012",
+      "f0014",
+      "f0018",
+      "f0020",
+      "f0022",
+      "f0025",
+      "f0027",
+      "f0029",
+      "f0031",
+      "f0033",
+      "f0036",
+      "f0039",
+      "f0042",
+      "f0045",
+      "f0047",
+      "f0049",
+      "f0052",
+      "f0055",
+      "f0057",
+      "f0060",
+      "f0062",
+      "f0064",
+      "f0067"
+    ],
+    "h5Labe97yWM": [
+      "f0003",
+      "f0006",
+      "f0009",
+      "f0012",
+      "f0014",
+      "f0017",
+      "f0019",
+      "f0022",
+      "f0024",
+      "f0026",
+      "f0028",
+      "f0031",
+      "f0033",
+      "f0036",
+      "f0039",
+      "f0042",
+      "f0044",
+      "f0047",
+      "f0050",
+      "f0052",
+      "f0054",
+      "f0056",
+      "f0058",
+      "f0060",
+      "f0062",
+      "f0064",
+      "f0066",
+      "f0068",
+      "f0070",
+      "f0072",
+      "f0074",
+      "f0076",
+      "f0078",
+      "f0080",
+      "f0083",
+      "f0086"
+    ]
+  },
+  "source_uncertainties": [
+    "Intel ARK page for the i5-12450H could not be opened for this chapter (the server returned a 555-byte refusal to scripted clients on 2026-10-26). The hybrid layout (4 P-cores x 2 threads, 4 E-cores x 1 thread, 12 threads) is taken from the authoring brief, which cites ARK; the chapter uses it only as a description of the machine and relies on no claim from it. Local evidence: nproc = 12, lscpu = 6 cores x 2 threads (synthetic WSL view).",
+    "POSIX text is the 2018 edition (IEEE Std 1003.1-2017, Issue 7); the page states that a newer edition exists. Only the test utility of the newer edition (POSIX.1-2024, Issue 8) was read, for the operators s1 > s2 and s1 < s2 and its rationale; the rest of the newer edition was not read, so the chapter does not claim that the other cited wording (for example the unspecified result for a '#!' first line, section 2.1) is unchanged there. The HTML pages carry section numbers but no page numbers; section numbers are cited.",
+    "The Bash manual cited is version 5.3 (18 May 2025), read as extracted HTML text. Every statement used from it was also run on Bash 5.2.21 (the version on the machine). Behaviours of Bash 5.3 that differ from 5.2.21 were not looked for.",
+    "execve(2) is Linux man-pages 6.19 (2026-02-08) and ld.so(8) is Linux man-pages 6.19 (2026-08-03), both read as extracted text from man7.org; the kernel on the machine is 6.6.87.2 (WSL 2). The 255-character and 127-character interpreter-line limits are quoted from the man page and were not tested.",
+    "The GCC manual 'Environment Variables' page was read on 2026-10-26; the page carries no version number. The local test (INCLUDE_PATH ignored, CPATH honoured) used gcc 13.3.0. The chapter makes no claim about other compilers' variables.",
+    "The Slurm sbatch manual is the page of version 26.05 as served on 2026-10-26. No scheduler exists on the machine, so the statements about #SBATCH lines and --export are the manual's, not tested. Chapter 30 treats schedulers.",
+    "Process counts in (5.5) come from a PID-difference probe (consecutive PIDs; each probe consumes one PID). It is exact only on a quiet system. It gave 4, 3, 1, 0 in every one of five runs, and 1, 1, 0, 3 for a substitution with a builtin, an external program, a plain assignment and a two-stage pipeline in three runs. Counts were not checked with a tracer (strace is not installed) and apply to Bash 5.2.21 only.",
+    "Timing: the printed fork_cost.sh sample was captured with code_lab.run_program through the private assembly script. The later runs of code_lab.py --chapter 5 passed and produced new samples that were not pasted. Quoted ranges come from four runs of the same script before final assembly (lecture loop 0.67-1.66 s, kappa 0.59-0.81 ms, awk 0.001-0.003 s, builtin true 1.4-2.5 us each); exercise 6 quotes three runs of a separate script (assignment 0.012-0.015 s per 1e4, $(echo hi) 4.4-5.8 s per 1e4, $(/bin/echo hi) 0.95-1.9 s per 1e3). A direct measurement of the awk program of fork_cost.sh on 1e6 generated lines took 0.285, 0.301 and 0.365 s (an empty awk BEGIN{} took 0.002 s); it is not a listing. These runs are not reproduced by listings; per-iteration timing under WSL 2 varied by a factor of up to 2.5 between runs.",
+    "The solver iteration counts 163, 515, 1657, 5272 and 16148 (N = 8..128 at tol 1e-6, max_iter 100000) and the times 0.02 s (N = 64) and 0.28 s (N = 128) quoted in the sweep section and in exercise 5 come from one ad hoc run of the solver source of sweep.sh built with gcc -O2, not from a listing. Review round 1 added: N = 256 gave 45651 iterations in 3.63 s and N = 512 gave 108997 iterations in 51.4 s (one run each by the author, solver of sweep.sh, no iteration limit, gcc -O2). N = 1024 gave 193751 iterations and 677 s in one run by the reviewer on a loaded machine; the author did not repeat it. Exercise 5 uses the growth factor 3.1 as an estimate and checks it against these runs; the factors per doubling are 3.22, 3.18, 3.06, 2.83, 2.39, 1.78. The reason for the falling factor (stopping test on the last change) and for the rising time per update (cache) are not tested.",
+    "The 20-digit input that defeats a digits-only check (section on exit status) was run in a separate test of a first version of grade_checked.sh; the final listing contains the length-limited version and its rejection of that input.",
+    "Round 1 disclosure: in the first version of the chapter the gcc session of the PATH section was edited: it omitted the lines of caret and 'compilation terminated.' and the echo of the status. The session now shows the command with echo \"status $?\" and the full gcc 13.3 output as run.",
+    "ENOEXEC behaviour (section script): a file plain.sh without an interpreter line that prints $BASH_VERSION gave 5.2.21(1)-release under ./plain.sh from Bash, an empty value (dash) under env ./plain.sh and under find -exec, and OSError Errno 8 under Python subprocess.run; xargs was not tested. execvp(3) was read for the /bin/sh statement. sbatch behaviour without a #! line was not tested.",
+    "Special built-ins ahead of functions (POSIX 2.9.1): tested with a function named export (accepted by bash, rejected by bash --posix as a special builtin).",
+    "Exit status 65 (EX_DATAERR) for bad input data of the checked grading script and 64 (EX_USAGE) for bad command-line arguments of the solver were checked in the local sysexits.h.",
+    "Word count: the first report of about 6600 words was wrong because the counting regular expression for math removed too much text. A corrected count (tags removed, math replaced by one token, code blocks excluded; tables, exercises, solutions and the source list included) is about 14000 words, in line with the reviewer's 13200. The brief's 6000 to 9000 is exceeded; no padding paragraph was found.",
+    "Forward reference: the model section refers to chapter 2 for fork, exec and wait; chapter 2 is not in the repository at the time of writing. Check at assembly.",
+    "ASR errors in the machine transcripts corrected from slides and subject: 'cell script' = shell script; 'C bank' / 'see bank' = shebang; 'SSL' = sh; 'ZS cell' = zsh; 'uco' = echo; 'dollar and this sign' = $?; 'dot psi' = ':$PATH'; 'usage greater than or equal to 3 short' = '-ge $THRESHOLD'; 'SDA1' = /dev/sda1; 'variable four dot SS' = var4.sh; 'peter' / 'pitter' = 'Pitter' (slide).",
+    "Slide errors: the code box of var2.sh and var4.sh shows '!/bin/bash' without '#' (frames f0042, f0045, f0047, f0049 and f0052 of W2L1) while the terminal capture shows '#!/bin/bash'; the code box of the while-loop slide shows 'Done' with a capital D (frames f0036, f0039, f0042 and f0044 of W2L2) while the terminal capture shows 'done'. The speech at W2L2 13:04 says 'greater than or equal to 5' for the test of 90. The chapter reads the code from the terminal captures.",
+    "The lectures were recorded on a system with the prompt root@localhost (user root); the chapter's runs are as an ordinary user on Ubuntu 24.04 under WSL 2. On the guest's /mnt/c (9p, no metadata) chmod has no effect, so all permission-bit listings use mktemp -d under /tmp.",
+    "Timestamps are section anchors from local speech-recognition segment times and locate topic changes to within a few seconds. The W2L1 duration is 2093 s from playlist.txt (the transcript header says 2092 s)."
+  ],
+  "lecture_corrections": [
+    "env lists only the exported variables (the environment), not all variables set in the shell (W2L1 about 18:33; env_demo.sh).",
+    "The explanation of the long variable list by 'everything is a file' (W2L1 about 19:06) is not supported; the environment is inherited at exec (execve(2); Bash manual 3.7.4).",
+    "The slide's export PATH=/home/master/Desktop:$PATH prepends; the speech says append or prepend (W2L1 about 28:38); position decides which program runs (path_demo.sh).",
+    "INCLUDE_PATH (slide) is not read by gcc 13.3; CPATH is (session in the PATH section; GCC manual).",
+    "The condition of if is the exit status of a command, not a Boolean value (W2L2 0:06); an error status counts as false.",
+    "'==' inside [ ] is a Bash extension and fails in dash; '>' is a redirection; signs cannot replace -gt in general (W2L2 about 6:59; status_demo.sh).",
+    "return carries only an eight-bit status: add 200 100 returns 44 (W2L2 about 27:21; functions_demo.sh).",
+    "The recursive factorial is correct only for n up to 20 (21 wraps, 66 gives 0) and creates one subshell per call (W2L2 about 29:27).",
+    "The while loop of the monitoring script does not monitor continuously; it checks each line of one df table once (W2L2 about 36:11; monitor.sh).",
+    "The lecture's grading script grades invalid input as C with status 0 (W2L2 about 11:30; read_demo.sh)."
+  ],
+  "sections": [
+    {
+      "section": "The objects of the chapter and the running case",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Running problem: a parameter sweep that runs a solver and collects results; the lectures' aim of scripts that submit and collect jobs (W2L2 40:09).",
+      "research_extension": "POSIX 2.1, 2.8.2, 2.9.1, 2.12 (execution environments, subshells, exit status); execve(2); Bash manual 3.7.2 to 3.7.5.",
+      "teaching_construction": "Formal model: variables V and export set X, inheritance rule (5.1), cost symbol kappa; machine and versions; solver contract.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "A script is a file of commands: the interpreter line, the execute bit and three ways to run it",
+      "video_id": "DRDzYNVw7K4",
+      "start": 105.0,
+      "end": 600.0,
+      "lecture_material": "Definition of a script, uses, shells, creating hello.sh, shebang, chmod, running.",
+      "research_extension": "POSIX 2.1, 2.9.1 (command search, ENOEXEC); execve(2) interpreter scripts; Slurm sbatch #SBATCH lines.",
+      "teaching_construction": "exec_modes.sh (three ways, x bit, missing interpreter line); interp_line.sh (kernel reads #!, single argument on Linux); WSL /mnt/c warning.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Command substitution and arithmetic expansion",
+      "video_id": "DRDzYNVw7K4",
+      "start": 600.0,
+      "end": 832.0,
+      "lecture_material": "$(date) and $((5 + 2)) examples.",
+      "research_extension": "POSIX 2.6.3, 2.6.4; Bash manual 3.5.5, 6.5.",
+      "teaching_construction": "Wrap-around rule (5.2); arith.sh (by-name versus textual evaluation, octal, errors); consequences for read input.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Variables, the environment and child processes",
+      "video_id": "DRDzYNVw7K4",
+      "start": 832.0,
+      "end": 1853.0,
+      "lecture_material": "Variables, command substitution into variables, env, export, parent and child scripts, unset, PATH and library/header variables.",
+      "research_extension": "POSIX 2.2, 2.9.1, 2.12, 8.3; Bash manual 3.7.4; ld.so(8); GCC manual; Slurm --export.",
+      "teaching_construction": "Inheritance rule (5.1) and its five consequences; env_demo.sh; path_demo.sh; quoting session; INCLUDE_PATH versus CPATH test.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Reading input with read",
+      "video_id": "DRDzYNVw7K4",
+      "start": 1853.0,
+      "end": 2093.0,
+      "lecture_material": "echo plus read, two numbers and their sum.",
+      "research_extension": "Bash manual read options.",
+      "teaching_construction": "Exact semantics of read (fields, remainder, IFS, -r, status); session.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "Exit status: what if really tests",
+      "video_id": "h5Labe97yWM",
+      "start": 6.0,
+      "end": 880.0,
+      "lecture_material": "if/elif/else, -f test, number test with -gt and ==, grade script.",
+      "research_extension": "POSIX 2.9.4 if/while, test utility, 2.8.2; Bash manual 3.7.5, 6.4; sysexits.h EX_USAGE.",
+      "teaching_construction": "Eight-bit status rule (5.3); status_demo.sh; read_demo.sh with a checked grading script; == and > under [ ].",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Loops: for, while and the process boundary of a pipeline",
+      "video_id": "h5Labe97yWM",
+      "start": 880.0,
+      "end": 1357.0,
+      "lecture_material": "for over a list, while with a counter, rule of choice.",
+      "research_extension": "POSIX 2.9.4 for/while, 2.12; Bash manual 3.2.3.",
+      "teaching_construction": "Iteration count (5.4); loops_demo.sh (word splitting of for lists, loop at the end of a pipeline).",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Functions, return values and recursion",
+      "video_id": "h5Labe97yWM",
+      "start": 1357.0,
+      "end": 1938.0,
+      "lecture_material": "Definition and call, add with return and $?, factorial by recursion.",
+      "research_extension": "POSIX 2.9.1, 2.9.5, return; Bash manual local.",
+      "teaching_construction": "Wrap of n! and Legendre's formula; functions_demo.sh (return range, global variables, local x=$(cmd), one process per call).",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "The monitoring script and the price of a process",
+      "video_id": "h5Labe97yWM",
+      "start": 1938.0,
+      "end": 2622.0,
+      "lecture_material": "Disk-space monitoring script and its explanation; recap.",
+      "research_extension": "POSIX 2.12; Bash manual 3.2.3.",
+      "teaching_construction": "Process-count rule (5.5); fork_cost.sh (counts, kappa, loop against one awk); monitor.sh; extrapolation to 10^6 lines.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "The parameter sweep: every construct together",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None (applies the constructs of both lectures).",
+      "research_extension": "Bash manual wait, local; POSIX 2.5.2.",
+      "teaching_construction": "sweep.sh: status-checked collector, case, background processes with wait, file-based results, exit status of the sweep.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "What the model establishes and what it does not",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Statements of the lectures including their own explanations.",
+      "research_extension": "None.",
+      "teaching_construction": "Table 5.1 and boundaries.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Exercises",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "None.",
+      "teaching_construction": "Six exercises with full solutions: derive, compute, counterexample, diagnose an assumption, design judgment, implementation and measurement.",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "Lecture W2L1 recording",
+      "url": "https://www.youtube.com/watch?v=DRDzYNVw7K4",
+      "supports": "Shell script definition, structure, command substitution, arithmetic, variables, env, export, unset, PATH, read.",
+      "page_checked": "slide frames listed in frames_viewed"
+    },
+    {
+      "title": "Lecture W2L2 recording",
+      "url": "https://www.youtube.com/watch?v=h5Labe97yWM",
+      "supports": "if/elif/else, for, while, functions, factorial, disk monitoring script.",
+      "page_checked": "slide frames listed in frames_viewed"
+    },
+    {
+      "title": "POSIX.1-2017 Shell Command Language (Issue 7, 2018 edition)",
+      "url": "https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html",
+      "supports": "2.1 '#!' first line unspecified; 2.6.3 command substitution in a subshell environment, trailing newlines removed; 2.6.4 only signed long arithmetic required; 2.8.2 status 126/127, full eight bits, above 128 for signals; 2.9.1 command search, ENOEXEC fallback, assignments before a command exported for it only; 2.9.4 if/for/while over command lists; 2.9.5 functions; 2.12 execution environments, export attribute passed to utilities, subshell changes do not affect the shell, each pipeline command in a subshell environment; 2.14 export, return (value above 255 unspecified).",
+      "page_checked": "full text extracted; sections 2.1 to 2.14 as cited"
+    },
+    {
+      "title": "POSIX.1-2017 test utility",
+      "url": "https://pubs.opengroup.org/onlinepubs/9699919799/utilities/test.html",
+      "supports": "Operands: integer operators, = and != only for strings, evaluation by argument count, -f and -e; exit 0/1/>1; rationale that Korn-shell string comparisons were not carried into test.",
+      "page_checked": "full text extracted"
+    },
+    {
+      "title": "POSIX.1-2024 test utility (Issue 8)",
+      "url": "https://pubs.opengroup.org/onlinepubs/9799919799/utilities/test.html",
+      "supports": "s1 > s2 and s1 < s2 (collation order of the current locale) are operators of test; rationale: they were later added once support became widespread.",
+      "page_checked": "operator list and rationale; rest of the edition not read"
+    },
+    {
+      "title": "execvp(3) (exec(3) page), Linux man-pages",
+      "url": "https://man7.org/linux/man-pages/man3/execvp.3.html",
+      "supports": "If the attempted execve failed with ENOEXEC, these functions execute /bin/sh with the path of the file as its first argument.",
+      "page_checked": "DESCRIPTION"
+    },
+    {
+      "title": "POSIX.1-2017 XBD chapter 8 Environment Variables",
+      "url": "https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap08.html",
+      "supports": "PATH: searched beginning to end, first executable wins, zero-length prefix means the current directory.",
+      "page_checked": "8.3 PATH"
+    },
+    {
+      "title": "GNU Bash Reference Manual, version 5.3 (18 May 2025)",
+      "url": "https://www.gnu.org/software/bash/manual/bash.html",
+      "supports": "3.2.3 pipelines in subshells and lastpipe; 3.5.5 and 6.5 arithmetic (fixed width, no overflow check, octal, variable evaluated as expression); 3.7.2 command search, hash table, script fallback; 3.7.3 subshell; 3.7.4 environment, automatic export of inherited variables, prefix assignments; 3.7.5 exit status, 128+N; 4.2 local return status, read options; 7.2 wait returns the status of the last id; 6.4 string comparison in [[.",
+      "page_checked": "sections as cited, extracted text"
+    },
+    {
+      "title": "execve(2), Linux man-pages 6.19 (2026-02-08)",
+      "url": "https://man7.org/linux/man-pages/man2/execve.2.html",
+      "supports": "Program replaced; envp is the environment of the new program; interpreter scripts need execute permission and a '#!interpreter [optional-arg]' first line and receive 'interpreter [optional-arg] path arg...'; on Linux the whole optional text is one argument; limit 255 characters since Linux 5.1, 127 before.",
+      "page_checked": "DESCRIPTION and both Interpreter scripts passages"
+    },
+    {
+      "title": "ld.so(8), Linux man-pages 6.19 (2026-08-03)",
+      "url": "https://man7.org/linux/man-pages/man8/ld.so.8.html",
+      "supports": "LD_LIBRARY_PATH: directories searched for ELF libraries at execution time; a zero-length entry means the current directory.",
+      "page_checked": "ENVIRONMENT"
+    },
+    {
+      "title": "GCC manual, Environment Variables",
+      "url": "https://gcc.gnu.org/onlinedocs/gcc/Environment-Variables.html",
+      "supports": "CPATH, C_INCLUDE_PATH, CPLUS_INCLUDE_PATH, OBJC_INCLUDE_PATH for header search; LIBRARY_PATH for link-time library search.",
+      "page_checked": "retrieved 2026-10-26; version not stated on the page"
+    },
+    {
+      "title": "Slurm Workload Manager, sbatch (version 26.05)",
+      "url": "https://slurm.schedmd.com/sbatch.html",
+      "supports": "#SBATCH directives are read by Slurm, literal text to the shell, end at the first non-comment line; --export default ALL loads the user's environment; NIL and NONE pass only SLURM_* and SPANK variables.",
+      "page_checked": "DESCRIPTION and --export, retrieved 2026-10-26"
+    },
+    {
+      "title": "sysexits.h (local system header)",
+      "url": "file:///usr/include/sysexits.h",
+      "supports": "EX_USAGE = 64, command line usage error.",
+      "page_checked": "grep on the guest, Ubuntu 24.04"
+    },
+    {
+      "title": "Intel ARK, Core i5-12450H",
+      "url": "https://www.intel.com/content/www/us/en/products/sku/132222/intel-core-i512450h-processor-12m-cache-up-to-4-40-ghz/specifications.html",
+      "supports": "4 P-cores x 2 threads, 4 E-cores x 1 thread, 12 threads (as stated by the authoring brief).",
+      "page_checked": "not opened by this chapter's author"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "V, X, E_child, A",
+      "first_section": "model",
+      "definition": "Set of shell variables (name, value), set of names with the export attribute (X is local to this chapter, not the Little-law throughput), environment of a child, assignments written before a command (eq. 5.1)."
+    },
+    {
+      "symbol": "kappa",
+      "first_section": "model",
+      "definition": "Wall-clock time to create one process and wait for it."
+    },
+    {
+      "symbol": "s",
+      "first_section": "status",
+      "definition": "Exit status of a command, an integer 0..255 (eq. 5.3)."
+    },
+    {
+      "symbol": "w, wrap(z)",
+      "first_section": "substitution",
+      "definition": "2^64 and the reduction of an integer to [-w/2, w/2) (eq. 5.2)."
+    },
+    {
+      "symbol": "c_0, b, d, n_iter",
+      "first_section": "loops",
+      "definition": "Start value, bound and step of a while counter, and the number of iterations (eq. 5.4)."
+    },
+    {
+      "symbol": "P, R, k_j",
+      "first_section": "monitor",
+      "definition": "Number of processes created, number of input lines (records), number of pipeline stages of the j-th command substitution (eq. 5.5)."
+    },
+    {
+      "symbol": "K(N), t_u, K_max",
+      "first_section": "exercises",
+      "definition": "Jacobi iterations for grid size N, time per cell update, iteration limit (exercise 5)."
+    },
+    {
+      "symbol": "s_2(n)",
+      "first_section": "functions",
+      "definition": "Number of 1 bits of n, used in Legendre's formula for the exponent of 2 in n!."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python code_lab.py --chapter 05",
+    "listings": 12,
+    "all_passed": true
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "review_file": "ch05-r1.md",
+      "verdict": "ACCEPT WITH FIXES",
+      "blocking": 3,
+      "major": 5,
+      "minor": 13,
+      "fixed": [
+        "B1",
+        "B2",
+        "B3",
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M5",
+        "m1",
+        "m2",
+        "m3",
+        "m4",
+        "m5",
+        "m6",
+        "m7",
+        "m8",
+        "m9",
+        "m10",
+        "m11",
+        "m12 (partly)",
+        "m13"
+      ],
+      "not_fixed": [
+        "m12: the length is not cut beyond the WSL warning and the Slurm paragraph; the closing sentence of the monitoring section is kept because it states the verdict on the lecture script"
+      ]
+    },
+    {
+      "round": 2,
+      "review_file": "ch05-r2.md",
+      "verdict": "ACCEPT WITH FIXES",
+      "blocking": 0,
+      "major": 0,
+      "minor": 2,
+      "fixed": [
+        "m1: Exercise 5 text made impersonal; the provenance of the N = 1024 run (reviewer, loaded machine, not repeated by the author) stays in source_uncertainties"
+      ],
+      "not_fixed": [
+        "m2: length, no change required by the lead"
+      ]
+    }
+  ]
+}
