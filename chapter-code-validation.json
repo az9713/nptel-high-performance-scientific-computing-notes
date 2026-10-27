@@ -1,5 +1,5 @@
 {
-  "checked_at_utc": "2026-10-27T18:14:04.874075+00:00",
+  "checked_at_utc": "2026-10-27T19:05:15.266580+00:00",
   "status": "passed",
   "scope": "Actual isolated build and execution of each runnable listing; exact printed-output comparison where data-check=\"exact\", successful exit only where data-check=\"returncode\"; not a scientific review",
   "machine": "WSL Ubuntu 24.04, gcc 13.3 (OpenMP, OpenACC nvptx offload), Open MPI, CUDA 13.3, NVIDIA GeForce RTX 3050 Laptop GPU (sm_86), 12 logical CPUs",

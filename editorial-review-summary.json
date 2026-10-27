@@ -1,5 +1,5 @@
 {
-  "checked_at_utc": "2026-10-27T18:38:25.639672+00:00",
+  "checked_at_utc": "2026-10-27T19:05:42.990598+00:00",
   "scope": "Curated review records, not a new scientific review or retrospective acceptance",
   "review_process": "Each written chapter: author draft; independent review round 1 against the authoring contract (correctness, lecture fidelity, rigor, sources, code, contract, prose); author repairs; independent review round 2; author repairs; lead spot-check. Chapters whose latest round still recorded a blocking finding received further independent rounds until one recorded zero blocking findings; the author repaired the remaining findings of that round. Review reports are private editorial records.",
   "all_chapters_written": false,
@@ -63,7 +63,7 @@
     {
       "chapter": 3,
       "file": "chapter-03-linux-file-system-permissions-ownership.html",
-      "current_body_sha256": "603c430254316553de1f3f37b36dd4abb834660df58de183dccc6f191b60bca3",
+      "current_body_sha256": "17590fe3d2bedfb66fcea1262a7dbc9e5ffcccdc58a49fff1252d2c0db63b4d7",
       "review_rounds": 3,
       "latest_recorded_review": "ch03-r3.md",
       "latest_recorded_verdict": "ACCEPT WITH FIXES",

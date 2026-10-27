@@ -1,5 +1,5 @@
 {
-  "checked_at_utc": "2026-10-27T18:38:25.639672+00:00",
+  "checked_at_utc": "2026-10-27T19:05:42.990598+00:00",
   "status": "partial edition: chapters 1-11 written; chapters 12-31 not written; every written chapter has an independent zero-blocking verdict",
   "chapter_count": 31,
   "written_chapters": 11,
@@ -29,7 +29,7 @@
   "chapter_body_sha256": {
     "chapter-01-what-hpsc-is-for.html": "20fed3dd02c0eeda5d6b6f0e701dea5f35e694395df359864c0bcdf4ded80223",
     "chapter-02-operating-systems-and-linux-kernel.html": "f153751936e71e3957d0c71eb81aebbb9b4183113eb556effa547fef6b028a1e",
-    "chapter-03-linux-file-system-permissions-ownership.html": "603c430254316553de1f3f37b36dd4abb834660df58de183dccc6f191b60bca3",
+    "chapter-03-linux-file-system-permissions-ownership.html": "17590fe3d2bedfb66fcea1262a7dbc9e5ffcccdc58a49fff1252d2c0db63b4d7",
     "chapter-04-processes-text-memory-and-networking.html": "a7a808bfd37b6cae9deb3616cb50f51fe9754ab4f601a66a6a32727b77793419",
     "chapter-05-shell-scripting-processes-and-control-flow.html": "7fb0dfc447337fbe798805900efde00ae052c119dcd5c6c1d2a4871f4428f07f",
     "chapter-06-hpc-components-and-node-architecture.html": "25df0acdbdc801ac0b727fe2da9ae10425bc089ff468948ce29fc5d0b905eeeb",
