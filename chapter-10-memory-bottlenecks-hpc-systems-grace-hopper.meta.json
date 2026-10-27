@@ -1,0 +1,456 @@
+{
+  "chapter": 10,
+  "title": "Memory bottlenecks, the organization of large HPC systems and the Grace Hopper superchip",
+  "status": "revised after review round 2",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "Dg69YlKdUNo",
+      "label": "W3L3",
+      "playlist_index": 17,
+      "duration_seconds": 1570
+    },
+    {
+      "video_id": "iE47tWwhBKs",
+      "label": "W3L4",
+      "playlist_index": 18,
+      "duration_seconds": 1587
+    },
+    {
+      "video_id": "tCj4YXGsEXE",
+      "label": "W3L5",
+      "playlist_index": 19,
+      "duration_seconds": 1559
+    }
+  ],
+  "frames_viewed": {
+    "Dg69YlKdUNo": [
+      "f0001",
+      "f0002",
+      "f0003",
+      "f0004",
+      "f0006",
+      "f0008",
+      "f0010",
+      "f0012",
+      "f0014",
+      "f0017",
+      "f0020",
+      "f0022",
+      "f0024",
+      "f0026",
+      "f0028",
+      "f0030",
+      "f0033",
+      "f0036",
+      "f0039",
+      "f0042",
+      "f0044",
+      "f0046",
+      "f0048",
+      "f0050"
+    ],
+    "iE47tWwhBKs": [
+      "f0004",
+      "f0008",
+      "f0010",
+      "f0011",
+      "f0012",
+      "f0013",
+      "f0014",
+      "f0015",
+      "f0016",
+      "f0017",
+      "f0018",
+      "f0019",
+      "f0020",
+      "f0021",
+      "f0022",
+      "f0024",
+      "f0026",
+      "f0028",
+      "f0030",
+      "f0032",
+      "f0034",
+      "f0036",
+      "f0038",
+      "f0040",
+      "f0042",
+      "f0044",
+      "f0046",
+      "f0048",
+      "f0049",
+      "f0050",
+      "f0051",
+      "f0052"
+    ],
+    "tCj4YXGsEXE": [
+      "f0010",
+      "f0011",
+      "f0012",
+      "f0013",
+      "f0014",
+      "f0015",
+      "f0016",
+      "f0017",
+      "f0018",
+      "f0019",
+      "f0020",
+      "f0021",
+      "f0022",
+      "f0023",
+      "f0024",
+      "f0025",
+      "f0026",
+      "f0027",
+      "f0028",
+      "f0029",
+      "f0030",
+      "f0031",
+      "f0032",
+      "f0033",
+      "f0034",
+      "f0035",
+      "f0036",
+      "f0037",
+      "f0038",
+      "f0039",
+      "f0040",
+      "f0041",
+      "f0042",
+      "f0043",
+      "f0044",
+      "f0045",
+      "f0046",
+      "f0047",
+      "f0048",
+      "f0049"
+    ]
+  },
+  "source_uncertainties": [
+    "Wulf and McKee (1995), ACM SIGARCH Computer Architecture News 23(1) 20-24: the paper could not be downloaded (the ACM, ResearchGate and course-page copies returned 403 or 404 and the University of Virginia repository returned an empty response on 2026-10-26). Bibliographic data checked in Crossref (volume 23, issue 1, pages 20-24). The argument is cited as reported by Machanick (2002), Sec. 1, and criticised by Ertl (undated web page); the 50 % and 7 % per year growth rates are Machanick's, and he attributes the 7 % DRAM figure to the literature; this chapter did not trace them to the original.",
+    "Williams, Waterman and Patterson: the chapter read the Berkeley technical report UCB/EECS-2008-134 (October 2008). The published CACM article 52(4) (2009) was not opened; page numbers of the CACM article are not given.",
+    "Intel ARK page for the i5-12450H returned HTTP 403 to this chapter's scripted requests; Chapter 7 opened it on 2026-10-26 through a fetch agent. The maximum turbo frequency of 4.40 GHz is taken from Chapter 11's record. The 16 double-precision flop per cycle of a performance core (two 256-bit FMA pipes) was not checked in an Intel manual; the measured 66.7 Gflop/s on one thread is 95 % of 4.40 GHz x 16.",
+    "Kim et al. (ISCA 2008): the University of Maryland copy of the paper was read; it was not compared with the ACM version. The exact lower bound on channels per group pair in non-maximum dragonflies is garbled in the text extraction and is not quoted.",
+    "Frontier numbers: the lecture's slides (ORNL, 2024 data) agree with TOP500 for June 2024 (8 699 904 cores, 22 786 kW, Rpeak 1 714.81 PFLOP/s, Rmax 1 206.00 PFLOP/s). The OLCF user guide (retrieved 2026-10-26) gives 77 cabinets and 9 856 nodes and 23.9 TFLOP/s per GCD; the HPE talk of February 2023 gives 9 408 nodes in 74 cabinets and 26.5 TFLOP/s per GCD. The three peak values (2.014, 1.818 and 1.715 EFLOP/s) are not reconciled. The HPE slide says 16 global links per switch (512 per group, 7.0 per other group) and also '4 links between each of the 74 compute groups'; this contradiction is not resolved. The lecture's 74 groups x 128 nodes = 9 472 differs from 9 408 nodes; not resolved. The HPCG value of 14 054.0 TFLOP/s is read from the TOP500 system page without a list date; the HPCG specification was not opened.",
+    "The 2025 GH200 datasheet table has two-line cells for the LPDDR5X size (480 GB; 120 GB, 240 GB) and bandwidth (up to 384 GB/s; up to 512 GB/s); the chapter reads them line by line (480 GB with 384 GB/s). The whitepaper (v1.21) says 'up to 500 GB/s'. The slide's 70 TFLOP/s FP64 is not explained by the datasheet (34 vector, 67 tensor core). The 7x of thread-block clusters (slide) was not checked against the H100 whitepaper, which was not opened.",
+    "Energy values (35, 6.5, 5, 1.3 pJ per bit; 99, 62, 12 pJ per flop) are the values of an NVIDIA slide. The whitepaper (p. 13) confirms 1.3 pJ per bit for NVLink-C2C and a ratio above 5 to PCIe Gen 5. Horowitz (ISSCC 2014) supports the order of magnitude of DRAM access energy. The pJ per flop values are not confirmed by an opened source, and the slide does not state what they include.",
+    "The ABINIT segment heights (CPU-bound about 0.43; transfer about 0.40 and 0.04; CPU about 0.17) are read from a projected chart with an uncertainty of about 0.03; the speedups 1.16 and 4.25 are quoted from the slide, which the whitepaper (Figure 19, p. 30) calls a performance simulation.",
+    "Measurement conditions: one 32 GiB DDR4-3200 module (Windows CIM query, 2026-10-26), single channel, pin rate 25.6 GB/s; WSL 2 guest; hybrid processor; other agents' jobs shared the machine. Thread placement was not controlled. The guest shows no hardware performance counters (/sys/bus/event_source/devices lists only software events), so DRAM traffic per point was not measured: the 24 bytes per point are a model with write allocate. Printed timing tables are the best of five complete runs by a stated rule and are faster than typical runs; ranges over the five runs are given in the text.",
+    "Unexplained measurements: dependent loads from working sets of 4 and 8 MiB cost 96-158 ns although the guest reports a 12 MiB L3; kernels with stores reach 19.5-21.8 GB/s of assumed DRAM traffic while the read-only dot product and the streaming-store triad reach 16.4-16.8 GB/s; the best of five Jacobi runs at 4 threads (4.92 Gflop/s) is 9 % above the roof computed from the scale kernel (4.53); twelve threads are slower than eight in all five runs of the sweep; the 12-thread FMA rate was 196-210 Gflop/s in the five kept runs and 233-290 Gflop/s in four earlier runs (thermal or power state suspected, not tested). The dot-product program of exercise 6 was run three times and is not a code-lab listing. The write-only fill (fill_mini.c) gives a streaming-over-ordinary ratio of 2.05-2.21 at 1 thread and 1.17-1.46 at 4 threads; at 4 threads the ordinary fill (14.6 GB/s asked for) would move 29.2 GB/s under full write allocate, above the 25.6 GB/s pin rate, so the 3/2 factor for the scale kernel is an upper estimate and the sweep's Q lies between 16 and 24 bytes per point.",
+    "Timestamps are section anchors from local speech-recognition segment times and locate topic changes to within a few seconds.",
+    "The machine transcript mishears technical words; all numbers and names in the chapter were taken from slide frames or from the sources, and no statement is attributed to the speech where the slide or a source gives the value."
+  ],
+  "lecture_corrections": [
+    {
+      "claim": "A read from storage costs a few thousand clock cycles (W3L3 9:59-10:30; repeated in context).",
+      "correction": "The lecture's own slide gives 10 000 000 ns, which is 1e7 cycles at 1 GHz and 4e7 at 4 GHz.",
+      "evidence": "slide f0050 (W3L3); arithmetic"
+    },
+    {
+      "claim": "Ratios between memory levels are kept when technology improves (W3L3 14:20-14:52, in context).",
+      "correction": "The statement concerns transfer rates. For latency it is contradicted: CPU +50 %/yr against DRAM +7 %/yr (Machanick 2002) gives a gap growing by 1.40 per year. For bandwidth, the ridge point grew by at most a factor of 3.8 between 2008 and the machines of Table 10.3.",
+      "evidence": "Machanick 2002 Sec. 1; Williams et al. Sec. 6.3; Table 10.3"
+    },
+    {
+      "claim": "CPU is SISD and GPU is SIMD (annotated on the slide, W3L4 7:21).",
+      "correction": "CPUs execute SIMD (256-bit FMA measured); the GPU model is SIMT.",
+      "evidence": "slide f0019 (W3L4); peak_fma.c run; Chapter 18"
+    },
+    {
+      "claim": "Performance share of accelerators increases (W3L4 10:55).",
+      "correction": "The slide shows the number of TOP500 systems with accelerators, 2006-2014, not the performance share.",
+      "evidence": "slide f0022 (W3L4)"
+    },
+    {
+      "claim": "Slide: 70 TFLOP/s FP64 for the Grace Hopper Superchip.",
+      "correction": "Datasheet: 34 TFLOP/s FP64 and 67 TFLOP/s FP64 tensor core; 67 + 3.46 (Grace CPU) = 70.5 suggests the slide adds the two, which it does not say.",
+      "evidence": "slide f0028 (W3L5); GH200 datasheet p. 4"
+    },
+    {
+      "claim": "Slide: Grace Hopper 4.25 times faster (bar chart).",
+      "correction": "One application (ABINIT, 255-atom titanium) from a performance simulation.",
+      "evidence": "slide f0049; whitepaper Figure 19, p. 30"
+    },
+    {
+      "claim": "Slide: 36 Grace CPUs with NVLink, 130 TB/s.",
+      "correction": "The slide shows GB200 NVL72: 36 Grace CPUs and 72 Blackwell GPUs; 130 TB/s is the NVLink bandwidth among the 72 GPUs.",
+      "evidence": "slide f0037 (W3L5)"
+    },
+    {
+      "claim": "Frontier peak 1.7 EFLOP/s (overview) and 2 EFLOP/s (fun facts); 26.5 TFLOP/s per GCD.",
+      "correction": "Two bases for peak; OLCF guide gives 23.9 TFLOP/s per GCD.",
+      "evidence": "slides f0013, f0050 (W3L4); OLCF guide; TOP500"
+    }
+  ],
+  "sections": [
+    {
+      "section": "The objects of the chapter and the running case",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Running problem of the book (Jacobi sweep) and the question of whether memory limits it.",
+      "research_extension": "None.",
+      "teaching_construction": "Formal model of a program run (F, Q, I) and a machine (P_peak, B_peak, hierarchy); the bound T >= max(F/P, Q/B); machine description with the installed memory and its pin rate.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "The memory hierarchy: speed, size and the width of the paths",
+      "video_id": "Dg69YlKdUNo",
+      "start": 201.0,
+      "end": 992.0,
+      "lecture_material": "Von Neumann cycle; pyramid of memory levels; speeds, sizes, costs; path widths 8 B, 32 B, 4 KB; bandwidths; warehouse analogy.",
+      "research_extension": "None beyond the lecture slides.",
+      "teaching_construction": "Correction of the cycle count; latency and bandwidth measurement by working-set size (hierarchy.c); half-performance length; bytes in flight.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Virtual memory, paging and thrashing",
+      "video_id": "Dg69YlKdUNo",
+      "start": 992.0,
+      "end": 1360.0,
+      "lecture_material": "Virtual address space, pages, paging, thrashing, contiguous access.",
+      "research_extension": "None.",
+      "teaching_construction": "Page, frame, page table, fault model; fault cost measurement (faults.c); average time with faults; the thrashing cliff table (amat.py).",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Hit time, miss penalty, the average access time and the memory wall",
+      "video_id": "Dg69YlKdUNo",
+      "start": 1360.0,
+      "end": 1570.0,
+      "lecture_material": "Hit, miss, hit rate, miss rate, hit time, miss penalty; hierarchy numbers.",
+      "research_extension": "Wulf and McKee as reported by Machanick; Ertl critique.",
+      "teaching_construction": "AMAT and two-level AMAT; failure of AMAT for streaming; memory-wall extrapolation.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "STREAM: the bandwidth that the memory delivers",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "McCalpin STREAM rules and byte-counting conventions.",
+      "teaching_construction": "stream_mini.c with a streaming-store triad to test write allocate; interpretation.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "The Roofline model: derivation, assumptions and the ceilings of this machine",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "Williams, Waterman and Patterson (technical report).",
+      "teaching_construction": "Derivation from (10.1); assumptions A1-A3; peak_fma.c; ridge points of the machine.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "The Jacobi sweep under the roof",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "Williams et al. 7-point stencil intensity 0.33.",
+      "teaching_construction": "Intensity of the sweep in three cache cases; layer condition; jacobi_bench.c, roofline.py, jacobi_check.c.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Shared-memory and distributed-memory machines, and the node of a leadership system",
+      "video_id": "iE47tWwhBKs",
+      "start": 6.0,
+      "end": 1587.0,
+      "lecture_material": "Shared versus distributed memory; MPPs; CPU versus GPU; Frontier node, GPU, network, programming environment, uses; Spacetime2.",
+      "research_extension": "OLCF user guide; HPE talk 2023; TOP500; Kim et al. dragonfly.",
+      "teaching_construction": "Multi-link bound (10.11); Frontier numbers check; bandwidth ladder; dragonfly port budget and cut capacity; halo ratio; capacity and power per flop.",
+      "evidence_class": "product specification"
+    },
+    {
+      "section": "The Grace Hopper superchip and the economics of moving data",
+      "video_id": "tCj4YXGsEXE",
+      "start": 39.0,
+      "end": 1559.0,
+      "lecture_material": "Grand-challenge applications, ML/DL, digital twins, Moore, energy, Grace CPU, Hopper GPU, NVLink-C2C, energy per bit, co-scheduling, ABINIT.",
+      "research_extension": "GH200 datasheet; whitepaper v1.21; Horowitz 2014.",
+      "teaching_construction": "Cost-error orders; ridge-point table; GH200 flop per byte and Jacobi bounds; energy per operand and per Jacobi point; ABINIT bar accounting.",
+      "evidence_class": "product specification"
+    },
+    {
+      "section": "What the models establish and what they do not",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Claims table.",
+      "research_extension": "None.",
+      "teaching_construction": "Table 10.4 and limits.",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "Lecture W3L3 recording",
+      "url": "https://www.youtube.com/watch?v=Dg69YlKdUNo",
+      "supports": "Memory hierarchy, paths, virtual memory, paging, terminology.",
+      "page_checked": "slide frames listed in frames_viewed"
+    },
+    {
+      "title": "Lecture W3L4 recording",
+      "url": "https://www.youtube.com/watch?v=iE47tWwhBKs",
+      "supports": "Shared and distributed memory, CPU vs GPU, Frontier, Spacetime2.",
+      "page_checked": "slide frames listed in frames_viewed"
+    },
+    {
+      "title": "Lecture W3L5 recording",
+      "url": "https://www.youtube.com/watch?v=tCj4YXGsEXE",
+      "supports": "Grand challenges, Moore, energy, Grace, Hopper, superchip, ABINIT.",
+      "page_checked": "slide frames listed in frames_viewed"
+    },
+    {
+      "title": "Wulf and McKee, Hitting the memory wall: implications of the obvious (1995)",
+      "url": "https://doi.org/10.1145/216585.216588",
+      "supports": "Name and statement of the memory wall (as reported by Machanick).",
+      "page_checked": "not opened; Crossref metadata only"
+    },
+    {
+      "title": "Machanick, Approaches to addressing the memory wall (2002)",
+      "url": "https://homes.cs.ru.ac.za/Philip/Publications/Techreports/2002/Reports/memory-wall-survey.pdf",
+      "supports": "Definition of the memory wall; CPU 50 % per year against DRAM 7 % per year; gap 1.4 per year, doubling in 2.1 years.",
+      "page_checked": "Section 1 (introduction)"
+    },
+    {
+      "title": "Ertl, The Memory Wall Fallacy",
+      "url": "https://www.complang.tuwien.ac.at/anton/memory-wall.html",
+      "supports": "Fixed miss rate assumption; longer lines; concurrent misses.",
+      "page_checked": "whole page (undated)"
+    },
+    {
+      "title": "McCalpin, STREAM reference information",
+      "url": "https://www.cs.virginia.edu/stream/ref.html",
+      "supports": "Array size rule, best of trials, byte counting conventions, write allocate, 16/16/24/24 bytes and 0/1/1/2 flop.",
+      "page_checked": "whole page"
+    },
+    {
+      "title": "Williams, Waterman, Patterson, Roofline (UCB/EECS-2008-134; CACM 52(4) 2009)",
+      "url": "https://www2.eecs.berkeley.edu/Pubs/TechRpts/2008/EECS-2008-134.pdf",
+      "supports": "Operational intensity; Min(peak, bandwidth x intensity); ridge point; ridge points 6.7 and 4.4; 7-point stencil 8 flop per 24 bytes, 0.33.",
+      "page_checked": "Sections 3, 4, 6.3, 6.3.3 of the technical report"
+    },
+    {
+      "title": "Horowitz, Computing's energy problem (ISSCC 2014)",
+      "url": "https://gwern.net/doc/cs/hardware/2014-horowitz-2.pdf",
+      "supports": "DRAM access 1-2 nJ against about 10 pJ per cache access or operation; DRAM I/O above 20 pJ per bit; 10 pJ per bit = 0.6 nJ per 8 B.",
+      "page_checked": "Digest p. 11 (Section on memory energy)"
+    },
+    {
+      "title": "Kim, Dally, Scott, Abts, Technology-driven, highly-scalable dragonfly topology (ISCA 2008)",
+      "url": "https://www.cs.umd.edu/class/fall2019/cmsc714/readings/Kim-Dragonfly.pdf",
+      "supports": "p, a, h; radix; virtual router; g = ah+1, N = ap(ah+1); balance a = 2p = 2h; one global hop; cost 20 % and 52 % lower.",
+      "page_checked": "abstract and Section 3 (topology)"
+    },
+    {
+      "title": "NVIDIA GH200 Grace Hopper Superchip datasheet (March 2025)",
+      "url": "https://dam-cdn.nvd.orangelogic.com/AssetLink/tkno03fa645gb7f33w60rf200d330420.pdf",
+      "supports": "72 Neoverse V2 cores; caches; LPDDR5X sizes and bandwidths; FP64 34 TFLOP/s, FP64 tensor 67; HBM3 4 TB/s; NVLink-C2C 900 GB/s; NVL2 column.",
+      "page_checked": "pp. 1-4 (specification table on p. 4)"
+    },
+    {
+      "title": "NVIDIA GH200 Grace Hopper Superchip Architecture whitepaper v1.21",
+      "url": "https://dam-cdn.nvd.orangelogic.com/AssetLink/h125m07nuew832vthbov0q6b2rs8ta0q.pdf",
+      "supports": "72 cores, 500 GB/s, 3.2 TB/s bisection (p. 6); Table 1 (p. 7); 1.3 pJ per bit (p. 13); coherency, NUMA (p. 18); ABINIT Figure 19 (p. 30).",
+      "page_checked": "printed pp. 6, 7, 13, 18, 30"
+    },
+    {
+      "title": "NVIDIA GH200 product page",
+      "url": "https://www.nvidia.com/en-eu/data-center/grace-hopper-superchip.md",
+      "supports": "900 GB/s coherent interface; one shared page table per process.",
+      "page_checked": "whole page, retrieved 2026-10-26"
+    },
+    {
+      "title": "OLCF Frontier User Guide",
+      "url": "https://docs.olcf.ornl.gov/systems/frontier_user_guide.html",
+      "supports": "77 cabinets, 9 856 nodes; about 2 EFLOP/s; node design; 23.9 TFLOP/s per GCD; 36+36 GB/s; 4 NICs of 200 Gbit/s; 679 PB Orion.",
+      "page_checked": "System Overview and Frontier Compute Nodes, retrieved 2026-10-26"
+    },
+    {
+      "title": "Glenski (HPE), Frontier System Architecture, OLCF, 15 February 2023",
+      "url": "https://www.olcf.ornl.gov/wp-content/uploads/2-15-23-Frontier-System-Architecture-public-v7.pdf",
+      "supports": "74 cabinets, 9 408 nodes; 205 GB/s DDR4; 26.5 TFLOP/s per GCD; switch links 16/31/16; 74 groups; caption of 4 links per group pair.",
+      "page_checked": "slides 2-9"
+    },
+    {
+      "title": "TOP500, Frontier system page",
+      "url": "https://www.top500.org/system/180047/",
+      "supports": "Rmax, Rpeak, cores, power June 2022 to June 2026; HPCG 14 054.0 TFLOP/s; ranks.",
+      "page_checked": "whole page, retrieved 2026-10-26"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "F, Q, I = F/Q",
+      "first_section": "model",
+      "definition": "Flop count, DRAM bytes, arithmetic (operational) intensity."
+    },
+    {
+      "symbol": "P_peak, B_peak, I*",
+      "first_section": "model",
+      "definition": "Peak arithmetic rate, peak DRAM bandwidth, ridge point P_peak/B_peak."
+    },
+    {
+      "symbol": "tau, b, B, b_{1/2}, n",
+      "first_section": "hierarchy",
+      "definition": "Latency, bytes, bandwidth, half-performance length tau*B, bytes in flight tau*B."
+    },
+    {
+      "symbol": "t_h, m_r, t_m, AMAT",
+      "first_section": "amat",
+      "definition": "Hit time, miss rate, miss penalty, average memory access time."
+    },
+    {
+      "symbol": "t_mem, t_f, m_f, V, R",
+      "first_section": "paging",
+      "definition": "Memory time, fault service time, fault rate, array size in bytes, resident bytes."
+    },
+    {
+      "symbol": "Q_k, I_k, B_k",
+      "first_section": "systems",
+      "definition": "Bytes over link k, intensity and bandwidth of link k."
+    },
+    {
+      "symbol": "nu, a, gamma, r, g, M",
+      "first_section": "systems",
+      "definition": "Dragonfly (Kim et al. write p, a, h, k, g, N): terminals per router, routers per group, global channels per router, router radix, number of groups, number of terminals."
+    },
+    {
+      "symbol": "kappa",
+      "first_section": "stream",
+      "definition": "The scalar of the STREAM scale and triad kernels."
+    },
+    {
+      "symbol": "n_b, X, Y, Z",
+      "first_section": "exercises",
+      "definition": "Tile edge and tiles of the blocked matrix multiplication of exercise 2."
+    },
+    {
+      "symbol": "N, u, u^new, IDX",
+      "first_section": "model",
+      "definition": "Interior points per side, grid and its update, index macro (as Chapter 9)."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python code_lab.py --chapter 10",
+    "listings": 10,
+    "all_passed": true
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "REVISE (6 blocking, 7 major, 12 minor)",
+      "changes": "B1 Grace CPU Superchip panel and 70 TFLOP/s rewritten; B2 ABINIT is a performance simulation; B3 roofs matched to the thread count (2 threads 101 %, 8 threads 102 %); B4 10.2 times the cache; B5 only slide-confirmed corrections kept; B6 diffusion in the Jacobi check; M1 4 and 8 MiB not used as DRAM, bound from the 41.2 GB/s read; M2 write-allocate premise tested with a write-only fill (fill_mini.c), roofs given as a range; M3 latency versus bandwidth in the memory-wall argument; M4 platform and NVL72 subsection; M5 symbols renamed; M6 assumption A2; M7 second-module claim; minors m1-m12 applied except m11 (partly) and the STREAM array letters."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT WITH FIXES (1 blocking, 1 major, 6 minor)",
+      "changes": "B1 the case-2 roof is 4.53 Gflop/s for every write-allocate fraction w (Q = 16+8w, scale traffic 14.5(1+w/2)), 5.1 is the streaming-store roof, the asked-for scale rate is 14.5 GB/s; M1 stale sentences in exercises 4 and 6 and in the limits (30 to 59 times) corrected; m1 126 ns confirmed against the run logs (16 MiB minimum 126.26, 64 MiB minimum 133.85); m2 duplicated phrase; m3 software slide timestamp 15:15; m4 backslash; m6 STREAM array names stated; m5 length not cut."
+    }
+  ]
+}

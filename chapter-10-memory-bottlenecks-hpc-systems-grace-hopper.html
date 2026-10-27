@@ -1,0 +1,1071 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="bdad2a2b2dff9fc8becd5bf356cd00b9b255ed4f876b78c1b4cc25c5bb37f418"><title>Memory bottlenecks, the organization of large HPC systems and the Grace Hopper superchip · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>Memory bottlenecks, the organization of large HPC systems and the Grace Hopper superchip</h1>
+<p class="lead">One Jacobi sweep on a grid of \(4096\times4096\) points performs \(8.4\times10^{7}\) floating-point operations and moves \(2.7\times10^{8}\) to \(4.0\times10^{8}\) bytes through the memory interface (16 to 24 bytes per point). The laptop used for this chapter performs 66.7 Gflop/s on one thread and 202 Gflop/s on twelve, in a loop that does nothing but arithmetic. Its one memory module has a pin rate of 25.6 GB/s; the STREAM scale kernel obtains 10.4 GB/s on one thread and 14.5 GB/s on four, counted as STREAM counts, which is 15.6 and 21.8 GB/s of DRAM traffic if every store first reads its line. The sweep ran at 3.3 Gflop/s on one thread and at 4.4 to 4.5 Gflop/s on four to eight threads: 2.2 % of the arithmetic peak, and 98 % of the rate that the scale kernel allows in the same count. Twelve threads ran it more slowly than eight in each of five runs. The Frontier node in the lectures has, for each GPU die, 26.5 Tflop/s and 1.6 TB/s, and the same sweep is bounded there (with 16 bytes per point) at 1.9 % of the die's peak. This chapter defines the quantities that make such statements checkable (arithmetic intensity, bandwidth, latency, the ridge point of the roofline), measures them on the machine, and applies them to the memory hierarchy, to the organization of a leadership-class system, and to the Grace Hopper superchip.</p>
+<p class="source-note">Grounded in three recordings of the NPTEL course <em>High Performance Scientific Computing</em> (Prof. Shivasubramanian Gopalakrishnan, IIT Bombay): <a href="https://www.youtube.com/watch?v=Dg69YlKdUNo">W3L3, Common Challenges with Memory in Computer Architecture</a>, <a href="https://www.youtube.com/watch?v=iE47tWwhBKs">W3L4, Organization of hardware in Large HPC systems</a>, and <a href="https://www.youtube.com/watch?v=tCj4YXGsEXE">W3L5, Architecture of Nvidia's Grace Hopper Superchip</a>. <strong>Lecture material:</strong> the von Neumann execution cycle; the levels of memory from registers to disk with their speeds, sizes and costs; the widths of the paths between levels; virtual memory, paging and page thrashing; the terms hit, miss, hit time and miss penalty; shared-memory and distributed-memory machines; the CPU–GPU contrast; the design of the Frontier supercomputer (node, GPU, network, programming environment, uses) and of the IIT Bombay machine Spacetime2; NVIDIA's slides (from the ATPESC 2024 training program, by their watermark) on grand-challenge applications, Moore's law and energy, the Grace CPU, the Hopper GPU, the NVLink-C2C link between them, energy per bit, co-scheduling, and one application speedup. <strong>Research extensions:</strong> the memory-wall argument of Wulf and McKee (1995) as reported in a survey by Machanick (2002) and a critique by Ertl (the original could not be opened); McCalpin's STREAM rules for counting bytes and sizing arrays; the Roofline model of Williams, Waterman and Patterson (2008 report of the 2009 article); Horowitz (2014) on the energy of arithmetic against memory access; the dragonfly topology of Kim, Dally, Scott and Abts (2008); the 2025 NVIDIA GH200 datasheet and the whitepaper v1.21 for the Grace Hopper numbers; the OLCF Frontier user guide, the HPE Frontier architecture talk (2023) and the TOP500 pages (retrieved 2026-10-26) for the Frontier numbers. <strong>Original teaching constructions:</strong> the formal model of a program and a machine (F, Q, <em>P</em><sub>peak</sub>, <em>B</em><sub>peak</sub>); the half-performance length and the bytes-in-flight argument; the average-access-time calculations with the slide's numbers, including page faults; the byte-count conventions and the test of write-allocate traffic; the arithmetic intensity of the book's Jacobi sweep in three cache situations and the layer condition; the roofline of this machine and its placement of the sweep; the node-level bandwidth ladder, the dragonfly port budget and the energy arithmetic for Frontier and the GH200; every program and measurement; the six exercises.</p>
+
+<h2 id="model">The objects of the chapter and the running case</h2>
+<p>The chapter asks one question about a program on a machine: which resource sets the run time? The answer needs two descriptions that can be compared. A <em>program run</em> is described by two counts. \(F\) is the number of floating-point operations (flop) the run performs; one addition, subtraction, multiplication or division of two doubles is one flop, a fused multiply-add is two, and a comparison or an absolute value is not counted. \(Q\) is the number of bytes that cross the interface between the processor chip and main memory (DRAM) during the run. Their ratio is the <em>arithmetic intensity</em>
+\[
+I=\frac{F}{Q}\quad\text{(flop per byte).}
+\]
+A <em>machine</em> is described by two rates and by a list of memories. \(P_{\text{peak}}\) is the highest rate of flop the arithmetic units can sustain (flop/s). \(B_{\text{peak}}\) is the highest rate at which DRAM can deliver or accept bytes (byte/s). The list of memories is the <em>hierarchy</em>: registers, caches, DRAM, storage. Each level \(\ell\) has a capacity, a <em>latency</em> \(\tau_\ell\) (the time from the request for one item to its arrival) and a <em>bandwidth</em> \(B_\ell\) (the number of bytes per second the level can deliver when requests are plentiful). Latency and bandwidth are different quantities with different units, and the chapter keeps them apart.</p>
+<p>Two statements about time follow without further assumption. The run cannot finish before the arithmetic units could have executed \(F\) flop, and it cannot finish before DRAM could have moved \(Q\) bytes. Therefore the run time \(T\) satisfies</p>
+\[
+T\;\ge\;\max\!\Bigl(\frac{F}{P_{\text{peak}}},\ \frac{Q}{B_{\text{peak}}}\Bigr). \tag{10.1}
+\]
+<p>If the first term is the larger, the run is <em>compute-bound</em>; if the second is, it is <em>memory-bound</em>. Equation (10.1) is a lower bound. It is the starting point of the Roofline model in the section on the roofline, and the chapter uses it to read each measurement: a measured time far above the bound names a cost that the two rates do not describe, and a measured time below it names a counting error.</p>
+<p>The <strong>running case</strong> is the book's Jacobi sweep from Chapter 9. On the grid of \((N+2)\times(N+2)\) doubles in row-major order, with the interior \(i,j=1,\dots,N\) and the index macro <code>IDX(i,j)</code> \(=i(N+2)+j\), one sweep computes</p>
+\[
+u^{\text{new}}_{i,j}=\tfrac14\bigl(u_{i-1,j}+u_{i+1,j}+u_{i,j-1}+u_{i,j+1}\bigr)
+\]
+<p>for every interior point and returns the largest change \(\max|u^{\text{new}}_{i,j}-u_{i,j}|\). Each point costs three additions and one multiplication for the average and one subtraction for the change (the absolute value and the comparison are not counted, as in Chapter 9): \(F=5N^2\) per sweep. The question of the chapter is whether this sweep is limited by its \(F\) or by its \(Q\). A second question follows from the lectures: what does the organization of a large machine, from a laptop to the Frontier supercomputer, do to the answer?</p>
+<p>The symbols of the book are used as in the notation table: \(p\) threads, \(T_1\) and \(T_p\) times on one and on \(p\) threads, \(S_p=T_1/T_p\), \(P(I)\) for the attainable rate, \(N\) the number of interior points per side. Three more symbols belong to this chapter. \(t_h\) is the <em>hit time</em> of a memory level, \(m_r\) its <em>miss rate</em>, and \(t_m\) its <em>miss penalty</em>, as defined in the section on average access time. \(\tau\) is a latency and \(b\) a number of bytes. Each is repeated at first use.</p>
+<p>All measurements come from one machine: an Intel Core i5-12450H laptop under Windows 11, with programs built and run in a WSL 2 Ubuntu 24.04 guest by gcc 13.3. The processor is a hybrid design with 4 performance cores (2 hardware threads each) and 4 efficient cores: 12 logical processors. The guest sees 6 cores with 2 threads each; that view is synthetic, and this chapter does not control where threads run. The guest reports the per-core caches below: 48 KiB of level-1 data cache and 1.25 MiB of level-2 cache per instance, and one 12 MiB level-3 cache. The installed memory matters more than the processor for this chapter. A query of the physical memory in Windows PowerShell (<code>Get-CimInstance Win32_PhysicalMemory</code>, run on 2026-10-26) lists one module: 32 GiB, 3200 MT/s, SMBIOS memory type 26 (DDR4); the board has two slots and one is filled. A DDR4 channel is 64 bits (8 bytes) wide, so the module delivers at most</p>
+\[
+B_{\text{peak}}=3200\times10^{6}\ \tfrac{\text{transfer}}{\text{s}}\times 8\ \tfrac{\text{B}}{\text{transfer}}=25.6\ \text{GB/s} \tag{10.2}
+\]
+<p>through its one channel. This is a pin-rate limit set by the installed hardware. It is not a measurement and not the figure that the processor's specification would allow with two modules. The WSL guest shows 15.5 GiB of the 32 GiB.</p>
+<pre><code class="language-bash">$ nproc
+12
+$ lscpu | grep -E 'Model name|Thread|Core|L1d|L2|L3'
+Model name:                           12th Gen Intel(R) Core(TM) i5-12450H
+Thread(s) per core:                   2
+Core(s) per socket:                   6
+L1d cache:                            288 KiB (6 instances)
+L2 cache:                             7.5 MiB (6 instances)
+L3 cache:                             12 MiB (1 instance)
+$ getconf PAGESIZE; getconf LEVEL1_DCACHE_LINESIZE
+4096
+64
+$ lscpu | grep -o -E 'avx2|fma' | sort -u | tr '\n' ' '; echo
+avx2 fma
+$ grep MemTotal /proc/meminfo
+MemTotal:       16209104 kB
+</code></pre>
+<p>Every timing is the minimum over repetitions inside the program, and each printed timing table is the best of five complete runs, chosen by a rule fixed before the choice: the run with the smallest sum of dependent-load latencies (<code>hierarchy.c</code>), the smallest first-touch time (<code>faults.c</code>), the largest sum of the printed rates (<code>stream_mini.c</code>, <code>peak_fma.c</code>), or the largest sum of the printed rates of both tables of <code>jacobi_bench.c</code>. The rule favours the quiet runs, so a printed sample is faster than a typical run. Other jobs shared the machine during the measurements. Their effect is large for the memory-bound programs: the same program printed memory bandwidths that differ by up to a factor of two between runs. Each section therefore gives the range over runs next to the printed sample. A printed sample is one run on this machine; another run prints other digits.</p>
+
+<h2 id="hierarchy">The memory hierarchy: speed, size and the width of the paths <a class="timestamp" href="https://www.youtube.com/watch?v=Dg69YlKdUNo&amp;t=201s">W3L3 3:21</a></h2>
+<p>The lecture starts from the von Neumann machine: a control unit and an arithmetic unit fetch an instruction, decode it, fetch its operands, execute it, and store the result, then move to the next instruction. Instructions and operands both live in memory, so every cycle of the loop needs memory. The lecture asks whether memory is uniform and answers with a pyramid: registers next to the logic circuits, then two or three levels of cache on the processor chip, then DRAM on the motherboard, then permanent storage (read-only memory, removable drives, network storage, disks). The speed falls and the capacity and the distance rise down the pyramid; the lecture ties the cost per byte to the distance from the arithmetic.</p>
+<p>Chapter 7 treats the organization of the caches (lines, sets, tags), locality and coherence, and this chapter does not repeat it; the lecture's slides here are the coarse view that precedes it. The slide that carries the numbers is reproduced in the table. Its source line is a course at the University of Massachusetts Amherst (ECE 232), so the values describe a machine of an earlier decade. The right column gives what this chapter measured with <code>hierarchy.c</code> below.</p>
+<div class="table-wrap"><table>
+<caption>Table 10.1. The lecture's hierarchy slide and this machine. The right column gives the printed sample of <code>hierarchy.c</code>; a range within a cell is over the working-set sizes named.</caption>
+<thead><tr><th scope="col">Level</th><th scope="col">Slide: speed</th><th scope="col">Slide: size</th><th scope="col">Slide: cost per MB (USD)</th><th scope="col">This machine: dependent-load latency</th></tr></thead>
+<tbody>
+<tr><td>Registers</td><td>1 ns</td><td>0.0005 MB</td><td>not given</td><td>not measured</td></tr>
+<tr><td>L1 cache (SRAM)</td><td>2 ns</td><td>0.1 MB</td><td>10 USD</td><td>1.24 to 1.29 ns (16 and 32 KiB)</td></tr>
+<tr><td>L2 cache (SRAM)</td><td>6 ns</td><td>1–4 MB</td><td>3 USD</td><td>3.7 to 4.5 ns (128 and 512 KiB), 8.0 ns (1 MiB)</td></tr>
+<tr><td>Main memory (DRAM)</td><td>100 ns</td><td>1000–6000 MB</td><td>0.01 USD</td><td>126 to 134 ns (16 and 64 MiB), 251 ns (256 MiB); 96 and 123 ns at 4 and 8 MiB, not explained (see text)</td></tr>
+<tr><td>Secondary memory (disk)</td><td>10 000 000 ns</td><td>500 000 MB</td><td>0.002 USD</td><td>not measured</td></tr>
+</tbody></table></div>
+<p>The slide's own ratios are the point of the lecture. Main memory is 50 times slower than the first-level cache, and the disk is \(10^{5}\) times slower than main memory. Every level below is larger and cheaper per byte. From the first-level cache to the disk the access time rises by a factor of \(5\times10^{6}\), the capacity rises by \(5\times10^{6}\), and the cost per megabyte falls by 5000.</p>
+<p><strong>A correction of the cycle count.</strong> The lecture describes a read from a storage device as costing a few thousand clock cycles and a read from main memory as costing about 100. The slide gives 10 000 000 ns for the disk and 100 ns for main memory. At a clock of 1 ns per cycle these are \(10^{7}\) and 100 cycles, so a disk figure of a few thousand cycles is too small by a factor of about \(10^{4}\). At the 4 GHz clock of this machine, 100 ns is 400 cycles and 10 ms is \(4\times10^{7}\) cycles. The two statements agree only for main memory, and then only at 1 GHz.</p>
+<p><strong>A measurement of the first three rows.</strong> The program defines the latency of a level as the time of one load whose address is not known until the previous load has returned. It builds one random cycle through all 64-byte lines of a working set of the given size, and then follows the cycle: each load depends on the one before. No hardware can overlap these loads, so the time per load is a latency of the smallest level that holds the working set. The second measurement reads the same amount of memory in address order, with several independent sums, so that loads overlap. It reports bytes per second and the time per 64-byte line. The program takes no input and prints one table; the check is only that it terminates normally, because the numbers depend on the load of the machine.</p>
+<pre><code class="language-c" data-file="hierarchy.c" data-build="gcc -O2 -march=native hierarchy.c -o hierarchy" data-run="./hierarchy" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;time.h&gt;
+
+typedef double v4 __attribute__((vector_size(32)));
+typedef struct node { struct node *next; char pad[56]; } node;   /* one 64-byte line */
+
+static double now(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &amp;t);
+    return (double)t.tv_sec + 1e-9 * (double)t.tv_nsec;
+}
+
+static uint64_t rng = 88172645463325252ULL;
+static uint64_t rnd(void) { rng ^= rng &lt;&lt; 13; rng ^= rng &gt;&gt; 7; rng ^= rng &lt;&lt; 17; return rng; }
+
+/* Latency: walk one random cycle through all lines; each load needs the previous one. */
+static double chase_ns(size_t bytes)
+{
+    size_t n = bytes / sizeof(node), steps = 1L &lt;&lt; 21;
+    node *a = aligned_alloc(64, n * sizeof(node));
+    size_t *order = malloc(n * sizeof(size_t));
+    for (size_t i = 0; i &lt; n; i++) order[i] = i;
+    for (size_t i = n - 1; i &gt; 0; i--) { size_t j = rnd() % (i + 1); size_t t = order[i]; order[i] = order[j]; order[j] = t; }
+    for (size_t i = 0; i &lt; n; i++) a[order[i]].next = &amp;a[order[(i + 1) % n]];
+    node *p = &amp;a[order[0]];
+    for (size_t k = 0; k &lt; n; k++) p = p-&gt;next;                 /* warm-up pass */
+    double best = 1e30;
+    for (int rep = 0; rep &lt; 3; rep++) {
+        double t0 = now();
+        for (size_t k = 0; k &lt; steps; k++) p = p-&gt;next;
+        double t = now() - t0;
+        if (t &lt; best) best = t;
+    }
+    if (p == NULL) puts("unreachable");                           /* keeps the walk alive */
+    free(a); free(order);
+    return best / (double)steps * 1e9;
+}
+
+/* Bandwidth: read all doubles in order, 4 independent 4-lane vector sums; independent loads overlap. */
+static double read_gbs(size_t bytes)
+{
+    size_t n = bytes / sizeof(double);
+    double *a = aligned_alloc(64, n * sizeof(double));
+    for (size_t i = 0; i &lt; n; i++) a[i] = 1.0;
+    size_t passes = (size_t)(1e9 / (double)bytes) + 1;
+    v4 s0 = {0}, s1 = {0}, s2 = {0}, s3 = {0}, *v = (v4 *)a;
+    size_t nv = n / 4;
+    double best = 1e30;
+    for (int rep = 0; rep &lt; 3; rep++) {
+        double t0 = now();
+        for (size_t k = 0; k &lt; passes; k++)
+            for (size_t i = 0; i + 4 &lt;= nv; i += 4) { s0 += v[i]; s1 += v[i + 1]; s2 += v[i + 2]; s3 += v[i + 3]; }
+        double t = now() - t0;
+        if (t &lt; best) best = t;
+    }
+    v4 s = s0 + s1 + s2 + s3;
+    if (s[0] + s[1] + s[2] + s[3] &lt; 0.0) puts("unreachable");
+    free(a);
+    return (double)passes * (double)bytes / best / 1e9;
+}
+
+int main(void)
+{
+    size_t kib[] = {16, 32, 128, 512, 1024, 2048, 4096, 8192, 16384, 65536, 262144};
+    printf("%10s %12s %10s %12s %10s\n", "size", "chase ns/ld", "read GB/s", "read ns/line", "chase/read");
+    for (int k = 0; k &lt; 11; k++) {
+        size_t bytes = kib[k] * 1024;
+        double c = chase_ns(bytes), g = read_gbs(bytes), l = 64.0 / g;
+        if (kib[k] &gt;= 1024) printf("%7zu MiB", kib[k] / 1024); else printf("%7zu KiB", kib[k]);
+        printf(" %12.2f %10.1f %12.2f %10.1f\n", c, g, l, c / l);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">      size  chase ns/ld  read GB/s read ns/line chase/read
+     16 KiB         1.26      254.3         0.25        5.0
+     32 KiB         1.24      249.6         0.26        4.9
+    128 KiB         3.66      166.3         0.38        9.5
+    512 KiB         4.46      167.4         0.38       11.7
+      1 MiB         8.01      118.9         0.54       14.9
+      2 MiB        23.77       62.8         1.02       23.3
+      4 MiB        95.76       41.2         1.55       61.7
+      8 MiB       123.09       32.6         1.96       62.8
+     16 MiB       126.26       14.7         4.34       29.1
+     64 MiB       133.85       12.6         5.08       26.3
+    256 MiB       250.58       15.8         4.05       61.9</code></pre>
+<p>In the printed sample the dependent-load latency is 1.26 and 1.24 ns for working sets of 16 and 32 KiB (the first-level data cache holds 48 KiB), 3.66 ns at 128 KiB, 4.46 ns at 512 KiB and 8.01 ns at 1 MiB (the second-level cache holds 1.25 MiB), and 23.8 ns at 2 MiB. The first two levels agree with the slide's 2 ns and 6 ns in order of magnitude: the first-level latency is below the slide's value and the second-level latency is close to it. For sets of 16 MiB and more the chain takes 126 to 134 ns (16 and 64 MiB) and 251 ns at 256 MiB. Three features of the table need a comment. First, the sets of 4 and 8 MiB, which the guest's 12 MiB level-3 cache should hold, are nearly as slow as the sets of 16 and 64 MiB (96 and 123 ns against 126 and 134 ns), and the chapter does not use them as DRAM latency. The chapter does not explain them. Address translation, a thread on a core with a smaller cache, a level-3 latency higher than assumed, and a level-3 cache shared with other jobs are candidates that were not tested. One fact narrows the candidates. At 4 MiB the independent reads reached 41.2 GB/s, 1.6 times the 25.6 GB/s pin rate of the only memory channel. If a fraction \(x\) of the bytes came from DRAM, the time per byte is at least \(x/25.6\) ns, so \(x\le25.6/41.2=0.62\): at least 38 % of the bytes of a 4 MiB set came from on-chip caches (at least 21 % at 8 MiB, 32.6 GB/s). The level-3 cache therefore does hold part of these sets for a streaming read, and the long dependent-load time is a cost per random access (address translation, the core type, or a level-3 latency higher than assumed) more than a level-3 cache emptied by other jobs. Second, the independent reads fall from 254 GB/s in the first-level cache to 167 GB/s at 512 KiB, 119 GB/s at 1 MiB, 33 to 41 GB/s at 4 and 8 MiB, and 12.6 to 15.8 GB/s for sets of 16 MiB and more (10 to 16 GB/s over five runs): one thread reads DRAM at 39 to 63 % of the 25.6 GB/s pin rate. Third, the table gives the central contrast of the lecture two numbers. A dependent load from DRAM takes 106 times as long as one from the first-level cache (134 ns against 1.26 ns at 64 MiB). A streaming read delivers a 64-byte line every 5.1 ns at the same size, which is 26 times faster than the dependent chain delivers one.</p>
+<p><strong>Why the transfer unit grows with distance.</strong> The lecture shows the widths of the paths: 8 bytes between the registers and the cache, 32 bytes between the cache and memory, 4 KB between memory and disk. It asks why the width changes and answers with a supply chain: nobody sends one parcel at a time from the big warehouse to the shop in the city centre. A transfer model gives the quantitative form of the answer. Suppose a level has latency \(\tau\) and streaming bandwidth \(B\), and a transfer of \(b\) bytes takes</p>
+\[
+t(b)=\tau+\frac{b}{B}. \tag{10.3}
+\]
+<p>The delivered rate is \(b/t(b)\). It reaches half of \(B\) when \(b/B=\tau\), that is at</p>
+\[
+b_{1/2}=\tau B, \tag{10.4}
+\]
+<p>the <em>half-performance length</em>. Transfers much smaller than \(b_{1/2}\) run at a rate near \(b/\tau\), far below \(B\). The slide's numbers give \(b_{1/2}\) for the disk as \(10^{7}\ \text{ns}\times187\ \text{MB/s}=1.9\ \text{MB}\), while the page unit is 4 KB. A 4 KB transfer from that disk takes \(10\ \text{ms}+22\ \mu\text{s}\) and delivers 0.41 MB/s, 0.22 % of the streaming rate. The disk path is latency-dominated at the page size, and a system that moves pages in either direction has to treat a page fault as a very rare event. For main memory the product is \(\tau B\approx\) 100 ns \(\times\) 15 GB/s = 1.5 KB, which is 23 cache lines of 64 bytes. A 64-byte line therefore wastes most of the first request unless more requests are in flight. Equation (10.4) is the same relation as the bytes-in-flight rule below, applied to one transfer.</p>
+<p><strong>Bytes in flight.</strong> A level that has latency \(\tau\) and is to deliver bandwidth \(B\) must have requests for \(n=\tau B\) bytes outstanding at every moment (Little's law: the number of items in a system equals their arrival rate times the time each spends in it; Chapter 7 uses it in its section on the average access time). For the main memory of this machine, with the dependent-load latency of the sample and the bandwidth of the STREAM measurement below, \(n\) is about 2.9 kB, which is 46 lines of 64 bytes (\(\tau=134\) ns and \(B=21.8\) GB/s). The program above shows the effect directly: the last column, the ratio of the dependent-load time to the time per line of the independent reads, is the number of loads that the processor effectively keeps in flight. It is 26 to 63 for the working sets of 4 MiB and more. A program that follows pointers has one load in flight and runs at \(b/\tau\); a program that reads an array in order has many and runs near \(B\). This is why the chapter treats latency and bandwidth separately, and why the Jacobi sweep, which reads in address order, meets the bandwidth bound of (10.1) and not the latency.</p>
+<p>The lecture also lists bandwidths by level from its slide (source: the same UMass course): processor to cache 24 GB/s, cache to main memory 0.5 to 6.4 GB/s, main memory to disk 187 MB/s ("serial ATA/1500"). The slide writes the unit as MBps; the difference between Mbps and MBps is a factor of 8, so the unit must be kept. The lecture states that the ratios between levels stay roughly fixed when technology improves, so that a faster disk brings a proportionally faster memory and cache. The next sections show that this is the part of the lecture that the research literature contradicts.</p>
+
+<h2 id="paging">Virtual memory, paging and thrashing <a class="timestamp" href="https://www.youtube.com/watch?v=Dg69YlKdUNo&amp;t=960s">W3L3 16:00</a></h2>
+<p>The lecture poses a problem of portability. The same program may run on a machine with 1 GB of memory and 10 GB of disk, and on a machine with 1 TB of memory and petabytes of disk. A program cannot be written for one memory size, and it cannot name physical locations. The answer in the lecture is virtual memory: each process sees one address space, and the operating system maps pieces of it onto physical memory and, when memory is short, onto disk. The slide shows a column of virtual memory per process with arrows to blocks in RAM, to a block that holds "another process's memory", and to the disk.</p>
+<p>The model has four parts. A <em>page</em> is a block of consecutive virtual addresses that is mapped as a unit; on this machine the page size is 4096 bytes (<code>getconf PAGESIZE</code> in the session above), the same 4 KB as the width of the path between memory and disk on the slide. A <em>frame</em> is a block of physical memory of the page size. A <em>page table</em>, kept by the operating system, records for each page of a process the frame that holds it, or that the page is on disk, or that it has not been created. A reference to a page that has no frame is a <em>page fault</em>: the processor traps to the operating system, which finds a frame, fills it (with zeros for a new page, with a copy from disk for a page that was written out), updates the table and restarts the instruction. If the system has no free frame, it first chooses a page to evict, usually one that was not used recently, and writes it to disk if it was modified. A fault that needs no disk transfer is a <em>minor</em> fault; one that reads the disk is a <em>major</em> fault. The <em>working set</em> of a program over a time window is the set of pages it references in that window. <em>Thrashing</em> is the state in which the working set does not fit in the frames available, so that most references fault and the system spends its time moving pages.</p>
+<p><strong>The cost of one fault, measured.</strong> The program below allocates 1 GiB, touches one byte in each page, and counts the minor faults with <code>getrusage</code>. It touches the same pages a second time. The first pass creates every page; the second finds them all present. No disk is involved, so the times are those of the minor fault alone, in a WSL 2 guest, where the guest's page fault may also cause a fault in the host. The program takes no input, and its numbers depend on the load of the machine, so the check is only that it ends normally.</p>
+<pre><code class="language-c" data-file="faults.c" data-build="gcc -O2 faults.c -o faults" data-run="./faults" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;time.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;sys/resource.h&gt;
+
+static double now(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &amp;t);
+    return (double)t.tv_sec + 1e-9 * (double)t.tv_nsec;
+}
+
+static long minor_faults(void)
+{
+    struct rusage u;
+    getrusage(RUSAGE_SELF, &amp;u);
+    return u.ru_minflt;
+}
+
+int main(void)
+{
+    size_t bytes = 1UL &lt;&lt; 30, page = (size_t)sysconf(_SC_PAGESIZE);
+    char *a = malloc(bytes);                       /* reserved, not yet backed by physical pages */
+    long f0 = minor_faults();
+    double t0 = now();
+    for (size_t i = 0; i &lt; bytes; i += page) a[i] = 1;   /* first touch: one write per page */
+    double t1 = now();
+    long f1 = minor_faults();
+    for (size_t i = 0; i &lt; bytes; i += page) a[i] = 2;   /* second touch: pages are present */
+    double t2 = now();
+    long f2 = minor_faults();
+    size_t pages = bytes / page;
+    printf("page size %zu B, pages in 1 GiB %zu\n", page, pages);
+    printf("first touch:  %.0f%% of the pages caused a minor fault, %.0f ns per page\n",
+           100.0 * (double)(f1 - f0) / (double)pages, (t1 - t0) / (double)pages * 1e9);
+    printf("second touch: %ld faults, %.0f ns per page\n", f2 - f1, (t2 - t1) / (double)pages * 1e9);
+    free(a);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">page size 4096 B, pages in 1 GiB 262144
+first touch:  100% of the pages caused a minor fault, 1232 ns per page
+second touch: 0 faults, 20 ns per page</code></pre>
+<p>Every one of the 262 144 pages of the first pass caused a minor fault. The system backs memory from <code>malloc</code> with 4 KiB pages: the guest's transparent-huge-page setting is <code>madvise</code>, so a program that does not ask for huge pages gets small ones. The first touch cost 1.23 μs per page in the sample (1.2 to 3.3 μs over five runs) and the second touch 20 ns per page (20 to 30 ns). A page that is present is 62 times cheaper to touch than a page that must be created. The first pass over 1 GiB takes 0.32 s in the sample and 0.32 to 0.86 s over the runs. Reading 1 GiB at the 12.6 GB/s of the previous program takes 85 ms, so creating the pages costs 3.8 to 10 times as much as moving their bytes. One minor fault costs 9 times a dependent load from DRAM (1.23 μs against 134 ns) and about 1000 times a hit in the first-level cache. The lecture's account concerns the major fault, which adds the disk; the measurement shows that the part of the cost that does not involve a disk is already large. The numbers include the hypervisor of the WSL 2 guest, which the chapter did not separate.</p>
+<p><strong>Cost of a major fault and the thrashing cliff.</strong> The lecture's account of thrashing is qualitative: if a program asks for data in no particular pattern, each request may pull in a whole page and push another out, and the effort of moving the page is the same even if one element of it is used. The model gives the numbers. Let \(t_{\text{mem}}\) be the access time when the page is present and \(t_f\) the time to service a fault. If a fraction \(m_f\) of the references fault, the average time per reference is</p>
+\[
+T_{\text{avg}}=t_{\text{mem}}+m_f\,t_f. \tag{10.5}
+\]
+<p>With the slide's values \(t_{\text{mem}}=100\) ns and \(t_f=10\) ms, a slowdown of 10 % requires \(m_f t_f\le10\) ns, so \(m_f\le10^{-6}\): at most one fault per million references. Consider references to uniformly random locations in an array of \(V\) bytes of which only \(R\) bytes are resident. In steady state a reference finds its page resident with probability \(R/V\), so \(m_f=1-R/V\). An array 1 % larger than the resident memory (\(V/R=1.01\)) has \(m_f=0.0099\), and (10.5) gives 99 110 ns per reference, 991 times the fault-free time. The slowdown is a cliff, not a slope, because \(t_f/t_{\text{mem}}=10^{5}\). The program below prints this table for several sizes. The same program shows why the lecture advises contiguous access. A random fault pays the latency of the disk, 10 ms. A fault in a sequential scan, with the next pages read ahead, pays the transfer time of the page at the disk's streaming rate, \(4096\ \text{B}/187\ \text{MB/s}=22\ \mu\text{s}\), so the same page costs 457 times less. Read-ahead is an assumption of the model; it is what operating systems do for a sequential pattern, and the chapter did not test it.</p>
+<pre><code class="language-python" data-file="amat.py" data-run="python3 amat.py">"""Average memory access time (AMAT), page faults and the memory-wall extrapolation."""
+
+# ---- the numbers of the lecture's slide "Current Memory Hierarchy" (ns) ----
+t_l1, t_l2, t_mem, t_disk = 2.0, 6.0, 100.0, 1.0e7
+
+def amat_two_level(m1, m2_local):
+    """L1 hit time + L1 miss rate * (L2 hit time + local L2 miss rate * memory time)."""
+    return t_l1 + m1 * (t_l2 + m2_local * t_mem)
+
+print("two-level AMAT (L1 2 ns, L2 6 ns, memory 100 ns)")
+print(f"{'m1':&gt;6} {'m2 local':&gt;9} {'AMAT ns':&gt;8} {'vs L1 hit':&gt;10}")
+for m1, m2 in [(0.00, 0.0), (0.02, 0.1), (0.05, 0.2), (0.10, 0.5), (0.20, 0.8)]:
+    a = amat_two_level(m1, m2)
+    print(f"{m1:6.2f} {m2:9.2f} {a:8.2f} {a / t_l1:9.2f}x")
+
+# ---- page faults: T_avg = t_mem + m_f * t_f ----
+budget = 0.10 * t_mem
+print("\npage faults (memory 100 ns, fault service 10 ms from the slide)")
+print(f"fault rate for a 10% slowdown: {budget / t_disk:.0e} per access = 1 in {t_disk / budget:,.0f}")
+print("uniformly random access to V bytes, R bytes resident: m_f = 1 - R/V")
+print(f"{'V/R':&gt;7} {'m_f':&gt;9} {'ns per access':&gt;14} {'slowdown':&gt;9} {'with 0.1 ms fault':&gt;18}")
+for ratio in (1.0, 1.001, 1.01, 1.1, 2.0):
+    mf = 1.0 - 1.0 / ratio
+    t = t_mem + mf * t_disk
+    ssd = (t_mem + mf * 1.0e5) / t_mem
+    print(f"{ratio:7.3f} {mf:9.4f} {t:14.0f} {t / t_mem:8.1f}x {ssd:17.1f}x")
+page, disk_bw = 4096.0, 187.0e6
+seq = page / disk_bw * 1e9
+print(f"one 4096 B page: random fault {t_disk / 1e3:.0f} us, sequential read-ahead {seq / 1e3:.1f} us, ratio {t_disk / seq:.0f}")
+print(f"half-performance length of the disk: {t_disk * 1e-9 * disk_bw / 1e6:.2f} MB; a 4 KB transfer runs at "
+      f"{page / (t_disk * 1e-9 + page / disk_bw) / 1e6:.2f} MB/s = {page / (t_disk * 1e-9 + page / disk_bw) / disk_bw * 100:.2f} % of 187 MB/s")
+
+# ---- streaming through doubles, misses served one at a time (sample of hierarchy.c, 64 MiB) ----
+hit, penalty, measured = 1.3, 134.0, 12.6          # ns (L1 chase), ns (chase at 64 MiB), GB/s (independent reads at 64 MiB)
+amat = hit + penalty / 8
+print(f"\nstreaming doubles: AMAT = {hit} + {penalty:.0f}/8 = {amat:.1f} ns per double = {8 / amat:.2f} GB/s; "
+      f"measured {measured} GB/s = {measured / (8 / amat):.0f} times faster")
+
+# ---- memory wall: CPU +50 %/yr, DRAM +7 %/yr (Machanick 2002), miss rate fixed at 1 % ----
+gap = 1.5 / 1.07
+print(f"\nmemory wall: gap grows {gap:.3f} per year, doubles in {0.6931471805599453 / __import__('math').log(gap):.2f} years")
+m = 0.01
+for years in (0, 5, 10):
+    ratio = 100.0 * gap ** years
+    a = 1.0 + m * ratio
+    print(f"  after {years:2d} years: t_m/t_h = {ratio:7.0f}, AMAT = {a:5.1f} t_h, share of access time spent on misses {100 * (1 - 1 / a):5.1f} %")
+</code></pre>
+<pre><code class="output">two-level AMAT (L1 2 ns, L2 6 ns, memory 100 ns)
+    m1  m2 local  AMAT ns  vs L1 hit
+  0.00      0.00     2.00      1.00x
+  0.02      0.10     2.32      1.16x
+  0.05      0.20     3.30      1.65x
+  0.10      0.50     7.60      3.80x
+  0.20      0.80    19.20      9.60x
+
+page faults (memory 100 ns, fault service 10 ms from the slide)
+fault rate for a 10% slowdown: 1e-06 per access = 1 in 1,000,000
+uniformly random access to V bytes, R bytes resident: m_f = 1 - R/V
+    V/R       m_f  ns per access  slowdown  with 0.1 ms fault
+  1.000    0.0000            100      1.0x               1.0x
+  1.001    0.0010          10090    100.9x               2.0x
+  1.010    0.0099          99110    991.1x              10.9x
+  1.100    0.0909         909191   9091.9x              91.9x
+  2.000    0.5000        5000100  50001.0x             501.0x
+one 4096 B page: random fault 10000 us, sequential read-ahead 21.9 us, ratio 457
+half-performance length of the disk: 1.87 MB; a 4 KB transfer runs at 0.41 MB/s = 0.22 % of 187 MB/s
+
+streaming doubles: AMAT = 1.3 + 134/8 = 18.1 ns per double = 0.44 GB/s; measured 12.6 GB/s = 28 times faster
+
+memory wall: gap grows 1.402 per year, doubles in 2.05 years
+  after  0 years: t_m/t_h =     100, AMAT =   2.0 t_h, share of access time spent on misses  50.0 %
+  after  5 years: t_m/t_h =     541, AMAT =   6.4 t_h, share of access time spent on misses  84.4 %
+  after 10 years: t_m/t_h =    2931, AMAT =  30.3 t_h, share of access time spent on misses  96.7 %</code></pre>
+<p>The cliff is a property of the model with the slide's disk. A solid-state drive has a smaller \(t_f\), perhaps 0.1 ms; then \(t_f/t_{\text{mem}}=10^{3}\) and the same 1 % excess gives a slowdown of about 11 instead of 991 (the model's value, with the assumed \(t_f\); the chapter measured no drive). The cliff moves to a larger \(V/R\), and it does not disappear. This chapter did not drive the machine into swapping, because other jobs share its memory; the numbers above are model values from the slide, not measurements of thrashing.</p>
+
+<h2 id="amat">Hit time, miss penalty, the average access time and the memory wall <a class="timestamp" href="https://www.youtube.com/watch?v=Dg69YlKdUNo&amp;t=1360s">W3L3 22:40</a></h2>
+<p>The lecture ends with the vocabulary of the hierarchy. A request that finds its data in the upper level is a <em>hit</em>; the <em>hit rate</em> is the fraction of accesses that hit; a <em>miss</em> needs a block from the lower level, and the <em>miss rate</em> is \(m_r=1-\text{hit rate}\). The <em>hit time</em> \(t_h\) is the time to decide hit or miss plus the time to access the upper level. The <em>miss penalty</em> \(t_m\) is the time to replace a block in the upper level plus the time to deliver the block to the processor. The slide notes that hit time is much smaller than miss penalty, and the lecture closes with the advice that, for data sets that do not fit the caches, the only way to make the computation efficient is to reuse data that has come down to the faster levels.</p>
+<p>Chapter 7 derives the <em>average memory access time</em> from these terms in its section on the average access time, extends it to three cache levels, and shows that it fails for independent accesses, for which it uses a bound from Little's law. This section recalls the result in the form that the slide's numbers need. Each access pays \(t_h\), and the fraction \(m_r\) of accesses pays \(t_m\) in addition, so</p>
+\[
+\text{AMAT}=t_h+m_r\,t_m. \tag{10.6}
+\]
+<p>The slide gives numbers for exactly two cache levels. With \(m_1\) the miss rate of the first level, \(t_{h2}\) the hit time of the second level, and \(m_2\) its <em>local</em> miss rate (the fraction of the accesses that reach it and miss), the three-level form of Chapter 7 with two levels is</p>
+\[
+\text{AMAT}=t_{h1}+m_1\bigl(t_{h2}+m_2\,t_{\text{mem}}\bigr). \tag{10.7}
+\]
+<p>With the slide's 2 ns, 6 ns and 100 ns, the first table of the listing above shows the structure. A first-level miss rate of 5 % and a local second-level miss rate of 20 % give 3.30 ns, 1.65 times the all-hit time of 2 ns: a program that hits 95 % of the time in the first level runs its memory accesses 65 % slower than the all-hit case. At \(m_1=0.2\) and \(m_2=0.8\) the time is 19.2 ns, 9.6 times the all-hit time. The numbers are small only because the miss rates of programs that reuse data are small. A streaming program does not reuse data.</p>
+<p><strong>Where the formula stops describing the machine.</strong> A loop that reads doubles in order from a large array has \(m_r=1/8\): one access in eight starts a new 64-byte line. If misses are served one at a time and each costs the measured dependent-load latency, (10.6) predicts \(1.3+134/8=18.1\) ns per double. The independent-read measurement of <code>hierarchy.c</code> reached 12.6 GB/s, 0.63 ns per double for the working sets in memory. The formula is wrong by a factor of 28 because its premise is false for this loop: the misses of a streaming loop are independent of each other, and the machine keeps many of them in flight. Chapter 7 finds the same failure for sums over a matrix (factors of 22 and 9.5 at \(N=4096\)). AMAT is the right model for pointer-chasing and for any loop whose next address depends on the last load. It does not describe a loop that is limited by how many bytes per second the memory can deliver, and for that case the chapter uses the bound (10.1) in the next sections.</p>
+<p><strong>The memory wall.</strong> Wulf and McKee (1995) name the situation, as Machanick's survey reports it, in which processor speed has improved so much faster than DRAM speed that, in time, memory access dominates the run time of every program. Machanick's 2002 survey, which the chapter could open, restates the argument with a processor that improves 50 % per year (a figure he calls conservative) and DRAM that improves 7 % per year. The speed gap then grows by a factor of \(1.5/1.07=1.40\) per year and doubles every 2.1 years. Put this into (10.6) with a miss rate that stays at 1 %. If the miss penalty is 100 times the hit time today, then \(\text{AMAT}=t_h(1+0.01\times100)=2t_h\). After ten years the ratio \(t_m/t_h\) has grown by \(1.40^{10}=29\), so \(\text{AMAT}=t_h(1+0.01\times2930)=30\,t_h\). The share of the access time spent on misses, \(1-t_h/\text{AMAT}\), rises from 50 % to 97 %. The lecture's remark that the ratios between levels stay fixed concerns transfer rates. For latency the argument above contradicts it. For bandwidth the chapter has one proxy, the ratio of the arithmetic rate to the DRAM bandwidth: the ridge points of Williams et al. for two processors of 2008 are 4.4 and 6.7 flop per DRAM byte, and those of Table 10.3 are 4.3 to 16.6, so this ratio has grown by at most a factor of 3.8 (16.6 against 4.4) in about 16 years, against a factor of \(1.40^{16}\approx220\) for the latency gap of the argument above.</p>
+<p>The argument has a boundary. It rests on the assumption of a fixed miss rate. Ertl's critique of the paper (an undated web page) points out that the compulsory misses of a program are set by the amount of memory it touches and not by the number of instructions it executes, that longer cache lines (16 bytes on the 486, 64 bytes on the K7) reduce them, and that a memory system serves several misses at once, so that the time spent in compulsory misses is the memory touched divided by the memory bandwidth. The last point is the bytes-in-flight observation of this chapter, and it leads to the same place as the next section: the wall is a statement about a ratio, not about a latency. The ratio is \(P_{\text{peak}}/B_{\text{peak}}\), the number of flop that the arithmetic can perform in the time that memory delivers one byte. A program with fewer flop per byte than this ratio waits for memory, however many miss-rate improvements the caches deliver. One measurement of this chapter supports the lecture's side of the debate on latency: a dependent load from DRAM takes 126 to 171 ns for working sets of 16 and 64 MiB over five runs (126 to 134 ns in the printed sample) and 189 to 251 ns at 256 MiB on this machine, against 100 ns on the slide. The comparison is confounded by the virtualization layer and by 4 KiB page translation in the chain, which this chapter did not separate, so it shows that DRAM latency did not fall between the slide's era and now, and it shows no more.</p>
+
+<h2 id="stream">STREAM: the bandwidth that the memory delivers</h2>
+<p>Equation (10.2) gives 25.6 GB/s for this machine. That number is a limit set by the pins of the memory module. A program never reaches it, because rows of the memory chips must be opened, refreshed and switched between reading and writing, and because the processor keeps only a limited number of requests in flight. The bound (10.1) needs the rate that a program can sustain. McCalpin's STREAM benchmark measures that rate for four simple loops over arrays much larger than the caches: <em>copy</em> \(a_i=b_i\), <em>scale</em> \(a_i=\kappa b_i\), <em>add</em> \(a_i=b_i+c_i\), and <em>triad</em> \(a_i=b_i+\kappa c_i\) (\(\kappa\) is the scalar of the benchmark). The STREAM reference page fixes three conventions that matter here (the arrays keep STREAM's names \(a\), \(b\), \(c\)).</p>
+<p>The first is the size rule: each array must be at least 4 times the size of the sum of all the last-level caches used in the run, or one million elements, whichever is larger, so that no part of an array survives in a cache from one repetition to the next. The second is the repetition rule: the benchmark repeats the four kernels and reports the best of typically 10 trials. The third is the byte count, and it is the one that most often confuses a comparison. STREAM counts the bytes that the program asks to read and to write: 16 bytes per element for copy and scale, 24 for add and triad, and 0, 1, 1 and 2 flop per element. The page distinguishes this convention from two others, "bcopy" (which counts one transfer of the data) and "hardware" (what the memory system actually moves), and it states that most cached systems perform a <em>write allocate</em> when a store misses the data cache: they load the cache line before they overwrite it, so that the line has one valid copy. For triad, the program asks for 24 bytes per element, and a cache with write allocate moves 32: the line of \(a\) comes in, and later goes out.</p>
+<p>The bound (10.1) is a statement about bytes that cross the DRAM interface. The bandwidth in it must therefore be counted in the same way as \(Q\). A STREAM result is in the "asked for" convention, which for triad is \(24/32=75\,\%\) of the hardware traffic on a machine with write allocate. The program below measures this. It runs the four kernels on arrays of 16 million doubles (128 MB each, 10.2 times the 12 MiB last-level cache), with the pages first touched by the threads that later use them, for 1, 2, 4, 8 and 12 threads. It adds a fifth kernel, <em>triad-nt</em>, which computes the same triad with 256-bit streaming stores (<code>_mm256_stream_pd</code>): these stores write a full line to memory without reading it first, so triad-nt asks for 24 bytes and moves 24. If write allocate is the only difference between triad and triad-nt, then at a bandwidth-bound size the rate of triad-nt, in the "asked for" count, should be up to 32/24 = 1.33 times the rate of triad. Each kernel is repeated 8 times and the first repetition is dropped; the printed rate is for the best of the remaining 7. The program checks the final array values against the same recurrence run on scalars, and it needs a processor with AVX2.</p>
+<pre><code class="language-c" data-file="stream_mini.c" data-build="gcc -O2 -march=native -fopenmp stream_mini.c -o stream_mini -lm" data-run="./stream_mini" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+#include &lt;immintrin.h&gt;
+#include &lt;omp.h&gt;
+
+#define N 16000000L          /* 128 MB per array: more than 4 x the 12 MiB last-level cache, as the STREAM rules require */
+#define NTIMES 8
+#define SCALAR 3.0
+
+static double *a, *b, *c;
+
+/* bytes the program asks to read and write per element, as STREAM counts them */
+static const double bytes_per_elem[5] = {16.0, 16.0, 24.0, 24.0, 24.0};
+static const char *name[5] = {"copy", "scale", "add", "triad", "triad-nt"};
+
+static void kernel(int k)
+{
+    switch (k) {
+    case 0: {
+        #pragma omp parallel for schedule(static)
+        for (long i = 0; i &lt; N; i++) c[i] = a[i];
+        break; }
+    case 1: {
+        #pragma omp parallel for schedule(static)
+        for (long i = 0; i &lt; N; i++) b[i] = SCALAR * c[i];
+        break; }
+    case 2: {
+        #pragma omp parallel for schedule(static)
+        for (long i = 0; i &lt; N; i++) c[i] = a[i] + b[i];
+        break; }
+    case 3: {
+        #pragma omp parallel for schedule(static)
+        for (long i = 0; i &lt; N; i++) a[i] = b[i] + SCALAR * c[i];
+        break; }
+    default: {      /* triad again, but the stores bypass the cache: no write-allocate read of a[] */
+        __m256d vq = _mm256_set1_pd(SCALAR);
+        #pragma omp parallel for schedule(static)
+        for (long i = 0; i &lt; N; i += 4)
+            _mm256_stream_pd(a + i, _mm256_add_pd(_mm256_load_pd(b + i), _mm256_mul_pd(vq, _mm256_load_pd(c + i))));
+        break; }
+    }
+}
+
+int main(void)
+{
+    a = aligned_alloc(64, N * sizeof(double)); b = aligned_alloc(64, N * sizeof(double)); c = aligned_alloc(64, N * sizeof(double));
+    int plist[] = {1, 2, 4, 8, 12}, ok = 1;
+    printf("GB/s by the STREAM byte count (best of %d, first repetition dropped)\n", NTIMES - 1);
+    printf("%8s", "threads");
+    for (int k = 0; k &lt; 5; k++) printf(" %9s", name[k]);
+    printf("\n");
+    for (int pi = 0; pi &lt; 5; pi++) {
+        omp_set_num_threads(plist[pi]);
+        #pragma omp parallel for schedule(static)       /* first touch by the threads that will use the pages */
+        for (long i = 0; i &lt; N; i++) { a[i] = 1.0; b[i] = 2.0; c[i] = 0.0; }
+        double best[5] = {1e30, 1e30, 1e30, 1e30, 1e30};
+        for (int rep = 0; rep &lt; NTIMES; rep++)
+            for (int k = 0; k &lt; 5; k++) {
+                double t0 = omp_get_wtime();
+                kernel(k);
+                double t = omp_get_wtime() - t0;
+                if (rep &gt; 0 &amp;&amp; t &lt; best[k]) best[k] = t;
+            }
+        /* each repetition runs copy, scale, add, triad, triad-nt; the last two both leave a = b + SCALAR*c */
+        double ea = 1.0, eb = 2.0, ec = 0.0;
+        for (int rep = 0; rep &lt; NTIMES; rep++) { ec = ea; eb = SCALAR * ec; ec = ea + eb; ea = eb + SCALAR * ec; ea = eb + SCALAR * ec; }
+        if (fabs(a[N - 1] - ea) &gt; 1e-9 * ea || fabs(b[7] - eb) &gt; 1e-9 * eb || fabs(c[N / 2] - ec) &gt; 1e-9 * ec) ok = 0;
+        printf("%8d", plist[pi]);
+        for (int k = 0; k &lt; 5; k++) printf(" %9.1f", bytes_per_elem[k] * (double)N / best[k] / 1e9);
+        printf("\n");
+    }
+    printf("results checked against the scalar recurrence: %s\n", ok ? "ok" : "MISMATCH");
+    return ok ? 0 : 1;
+}
+</code></pre>
+<pre><code class="output">GB/s by the STREAM byte count (best of 7, first repetition dropped)
+ threads      copy     scale       add     triad  triad-nt
+       1       9.8      10.4      11.4      11.7      15.5
+       2      11.3      11.7      12.8      12.6      16.2
+       4      14.4      14.5      14.6      15.0      16.4
+       8      14.0      13.9      14.3      14.1      16.0
+      12      13.1      13.4      13.2      13.7      16.3
+results checked against the scalar recurrence: ok</code></pre>
+<p>In the printed sample, one thread reaches 11.7 GB/s on triad (asked-for count) and 15.5 GB/s on triad-nt. The rates rise to a plateau at about 4 threads (copy 14.4, scale 14.5, add 14.6, triad 15.0, triad-nt 16.4 GB/s) and are not higher with 8 threads. At 12 threads the four ordinary kernels fall by 8 to 10 % from their 4-thread values, and triad-nt stays at 16.3 GB/s. Over the five runs the best triad rate lay between 12.6 and 15.0 GB/s and the best triad-nt rate between 14.7 and 17.6 GB/s. With write allocate assumed, the DRAM traffic at 4 threads is \(14.4\times24/16=21.6\) GB/s for copy, 21.8 for scale, \(14.6\times32/24=19.5\) for add and \(15.0\times32/24=20.0\) for triad, that is 76 to 85 % of the pin rate of (10.2); triad-nt, which has no write allocate, moves 16.4 GB/s, 64 %. Three results follow. (1) One thread already obtains 78 % of the best triad rate (11.7 of 15.0 GB/s). Bandwidth is not scarce at the first thread, and this is why a bandwidth-bound loop has a small parallel speedup. (2) The write-allocate test gives mixed support. At 1 and 2 threads triad-nt is 1.32 and 1.29 times as fast as triad, close to the predicted 32/24 = 1.33. At 4, 8 and 12 threads the ratio falls to 1.09, 1.13 and 1.19, and the hardware rates that the prediction assigns to the kernels with stores (19.5 to 21.8 GB/s) exceed the 16.4 GB/s of triad-nt. So the plateau is not one pin limit shared by all kernels; exercise 6 and the section on limits return to this. (3) The \(B_{\text{peak}}\) of the model has to be a measured rate, and it has to be measured with the access pattern of the program that it bounds: the scale kernel, which reads one stream and writes one as the sweep does, gives 21.8 GB/s of DRAM traffic if every store reads its line, and the next program shows that this is an upper estimate; the asked-for 14.5 GB/s is the lower one. The pins give 25.6 GB/s, which no kernel reached. The program also checks that the final array values equal the scalar recurrence, so the timings are those of correct computations.</p>
+<p>The write-only fill below tests the write-allocate premise directly, without counters. It stores 8 bytes per element into an array of 128 MB, once with ordinary stores and once with 256-bit streaming stores that do not read the line first. If an ordinary store always reads its line, the ordinary fill moves 16 bytes for the 8 it asks for, and the streaming fill should be about twice as fast when the memory is the limit.</p>
+<pre><code class="language-c" data-file="fill_mini.c" data-build="gcc -O2 -march=native -fopenmp fill_mini.c -o fill_mini" data-run="./fill_mini" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;immintrin.h&gt;
+#include &lt;omp.h&gt;
+
+#define N 16000000L          /* 128 MB: more than 10 times the 12 MiB last-level cache */
+
+int main(void)
+{
+    double *a = aligned_alloc(64, N * sizeof(double));
+    const double x = 3.0;
+    printf("write-only fill of 8 bytes per element, GB/s of bytes asked for (best of 7)\n");
+    printf("%8s %10s %14s %8s\n", "threads", "ordinary", "streaming", "ratio");
+    int plist[] = {1, 2, 4, 8, 12};
+    for (int pi = 0; pi &lt; 5; pi++) {
+        int p = plist[pi];
+        omp_set_num_threads(p);
+        #pragma omp parallel for schedule(static)
+        for (long i = 0; i &lt; N; i++) a[i] = 0.0;
+        double ord = 1e30, nt = 1e30;
+        for (int rep = 0; rep &lt; 8; rep++) {
+            double t0 = omp_get_wtime();
+            #pragma omp parallel for schedule(static)
+            for (long i = 0; i &lt; N; i++) a[i] = x;
+            double t1 = omp_get_wtime();
+            __m256d vx = _mm256_set1_pd(x);
+            #pragma omp parallel for schedule(static)
+            for (long i = 0; i &lt; N; i += 4) _mm256_stream_pd(a + i, vx);
+            double t2 = omp_get_wtime();
+            if (rep &gt; 0 &amp;&amp; t1 - t0 &lt; ord) ord = t1 - t0;
+            if (rep &gt; 0 &amp;&amp; t2 - t1 &lt; nt) nt = t2 - t1;
+        }
+        printf("%8d %10.1f %14.1f %8.2f\n", p, 8.0 * N / ord / 1e9, 8.0 * N / nt / 1e9, ord / nt);
+    }
+    for (long i = 0; i &lt; N; i += N / 7) if (a[i] != x) { puts("MISMATCH"); return 1; }
+    puts("contents checked");
+    return 0;
+}
+</code></pre>
+<pre><code class="output">write-only fill of 8 bytes per element, GB/s of bytes asked for (best of 7)
+ threads   ordinary      streaming    ratio
+       1        9.4           20.8     2.21
+       2       11.7           18.3     1.56
+       4       14.6           17.2     1.17
+       8       13.0           17.9     1.38
+      12       12.8           18.1     1.42
+contents checked</code></pre>
+<p>At one thread the streaming fill is 2.2 times as fast as the ordinary fill (20.8 against 9.4 GB/s of bytes asked for; 2.05 to 2.21 over five runs), as a full read of every line by the ordinary stores would give. At 4 threads the ordinary fill reaches 14.6 GB/s of bytes asked for. If each of those bytes carried an extra read, DRAM would move 29.2 GB/s, above the 25.6 GB/s pin rate of (10.2). So write allocate does not charge the full extra read at 4 threads, and the ratio there is 1.17 (1.17 to 1.46 over the runs), not 2. The streaming fill itself stays at 17 to 21 GB/s. The data say that the DRAM traffic of ordinary stores lies between 1 and 2 times the bytes asked for, depending on the thread count, and that the 3/2 factor used for the scale kernel is an upper estimate. If an ordinary store costs a fraction \(w\) of a full extra read, the sweep moves \(16+8w\) bytes per point and the scale kernel moves \(1+w/2\) times its asked-for bytes, so the roof of the sweep does not depend on \(w\). The placement against the scale kernel below does not depend on the choice.</p>
+
+<h2 id="roofline">The Roofline model: derivation, assumptions and the ceilings of this machine</h2>
+<p>Williams, Waterman and Patterson (2008 report; CACM 52(4), 2009) turn the bound (10.1) into a picture. Divide (10.1) into \(F\): the attainable rate \(P=F/T\) satisfies \(P\le P_{\text{peak}}\) and \(P\le F B_{\text{peak}}/Q=I\,B_{\text{peak}}\), so</p>
+\[
+P(I)=\min\bigl(P_{\text{peak}},\ I\,B_{\text{peak}}\bigr). \tag{10.8}
+\]
+<p>This is the formula in §3 of the report: "Attainable GFlops/sec = Min(Peak Floating Point Performance, Peak Memory Bandwidth × Operational Intensity)". On a plot with \(\log I\) on the horizontal axis and \(\log P\) on the vertical axis the first argument is a horizontal line and the second is a line of slope one, which together form the "roofline". The two lines meet at the <em>ridge point</em></p>
+\[
+I^{*}=\frac{P_{\text{peak}}}{B_{\text{peak}}}, \tag{10.9}
+\]
+<p>the smallest intensity at which a program can reach the arithmetic peak. A program with \(I\lt I^{*}\) is memory-bound and a program with \(I\gt I^{*}\) can be compute-bound. A ridge point far to the right means that only programs with a very high intensity can use the arithmetic of the machine. The authors take the ridge point as a measure of how hard it is to reach the peak. The report quotes ridge points of 6.7 (Xeon) and 4.4 (Opteron X4) flop per DRAM byte for two multicores of 2008 (§6.3).</p>
+<p>The report uses the name <em>operational intensity</em> for flop per byte of DRAM traffic after the caches have filtered the accesses, and it gives its reason for not using "arithmetic intensity": the older term counts the traffic between the processor and the cache, and the model needs the traffic between the caches and DRAM. The book's symbol \(I=F/Q\), with \(Q\) defined as the DRAM traffic in the section above, is the report's operational intensity.</p>
+<p><strong>What (10.8) assumes.</strong> (A1) Compute and data movement overlap completely, so that the time is the larger of the two terms and not their sum. (A2) \(Q\) counts the bytes at the DRAM interface after the caches have served every reuse they can; it is not the count of loads and stores that the program issues. The bound is correct with this \(Q\) whatever the cache size, and \(Q\) itself depends on the cache size (the three cases of the next section). (A3) \(P_{\text{peak}}\) and \(B_{\text{peak}}\) are rates that a program can approach, so they are measured and not read from a specification. The bound is an upper limit. A measured rate above it means that \(Q\) was overstated or that the caches served more than assumed. A measured rate far below it is the useful case: it points to a ceiling below the roof that the program has not broken through. The report names such ceilings: instruction-level parallelism and SIMD for the horizontal roof, unit-stride access and prefetching for the diagonal.</p>
+<p><strong>The arithmetic roof of this machine.</strong> The program below measures \(P_{\text{peak}}\). Each thread runs 10 independent chains of 4-lane (256-bit) fused multiply-adds; ten chains cover the latency of the FMA unit, and the start values differ so that the compiler cannot merge the chains. One round of the loop is 10 vector FMAs, 80 flop. Each thread does the same work, the program starts all threads together and takes the time of the slowest, as in the false-sharing section of Chapter 11, so the printed rate is \(p\) times the speed of the slowest thread. The program takes the best of 3 repetitions.</p>
+<pre><code class="language-c" data-file="peak_fma.c" data-build="gcc -O2 -march=native -fopenmp peak_fma.c -o peak_fma" data-run="./peak_fma" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+typedef double v4 __attribute__((vector_size(32)));    /* 4 doubles = one 256-bit register */
+
+#define CHAINS 10                                      /* independent accumulators hide the FMA latency */
+#define ITERS 100000000L
+
+/* one thread: ITERS rounds of CHAINS fused multiply-adds on 4 lanes = ITERS*CHAINS*4*2 flop */
+static double burn(void)
+{
+    v4 m = {1.0000001, 1.0000001, 1.0000001, 1.0000001}, add = {1e-9, 1e-9, 1e-9, 1e-9};
+    v4 a0 = {1, 2, 3, 4}, a1 = a0 + 1, a2 = a0 + 2, a3 = a0 + 3, a4 = a0 + 4,       /* distinct start values: */
+       a5 = a0 + 5, a6 = a0 + 6, a7 = a0 + 7, a8 = a0 + 8, a9 = a0 + 9;               /* the chains cannot be merged */
+    for (long i = 0; i &lt; ITERS; i++) {                 /* each product-and-sum is contracted to one vfmadd */
+        a0 = a0 * m + add; a1 = a1 * m + add; a2 = a2 * m + add; a3 = a3 * m + add; a4 = a4 * m + add;
+        a5 = a5 * m + add; a6 = a6 * m + add; a7 = a7 * m + add; a8 = a8 * m + add; a9 = a9 * m + add;
+    }
+    v4 s = a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9;
+    return s[0] + s[1] + s[2] + s[3];
+}
+
+int main(void)
+{
+    double flop_per_thread = (double)ITERS * CHAINS * 4 * 2, sink = 0.0;
+    printf("%8s %10s %10s\n", "threads", "Gflop/s", "per thread");
+    int plist[] = {1, 2, 4, 8, 12};
+    for (int pi = 0; pi &lt; 5; pi++) {
+        int p = plist[pi];
+        double best = 1e30;
+        for (int rep = 0; rep &lt; 3; rep++) {
+            double t0 = omp_get_wtime();
+            #pragma omp parallel num_threads(p) reduction(+:sink)
+            sink += burn();
+            double t = omp_get_wtime() - t0;                  /* the slowest thread sets the time */
+            if (t &lt; best) best = t;
+        }
+        printf("%8d %10.1f %10.1f\n", p, p * flop_per_thread / best / 1e9, flop_per_thread / best / 1e9);
+    }
+    if (sink &lt; 0.0) puts("unreachable");
+    return 0;
+}
+</code></pre>
+<pre><code class="output"> threads    Gflop/s per thread
+       1       66.7       66.7
+       2      121.4       60.7
+       4      165.2       41.3
+       8      198.5       24.8
+      12      202.2       16.8</code></pre>
+<p>One thread reaches 66.7 Gflop/s in the sample (48 to 67 over five runs). The product of the maximum turbo frequency of a performance core, 4.40 GHz (Intel ARK, as recorded for Chapter 11; Chapter 7 opened the page, this chapter's own request returned HTTP 403), and 16 flop per cycle for two 256-bit FMA pipes is 70.4 Gflop/s, and the measurement is 95 % of it. The 16 flop per cycle were not checked in an Intel manual; the measurement is consistent with them. The aggregate rates are 121.4, 165.2, 198.5 and 202.2 Gflop/s for 2, 4, 8 and 12 threads. Against \(p\) times the one-thread rate these are 91, 62, 37 and 25 %. The loss from four threads on is what a hybrid processor with shared execution units produces, as Chapter 11 measured for its \(\pi\) loop. The placement of the threads was not controlled. Over five runs the 12-thread rate lay between 196 and 210 Gflop/s; four earlier runs gave 233 to 290 Gflop/s.</p>
+<p><strong>Reading the two roofs together.</strong> The bandwidth that belongs in the roof of a kernel is the one measured with the same access pattern. The Jacobi sweep reads one stream (\(u\)) and writes one stream (\(u^{\text{new}}\)), as the copy and scale kernels of STREAM do. Both ask for 16 bytes per element and, with write allocate, move 24; so the DRAM traffic is 3/2 of the asked-for count. From the samples, one thread has \(P_{\text{peak}}=66.7\) Gflop/s and \(B_{\text{peak}}=15.6\) GB/s (the scale kernel on one thread, 10.4 GB/s asked for, times 3/2; the triad gives the same value, 11.7 times 4/3), so \(I^{*}=4.3\) flop/B. The twelve logical processors together have \(P_{\text{peak}}=202\) Gflop/s and \(B_{\text{peak}}=21.8\) GB/s (the scale kernel at 4 threads, 14.5 GB/s, times 3/2; copy gives 21.6), so \(I^{*}=9.3\) flop/B. The ridge moves to the right as threads are added because the arithmetic scales with the number of cores, up to the limit of the hybrid processor, while the bandwidth saturates after about four threads. This is the quantitative form of the lecture's closing advice to reuse the data that has come down to the faster levels: the arithmetic units wait for the memory.</p>
+
+<h2 id="jacobi">The Jacobi sweep under the roof</h2>
+<p>The intensity of the sweep has three values, according to what the caches do. Count the bytes of one sweep on a grid much larger than the caches, with 5 flop per point (Chapter 9 counts the same five: three additions and one multiplication for the average and one subtraction for the change).</p>
+<ol>
+<li><strong>No reuse of loaded values.</strong> Every one of the five loads of the stencil comes from DRAM: 40 bytes. The store of \(u^{\text{new}}\) writes 8 bytes and, with write allocate, first reads the line: 16 bytes more. Total 56 bytes per point; \(I=5/56=0.089\).</li>
+<li><strong>Rows reused from cache, ordinary stores.</strong> The point \((i,j)\) needs the rows \(i-1,i,i+1\) of \(u\). Moving from row \(i\) to row \(i+1\) needs the rows \(i,i+1,i+2\), of which two are already loaded. If the three rows stay in cache while the sweep runs along a row, each value of \(u\) comes from DRAM once: 8 bytes. The store costs 8 bytes of read and 8 bytes of write-back. Total 24 bytes; \(I=5/24=0.208\).</li>
+<li><strong>Rows reused, streaming stores.</strong> As in case 2, but the stores bypass the cache and need no read: 16 bytes; \(I=5/16=0.3125\).</li>
+</ol>
+<p>Every implementation of one sweep moves at least 16 bytes per point once the grid exceeds the cache: each interior value of \(u\) must be read at least once, and each value of \(u^{\text{new}}\) must be written once. Hence \(Q\ge16N^{2}\) and \(I\le0.3125\) for every way of coding a single sweep. Tuning the loop can move the sweep from case 1 to case 3 and no further. Williams et al. (§6.3.3) count the same structure for the explicit heat-equation stencil on a 3-D grid, 7 points: 8 flop for 24 bytes of compulsory traffic on write-allocate machines, an operational intensity of 0.33.</p>
+<p><strong>The layer condition.</strong> Case 2 holds when the three rows of \(u\) stay in cache. Three rows are \(3(N+2)\times8\) bytes. A cache replaces by use and not by plan, and the stream of \(u^{\text{new}}\) also passes through it, so a common rule of thumb asks that the rows fit in half of the cache of capacity \(C\):</p>
+\[
+24\,(N+2)\le \frac{C}{2}\quad\Longleftrightarrow\quad N\le\frac{C}{48}-2. \tag{10.10}
+\]
+<p>The rule is a heuristic and not a theorem. For the 48 KiB first-level cache it gives \(N\le1022\); for the 1.25 MiB second-level cache of a performance core, \(N\le27\,304\). The experiments below use \(N\le8192\). For \(N=4096\), three rows are 96 KiB: they do not fit in the first-level cache and they fit in the second, which is enough for DRAM traffic (the rows move from the second-level cache to the first-level cache several times, which does not reach DRAM). The condition holds for every out-of-cache size of the experiment, so the DRAM traffic is that of case 2 or case 3. For \(N\le512\) the whole working set, \(2(N+2)^2\times8\) bytes, is at most 4.2 MB and fits in the second-level or the third-level cache; DRAM is not involved, and the roof is a cache roof, which this chapter does not measure.</p>
+<p><strong>The bound.</strong> With \(I=5/24\) and the hardware bandwidth of the previous section, (10.8) gives \(P\le4.5\) Gflop/s for case 2 and \(P\le6.8\) Gflop/s for case 3 (5.1 Gflop/s with the 16.4 GB/s that the streaming stores reached). Against \(P_{\text{peak}}=202\) Gflop/s of the whole machine this is 2.2 % and 3.4 %. If an ordinary store costs a fraction \(w\) of a full extra read (the fill test above shows \(w\lt1\) at 4 threads), the sweep moves \(Q=16+8w\) bytes per point and the scale kernel, which has the same pattern, moves \(14.5(1+w/2)\) GB/s; the case-2 roof \(5B/Q=5\times14.5/16=4.53\) Gflop/s does not depend on \(w\). The roof of case 3, with streaming stores, is 5.1 Gflop/s at the 16.4 GB/s that the streaming-store triad reached. The sweep sits at \(I=0.208\) and the ridge is at \(I^{*}=9.3\): the sweep is to the left of the ridge by a factor of 45 in intensity (30 for case 3). The listing below measures it. It is the book's kernel, with the OpenMP directives of Chapters 11 and 12 added: <code>parallel for</code> splits the rows among the threads, <code>reduction(max:…)</code> combines the per-thread maxima, and <code>omp simd</code> allows the compiler to vectorize the inner loop with the maximum reduction. With one thread it is the serial kernel. The program first sweeps grids from \(N=64\) to 8192 on one thread, and then \(N=4096\) with 1 to 12 threads. It prints the time per point, the rate in Gflop/s at 5 flop per point, and a bandwidth computed from the modelled 24 bytes per point; that figure is a model value, not a measured byte count, because the guest shows no hardware counters. The build uses <code>-O3 -march=native</code>, whereas the serial timings of Chapter 9 use <code>-O2</code>; the interpretation below compares the two. The next program checks that the threaded sweep gives the same grid as the serial one.</p>
+<pre><code class="language-c" data-file="jacobi_bench.c" data-build="gcc -O3 -march=native -fopenmp jacobi_bench.c -o jacobi_bench -lm" data-run="./jacobi_bench" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+#include &lt;omp.h&gt;
+
+#define IDX(i, j) ((i) * (N + 2) + (j))
+
+/* One Jacobi sweep on the (N+2) x (N+2) grid u: 5-point average into the interior of unew,
+   returns max |unew - u| over the interior. With one thread this is the serial kernel. */
+static double jacobi_step(int N, const double *u, double *unew)
+{
+    double maxd = 0.0;
+    #pragma omp parallel for reduction(max:maxd) schedule(static)
+    for (int i = 1; i &lt;= N; i++) {
+        #pragma omp simd reduction(max:maxd)
+        for (int j = 1; j &lt;= N; j++) {
+            double v = 0.25 * (u[IDX(i - 1, j)] + u[IDX(i + 1, j)] + u[IDX(i, j - 1)] + u[IDX(i, j + 1)]);
+            double d = fabs(v - u[IDX(i, j)]);
+            if (d &gt; maxd) maxd = d;
+            unew[IDX(i, j)] = v;
+        }
+    }
+    return maxd;
+}
+
+static double *make_grid(int N)
+{
+    size_t n = (size_t)(N + 2) * (size_t)(N + 2);
+    double *g = malloc(n * sizeof(double));
+    #pragma omp parallel for schedule(static)           /* first touch with the same row split as the sweep */
+    for (int i = 0; i &lt; N + 2; i++)
+        for (int j = 0; j &lt; N + 2; j++) g[IDX(i, j)] = (i == 0) ? 1.0 : 0.0;   /* u = 1 on the top edge, 0 elsewhere */
+    return g;
+}
+
+/* best time of three runs of 'sweeps' sweeps, in seconds per sweep */
+static double time_sweeps(int N, int sweeps)
+{
+    double *u = make_grid(N), *unew = make_grid(N), best = 1e30, sink = 0.0;
+    for (int rep = 0; rep &lt; 3; rep++) {
+        double t0 = omp_get_wtime();
+        for (int s = 0; s &lt; sweeps; s++) {
+            sink += jacobi_step(N, u, unew);
+            double *t = u; u = unew; unew = t;
+        }
+        double t = (omp_get_wtime() - t0) / sweeps;
+        if (t &lt; best) best = t;
+    }
+    if (sink &lt; 0.0) puts("unreachable");
+    free(u); free(unew);
+    return best;
+}
+
+int main(void)
+{
+    const double flop_per_point = 5.0, bytes_per_point = 24.0;   /* the model of the text: 3 add + 1 mul for the average, 1 sub for the change; 8 B read + 8 B write + 8 B write-allocate */
+    printf("serial sweep, 5 flop and 24 B per point (modelled, not measured)\n");
+    printf("%6s %10s %9s %9s %9s\n", "N", "set (MiB)", "ns/point", "Gflop/s", "GB/s");
+    omp_set_num_threads(1);
+    for (int N = 64; N &lt;= 8192; N *= 2) {
+        double mib = 2.0 * (N + 2.0) * (N + 2.0) * 8.0 / 1048576.0;
+        int sweeps = (int)(1e8 / ((double)N * N)) + 1;
+        double t = time_sweeps(N, sweeps), pts = (double)N * N;
+        printf("%6d %10.2f %9.3f %9.2f %9.1f\n", N, mib, t / pts * 1e9, flop_per_point * pts / t / 1e9, bytes_per_point * pts / t / 1e9);
+    }
+    printf("\nN = 4096, threads\n%8s %9s %9s %9s %9s\n", "threads", "ns/point", "Gflop/s", "GB/s", "speedup");
+    int plist[] = {1, 2, 4, 8, 12};
+    double t1 = 0.0, pts = 4096.0 * 4096.0;
+    for (int k = 0; k &lt; 5; k++) {
+        omp_set_num_threads(plist[k]);
+        double t = time_sweeps(4096, 4);
+        if (k == 0) t1 = t;
+        printf("%8d %9.3f %9.2f %9.1f %9.2f\n", plist[k], t / pts * 1e9, flop_per_point * pts / t / 1e9, bytes_per_point * pts / t / 1e9, t1 / t);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">serial sweep, 5 flop and 24 B per point (modelled, not measured)
+     N  set (MiB)  ns/point   Gflop/s      GB/s
+    64       0.07     0.399     12.52      60.1
+   128       0.26     0.365     13.72      65.8
+   256       1.02     0.366     13.65      65.5
+   512       4.03     0.435     11.49      55.2
+  1024      16.06     1.088      4.60      22.1
+  2048      64.13     1.462      3.42      16.4
+  4096     256.25     1.545      3.24      15.5
+  8192    1024.50     1.470      3.40      16.3
+
+N = 4096, threads
+ threads  ns/point   Gflop/s      GB/s   speedup
+       1     1.495      3.34      16.1      1.00
+       2     1.354      3.69      17.7      1.10
+       4     1.123      4.45      21.4      1.33
+       8     1.129      4.43      21.3      1.32
+      12     1.182      4.23      20.3      1.27</code></pre>
+<p>For \(N\le256\) the sweep runs at 12.5, 13.7 and 13.7 Gflop/s on one thread, and at 11.5 Gflop/s for \(N=512\) (a 4.0 MiB working set). These sets fit in the second-level or third-level cache, so the rate is that of a cache roof, and the modelled 55 to 66 GB/s of those rows is not DRAM traffic. At \(N=1024\) (16 MiB, just above the 12 MiB level-3 cache) the rate is 4.60 Gflop/s, and for \(N=2048\), 4096 and 8192 it is 3.42, 3.24 and 3.40 Gflop/s, 15.5 to 16.4 GB/s in the modelled count. A latency-bound loop would get slower as the working set grows; this one is flat from 2048 to 8192, which is what a bandwidth-bound loop does. The serial kernel of Chapter 9, built with <code>-O2</code> and without <code>omp simd</code>, so that its maximum reduction stays scalar, takes 1.5 ns per point in cache and 2.2 to 2.4 ns per point beyond the level-3 cache (its <code>jacobi_time.c</code>); this program takes 0.37 and 1.5 ns. Vectorization shortens the in-cache time by a factor of four and the out-of-cache time by a factor of 1.5. The out-of-cache gain shows that the scalar kernel of Chapter 9 was below the bandwidth roof, and the vectorized kernel reaches it (100 % of the one-thread roof). The single-thread rate at \(N=4096\) is 100 % of the one-thread roof of case 2 (3.25 Gflop/s, from <code>roofline.py</code> below). The thread table at \(N=4096\) gives 3.34, 3.69, 4.45 and 4.43 Gflop/s for 1, 2, 4 and 8 threads, speedups of 1.10, 1.33 and 1.32 on 2, 4 and 8 threads, and 4.23 Gflop/s on 12 threads. The roofline predicts the saturation. The bound of case 2 is \(I\,B\), so the largest speedup that more bandwidth can give is the ratio of the bandwidth ceilings, \(21.8/15.6=1.40\); the measured 1.33 is 95 % of it. The \(\pi\) loop of Chapter 11, which has no array traffic, reached a speedup of 3.7 to 4.1 on the same machine. Twelve threads ran the sweep more slowly than eight in each of the five runs (3.0 to 4.2 against 4.1 to 4.5 Gflop/s). The chapter did not test why. A possible cause is that 12 threads on 12 logical processors, some of them hardware-thread siblings, issue more competing requests than the memory system serves well. The listing <code>roofline.py</code> computes the intensities, the layer condition and the placement from the numbers of the samples; the constants in it are copied from the printed outputs of <code>peak_fma.c</code> and <code>stream_mini.c</code>, and the 24 bytes per point are a model. The sample places the sweep at 98 to 103 % of the roof built from the scale rate at the same thread count (1, 2, 4 and 8 threads; 101 % at 2 threads, roof 3.66 Gflop/s), and at 2.2 % of the arithmetic peak at 4 and 8 threads. The placement does not depend on the write-allocate assumption: it compares the sweep with the scale kernel in the same count, 14.2 against 14.5 GB/s of bytes asked for at 4 threads.</p>
+<pre><code class="language-python" data-file="roofline.py" data-run="python3 roofline.py">"""Intensity of the Jacobi sweep, the layer condition and the roofline of the measured machine."""
+
+F = 5                                              # flop per grid point: 3 add, 1 mul for the average, 1 sub for the change
+cases = [("no reuse of loaded values", 40 + 8 + 8), ("rows reused, ordinary stores", 8 + 8 + 8), ("rows reused, streaming stores", 8 + 8)]
+# constants taken from the printed samples of peak_fma.c and stream_mini.c (see the text);
+# P1 and PALL: rates of 1 and 12 threads; B1 and BALL: scale rate of 1 and 4 threads, times 24/16;
+# in the placement, each thread count uses the scale rate of the same count (11.7 at 2 and 13.9 at 8 threads)
+P1, PALL = 66.7, 202.2                             # Gflop/s, one thread and twelve threads
+B1, BALL = 10.4 * 3 / 2, 14.5 * 3 / 2              # GB/s of DRAM traffic: scale kernel (one read stream, one write stream, as the sweep), counted 16 B of 24 B moved
+print(f"ceilings: one thread {P1} Gflop/s and {B1:.1f} GB/s, ridge {P1 / B1:.1f} flop/B; "
+      f"12 threads {PALL} Gflop/s and {BALL:.1f} GB/s, ridge {PALL / BALL:.1f} flop/B")
+print(f"{'case':32s} {'B/point':&gt;8} {'I flop/B':&gt;9} {'bound 1 thr':&gt;12} {'bound 12 thr':&gt;13}")
+for name, b in cases:
+    I = F / b
+    print(f"{name:32s} {b:8d} {I:9.3f} {min(P1, I * B1):9.2f} Gf {min(PALL, I * BALL):10.2f} Gf")
+
+print("\nlayer condition 24 (N+2) &lt;= C/2, N &lt;= C/48 - 2")
+for name, c in [("L1d 48 KiB", 48 * 1024), ("L2 1.25 MiB", int(1.25 * 1024 * 1024)), ("L3 12 MiB (whole)", 12 * 1024 * 1024)]:
+    print(f"  {name:20s} N &lt;= {c // 48 - 2:,}")
+print(f"  N = 4096: three rows are {3 * 4098 * 8 / 1024:.0f} KiB; working set of two grids {2 * 4098 ** 2 * 8 / 2 ** 20:.0f} MiB")
+
+print("\nplacement of the samples of jacobi_bench.c (N = 4096), case 2 roof I = 5/24")
+for label, gf, p, b in [("1 thread", 3.34, P1, B1), ("2 threads", 3.69, PALL, 11.7 * 3 / 2), ("4 threads", 4.45, PALL, BALL), ("8 threads", 4.43, PALL, 13.9 * 3 / 2)]:
+    roof = min(p, 5 / 24 * b)
+    print(f"  {label}: {gf:.2f} Gflop/s = {gf / roof * 100:3.0f} % of the roof {roof:.2f} and {gf / p * 100:.1f} % of the arithmetic peak {p}")
+</code></pre>
+<pre><code class="output">ceilings: one thread 66.7 Gflop/s and 15.6 GB/s, ridge 4.3 flop/B; 12 threads 202.2 Gflop/s and 21.8 GB/s, ridge 9.3 flop/B
+case                              B/point  I flop/B  bound 1 thr  bound 12 thr
+no reuse of loaded values              56     0.089      1.39 Gf       1.94 Gf
+rows reused, ordinary stores           24     0.208      3.25 Gf       4.53 Gf
+rows reused, streaming stores          16     0.312      4.88 Gf       6.80 Gf
+
+layer condition 24 (N+2) &lt;= C/2, N &lt;= C/48 - 2
+  L1d 48 KiB           N &lt;= 1,022
+  L2 1.25 MiB          N &lt;= 27,304
+  L3 12 MiB (whole)    N &lt;= 262,142
+  N = 4096: three rows are 96 KiB; working set of two grids 256 MiB
+
+placement of the samples of jacobi_bench.c (N = 4096), case 2 roof I = 5/24
+  1 thread: 3.34 Gflop/s = 103 % of the roof 3.25 and 5.0 % of the arithmetic peak 66.7
+  2 threads: 3.69 Gflop/s = 101 % of the roof 3.66 and 1.8 % of the arithmetic peak 202.2
+  4 threads: 4.45 Gflop/s =  98 % of the roof 4.53 and 2.2 % of the arithmetic peak 202.2
+  8 threads: 4.43 Gflop/s = 102 % of the roof 4.34 and 2.2 % of the arithmetic peak 202.2</code></pre>
+<pre><code class="language-c" data-file="jacobi_check.c" data-build="gcc -O2 -fopenmp jacobi_check.c -o jacobi_check -lm" data-run="./jacobi_check">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;math.h&gt;
+#include &lt;omp.h&gt;
+
+#define GRID 128
+#define SWEEPS 200
+#define IDX(i, j) ((i) * (N + 2) + (j))
+
+static double jacobi_step(int N, const double *u, double *unew)
+{
+    double maxd = 0.0;
+    #pragma omp parallel for reduction(max:maxd) schedule(static)
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            double v = 0.25 * (u[IDX(i - 1, j)] + u[IDX(i + 1, j)] + u[IDX(i, j - 1)] + u[IDX(i, j + 1)]);
+            double d = fabs(v - u[IDX(i, j)]);
+            if (d &gt; maxd) maxd = d;
+            unew[IDX(i, j)] = v;
+        }
+    return maxd;
+}
+
+/* run SWEEPS sweeps with p threads; leave the final grid in out, return the last max change */
+static double run(int N, int p, double *out)
+{
+    size_t n = (size_t)(N + 2) * (N + 2);
+    double *u = calloc(n, sizeof(double)), *unew = calloc(n, sizeof(double)), d = 0.0;
+    for (int j = 0; j &lt; N + 2; j++) u[IDX(0, j)] = unew[IDX(0, j)] = 1.0;     /* u = 1 on the top edge */
+    omp_set_num_threads(p);
+    for (int s = 0; s &lt; SWEEPS; s++) {
+        d = jacobi_step(N, u, unew);
+        double *t = u; u = unew; unew = t;
+    }
+    memcpy(out, u, n * sizeof(double));
+    free(u); free(unew);
+    return d;
+}
+
+int main(void)
+{
+    int N = GRID;
+    size_t n = (size_t)(N + 2) * (N + 2);
+    double *g1 = malloc(n * sizeof(double)), *g4 = malloc(n * sizeof(double));
+    double d1 = run(N, 1, g1), d4 = run(N, 4, g4), sum = 0.0;
+    for (size_t k = 0; k &lt; n; k++) sum += g1[k];
+    printf("N = %d, %d sweeps\n", N, SWEEPS);
+    printf("max change in the last sweep: %.10e (1 thread), %.10e (4 threads)\n", d1, d4);
+    printf("u at row 8, middle column: %.10f\n", g1[IDX(8, N / 2)]);
+    printf("u at the centre:           %.10e\n", g1[IDX(N / 2, N / 2)]);
+    printf("sum of all grid values: %.6f\n", sum);
+    printf("grids identical bit for bit: %s\n", memcmp(g1, g4, n * sizeof(double)) == 0 ? "yes" : "no");
+    return 0;
+}
+</code></pre>
+<pre><code class="output">N = 128, 200 sweeps
+max change in the last sweep: 1.2103569478e-03 (1 thread), 1.2103569478e-03 (4 threads)
+u at row 8, middle column: 0.4243244853
+u at the centre:           1.1407522563e-10
+sum of all grid values: 1033.128230
+grids identical bit for bit: yes</code></pre>
+<p>The grids agree bit for bit, because each point of \(u^{\text{new}}\) is computed from \(u\) alone and the maximum of positive numbers does not depend on the order of the comparisons. The values also show a property of Jacobi iteration that matters for the cost: after 200 sweeps on a grid with \(N=128\) the centre, 64 rows from the heated edge, holds \(1.1\times10^{-10}\), although the boundary value reached it at sweep 64; the point 8 rows from the edge is at 0.42. A Jacobi sweep moves information one grid point, but the value spreads like diffusion, over a distance of the order of the square root of the number of sweeps, which is why the number of sweeps to convergence grows as \(N^2\) (Chapter 9).</p>
+<p><strong>What the result changes in practice.</strong> Four consequences follow for the running case. First, adding threads beyond the number that saturates the memory buys nothing for this sweep on this machine, in contrast with the \(\pi\) loop of Chapter 11, which has no array traffic and scales to the arithmetic limit of the machine. Second, the one change that raises the roof is more bandwidth: a second memory module would double the pin rate of (10.2) from 25.6 to 51.2 GB/s; if the same 85 % of it were sustained, the bound of the sweep at four or more threads would double as well, and the \(\pi\) loop would not change. The chapter did not measure this, and one thread, which is limited by the requests it keeps in flight, would gain less. Third, changing the intensity needs a change of the data: a sweep in single precision has \(I=5/12=0.42\) in case 2, at the price of the precision of the answer, and a sweep that performs several iterations on one block of rows before it moves on (time blocking) raises \(I\) at the price of a different schedule. Neither is part of the book's kernel. Fourth, the result is the reason why accelerators matter for this problem: what they supply is bandwidth, as the next sections show.</p>
+
+<h2 id="systems">Shared-memory and distributed-memory machines, and the node of a leadership system <a class="timestamp" href="https://www.youtube.com/watch?v=iE47tWwhBKs&amp;t=6s">W3L4 0:06</a></h2>
+<p>The lecture divides parallel machines into two classes. In a <em>shared-memory</em> machine every processor can address the whole data space. The lecture's slide lists the advantages as ease of programming, suitability for automatic parallelization by compilers, and the ability to run large-memory serial programs; and the disadvantages as expense, difficulty of implementation in hardware, a processor count limited by contention and coherency ("currently around 512"), and the warning to "watch out for the NU part of NUMA", the non-uniform memory access time. In a <em>distributed-memory</em> machine each node has a locally addressable memory and the nodes are joined by a network (InfiniBand, Myrinet, Giganet on the slide). Its advantages are size, limited only by room size, cable length, power and cooling, and money; and lower cost to build and run. Its disadvantage is programming: the problem must be decomposed, the parts must be sent to the nodes explicitly, and data that sits on another node must be requested by a message. The lecture calls this the problem of data locality. A <em>massively parallel processor</em> (MPP) is distributed memory at the largest scale and often shared memory at the lower levels, as the slides' IBM BlueGene/L (131 072 processors at 700 MHz, 256 MB of RAM per processor) and Sandia's Red Storm (12 960 dual-core 2.4 GHz Opterons, 4 GB per processor) show. Large machines today are of this kind: the node is a shared-memory machine, and the system is the nodes plus a network.</p>
+<p><strong>A model for several links.</strong> Section "the Roofline model" applied (10.1) to one link, the DRAM interface. A system has more links: HBM to a GPU, DRAM to a CPU, the link between CPU and GPU, the network interface. Let \(Q_k\) be the bytes that the run sends across link \(k\) and \(B_k\) the bandwidth of that link. The argument that gave (10.1) applies to each link in turn: \(T\ge Q_k/B_k\) for every \(k\), and \(T\ge F/P_{\text{peak}}\). Dividing into \(F\), with \(I_k=F/Q_k\),</p>
+\[
+P\;\le\;\min\Bigl(P_{\text{peak}},\ \min_k\, I_k B_k\Bigr). \tag{10.11}
+\]
+<p>The binding link is the one with the smallest \(I_kB_k\). The model assumes that all transfers overlap with each other and with the arithmetic, and that the links do not share a resource; both assumptions fail in places that the text points out. The same program has a different intensity at each link: the Jacobi sweep of one GPU has \(I_{\text{HBM}}=5/16\) at its high-bandwidth memory and \(I_{\text{net}}=5N^2/(32N)=5N/32\) at the network, because the halo that a subdomain of \(N\times N\) points exchanges per sweep is 4 sides of \(N\) values of 8 bytes. Chapter 16 develops the exchange itself.</p>
+
+<h3 id="cpu-gpu">The CPU and the GPU <a class="timestamp" href="https://www.youtube.com/watch?v=iE47tWwhBKs&amp;t=441s">W3L4 7:21</a></h3>
+<p>The lecture shows a slide from Prof. Wen-mei Hwu (University of Illinois): a CPU drawn as a large control block, four ALUs and a large cache, next to a GPU drawn as many small ALU columns with little cache. It annotates the CPU as the von Neumann architecture, "single instruction, single data" (SISD), and the GPU as SIMD, "single instruction, multiple data". It adds an analogy: to deliver 10 000 pizzas, one could use one heavy truck or 1000 scooters of 10 pizzas each, and for a task that is repetitive and independent the scooters are faster although each is slower.</p>
+<p>The analogy is correct and the labels need a correction. A modern CPU also executes SIMD instructions. The program <code>peak_fma.c</code> above reaches 66.7 Gflop/s on one thread of this laptop by executing 4-lane, 256-bit fused multiply-adds, and a scalar program on the same core would reach a quarter of that or less. The distinction that the slide draws is one of design: a CPU spends its area on control and cache to make one thread fast and to hide latency, and a GPU spends it on arithmetic lanes and on a memory system of high bandwidth to make many threads complete in a given time, hiding latency by switching between threads. The GPU programming model is called SIMT (single instruction, multiple threads) and differs from SIMD in that each thread has its own registers and may follow its own path through the code; Chapter 18 defines it. In the terms of this chapter, what the GPU adds is bandwidth. One GCD of the Frontier GPU has an HBM bandwidth of 1.6 TB/s, 62.5 times the 25.6 GB/s pin rate of the laptop's one memory module.</p>
+<p>The lecture then states that the performance share of accelerators in the largest systems increases dramatically. The slide it shows (TOP500, 2006–2014) plots the number of systems with accelerators, which grows to about 70 of the 500 by 2014, not the performance share. The statement is supported for the count and not shown for the share.</p>
+
+<h3 id="frontier">Frontier <a class="timestamp" href="https://www.youtube.com/watch?v=iE47tWwhBKs&amp;t=691s">W3L4 11:31</a></h3>
+<p>The lecture presents the Frontier system of the Oak Ridge National Laboratory with slides prepared by the laboratory. It names Frontier "the world's fastest supercomputer" and gives its size, node design, network and software. The numbers can be checked against sources that were opened for this chapter. The comparison separates three kinds of value: values that the sources confirm, values that have changed since the recording, and values that disagree between two slides of the lecture or between the lecture and a source.</p>
+<div class="table-wrap"><table>
+<caption>Table 10.2. Frontier numbers of the lecture compared with the sources (retrieved 2026-10-26).</caption>
+<thead><tr><th scope="col">Quantity</th><th scope="col">Lecture slides</th><th scope="col">Source</th><th scope="col">Status</th></tr></thead>
+<tbody>
+<tr><td>Cores</td><td>8 699 904</td><td>TOP500, June 2024: 8 699 904; since November 2024: 9 066 176</td><td>Confirmed for June 2024</td></tr>
+<tr><td>Power</td><td>23 MW</td><td>TOP500, June 2024: 22 786 kW; now 24 607 kW</td><td>Confirmed for June 2024</td></tr>
+<tr><td>Peak (slide "overview")</td><td>1.7 EFLOP/s</td><td>TOP500 Rpeak June 2024: 1 714.81 PFLOP/s</td><td>Confirmed for June 2024</td></tr>
+<tr><td>Peak (slide "fun facts")</td><td>"theoretical peak of 2 exaflops"</td><td>TOP500 Rpeak, June 2026: 2 055.72 PFLOP/s; OLCF guide: "approximately 2 exaflops"</td><td>Two bases on two slides; both exist</td></tr>
+<tr><td>HPL performance</td><td>1.102 EF (June 2022), 1.206 EF (June 2024)</td><td>TOP500: 1 102.00 and 1 206.00 PFLOP/s; 1 353.00 PFLOP/s since November 2024</td><td>Confirmed; superseded</td></tr>
+<tr><td>Rank</td><td>"world's fastest"</td><td>TOP500: rank 1 from June 2022 to June 2024; rank 2 from November 2024 to November 2025; rank 3 in June 2026</td><td>True at the recording's data date; outdated now</td></tr>
+<tr><td>Nodes and cabinets</td><td>9 408 nodes in 74 cabinets</td><td>HPE/OLCF talk, February 2023: 9 408 nodes in 74 cabinets. OLCF guide (current): 77 cabinets of 128 nodes, 9 856 nodes</td><td>Confirmed for 2023; the system has grown</td></tr>
+<tr><td>Double-precision peak per GPU die (GCD)</td><td>26.5 TFLOP/s; 110 compute units</td><td>HPE/OLCF talk 2023: 26.5; OLCF guide: 23.9 (vector) with 110 compute units; 47.8 per MI250X package</td><td>Sources disagree by 11 %</td></tr>
+<tr><td>HBM per GCD</td><td>64 GB, 1.6 TB/s</td><td>OLCF guide: 64 GB (HBM2E), 1.6 TB/s</td><td>Confirmed</td></tr>
+<tr><td>DDR4 per node</td><td>512 GB, 205 GB/s</td><td>HPE/OLCF talk: 512 GB, 205 GB/s</td><td>Confirmed</td></tr>
+<tr><td>CPU–GPU link</td><td>36+36 GB/s</td><td>OLCF guide: 36+36 GB/s</td><td>Confirmed</td></tr>
+<tr><td>Network interfaces</td><td>4 NICs per node, 200 GbE each</td><td>OLCF guide: 4 x 200 Gbit/s (25 GB/s) = 100 GB/s injection</td><td>Confirmed; 200 Gbit/s is 25 GB/s</td></tr>
+<tr><td>File system</td><td>679 PB Lustre "Orion"</td><td>OLCF guide: 679 PB usable namespace</td><td>Confirmed</td></tr>
+<tr><td>"4 years"</td><td>One second of Frontier equals four years of everyone on Earth doing one operation per second</td><td>Arithmetic: \(10^{18}/(8\times10^{9}\ \text{s}^{-1})=3.96\) years</td><td>Confirmed for 8 billion people</td></tr>
+</tbody></table></div>
+<p>Two of the rows hold lessons. The first is the peak. The two slides differ by 18 % (2 against 1.7 EFLOP/s), and the arithmetic locates the source: the slide's per-GCD value of 26.5 TFLOP/s gives, for 9 408 nodes of 8 GCDs and one CPU of 2.05 TFLOP/s (64 cores at 2.0 GHz and an assumed 16 flop per cycle), a peak of 2.014 EFLOP/s, while the GCD value of the OLCF user guide, 23.9 TFLOP/s, gives 1.818 EFLOP/s and TOP500's Rpeak for June 2024 is 1.715 EFLOP/s. The three do not reconcile and the chapter does not reconcile them: the value of a peak depends on the clock rate and on the instruction mix that the owner assumes. The second lesson is the network row: 200 gigabit per second is 25 gigabyte per second, and confusing the two is an error of a factor of 8. It is a reason for the habit of this book of writing every bandwidth with its unit and its direction.</p>
+<p><strong>The node as a ladder of bandwidths.</strong> The node of the slide has 1 CPU with 64 cores and 512 GB of DDR4, 4 MI250X packages that the operating system sees as 8 GPUs of 64 GB HBM each, 2 NVMe drives of 1.92 TB, and 4 network interfaces; each GCD is attached to one level-3 cache region of the CPU, and each network interface to one MI250X. The listing below computes the ladder of bandwidths from these numbers. The HBM of the 8 GCDs delivers 12.8 TB/s. The DDR4 of the CPU delivers 205 GB/s, 62 times less. The 8 links between the CPU and the GPUs carry 288 GB/s in each direction, 44 times less than the HBM. The 4 network interfaces inject 100 GB/s, 128 times less than the HBM. The slide's node diagram has two more tiers that the listing leaves out: Infinity Fabric between GPUs at 50+50 GB/s per link (the OLCF guide gives 200 GB/s between the two GCDs of one package and 50 to 100 GB/s between packages), and PCIe Gen4 ESM from a GPU to its network interface at 50+50 GB/s. At each step away from the arithmetic the bandwidth falls, and a program that must move its data across a lower step runs at the rate of that step. The balance of one GCD, the ratio \(P_{\text{peak}}/B\), is 16.6 flop/B at the HBM (26.5 TFLOP/s over 1.6 TB/s with the slide's number; 14.9 with the guide's), and 736 flop/B at the link to the CPU.</p>
+<p>Apply (10.11) to the running case. A Jacobi grid that lives in the HBM of a GCD, with stores that do not read the line first (an assumption for the GPU; the chapter measured no GPU), has \(I=5/16\) and is bounded by \(0.3125\times1.6\ \text{TB/s}=500\) Gflop/s, 1.9 % of the slide's peak of a GCD (2.1 % of the guide's); the full machine of 9 408 nodes of 8 GCDs would reach at most 37.6 PFLOP/s for a grid that fits in HBM, about 2.2 % of the 1.7 EFLOP/s of the slide. The same sweep on a grid that lives in the CPU's DDR4 and is read by the GPU over the 36 GB/s link is bounded by \(36\ \text{GB/s}/8\ \text{B}=4.5\) Gpoint/s, 22 Gflop/s, 4.5 % of the HBM-resident rate. The network enters through the halo. At \(N=4096\) points per side the halo of 32 \(N\) bytes crosses a network interface of 25 GB/s that two GCDs share (12.5 GB/s each) in 10.5 μs, and the sweep takes 168 μs at the HBM rate: the ratio is 6 %. The two bounds of (10.11) meet at \(N=2B_{\text{HBM}}/B_{\text{net}}=256\), where the ratio is 1. The estimate neglects the latency of the message and any overlap, which Chapters 14 and 16 treat.</p>
+<pre><code class="language-python" data-file="systems.py" data-run="python3 systems.py">"""Arithmetic on the published numbers of Frontier and of the GH200 (sources in the text)."""
+
+# ---- Frontier: values of the lecture slides (ORNL), of the OLCF user guide and of TOP500 -------------
+nodes_slide, nodes_guide = 9408, 9856
+gcd_tf_slide, gcd_tf_guide = 26.5, 23.9          # TFLOP/s double precision per GCD
+hbm_tbs, ddr_gbs, link_gbs, nic_gbs = 1.6, 205.0, 36.0, 25.0   # per GCD, per CPU, per GCD per direction, per NIC
+cpu_tf = 64 * 2.0e9 * 16 / 1e12                  # 64 cores, 2.0 GHz, 16 flop/cycle assumed
+
+print("Frontier, one GCD (a GPU die): balance = peak / bandwidth")
+print(f"  slide 26.5 TF / 1.6 TB/s = {gcd_tf_slide / hbm_tbs:5.1f} flop/B; guide 23.9 TF / 1.6 TB/s = {gcd_tf_guide / hbm_tbs:5.1f} flop/B")
+print(f"  26.5 TF / 36 GB/s CPU link = {gcd_tf_slide * 1e3 / link_gbs:5.0f} flop/B")
+print("Frontier, one node (8 GCDs, 1 CPU, 4 NICs): bandwidth ladder")
+rows = [("HBM, 8 x 1.6 TB/s", 8 * hbm_tbs * 1e3), ("DDR4 of the CPU", ddr_gbs), ("CPU-GPU, 8 x 36 GB/s one way", 8 * link_gbs), ("NIC injection, 4 x 25 GB/s", 4 * nic_gbs)]
+for label, v in rows:
+    print(f"  {label:30s} {v:9.0f} GB/s  = 1/{8 * hbm_tbs * 1e3 / v:5.1f} of HBM")
+
+print("Jacobi sweep on one GCD, 5 flop and 16 B per point, bound I * B_HBM")
+for label, tf in [("slide 26.5 TF", gcd_tf_slide), ("guide 23.9 TF", gcd_tf_guide)]:
+    gf = 5 / 16 * hbm_tbs * 1e3
+    print(f"  {label}: {gf:.0f} Gflop/s = {gf / (tf * 1e3) * 100:.2f} % of peak; whole machine at 9,408 nodes x 8 GCDs: {gf * 8 * nodes_slide / 1e6:.1f} PFLOP/s")
+link_pts = 36e9 / 8
+print(f"  grid in the CPU's DDR4, GPU reads over the 36 GB/s link: {link_pts / 1e9:.1f} Gpoint/s = {5 * link_pts / 1e9:.0f} Gflop/s = {5 * link_pts / 5e11 * 100:.1f} % of the HBM-resident rate")
+b_net = 12.5e9                                     # one 25 GB/s NIC shared by the 2 GCDs of an MI250X
+print("halo exchange of an N x N subdomain per GCD: 4 sides x N points x 8 B = 32 N bytes per sweep")
+print(f"  intensity against the network I_net = 5N^2/32N = 5N/32 flop/B; network and HBM bounds meet at N = 2 B_HBM/B_net = {2 * 1.6e12 / b_net:.0f}")
+for n in (256, 1024, 4096, 16384):
+    t_halo, t_sweep = 32 * n / b_net, 16 * n * n / 1.6e12
+    print(f"  N = {n:6d}: halo {t_halo * 1e6:8.1f} us, sweep {t_sweep * 1e6:9.1f} us, ratio {t_halo / t_sweep:6.3f}")
+print("Frontier, peak double precision (EFLOP/s)")
+for label, n, g in [("slide numbers, 9,408 nodes", nodes_slide, gcd_tf_slide), ("user guide GCD, 9,408 nodes", nodes_slide, gcd_tf_guide), ("user guide GCD, 9,856 nodes", nodes_guide, gcd_tf_guide)]:
+    print(f"  {label:30s} {n * (8 * g + cpu_tf) / 1e6:5.3f}")
+print(f"  TOP500 June 2024 Rpeak 1,714.81 PF = {1714.81e3 / nodes_slide:5.1f} TF per node over 9,408 nodes")
+print(f"  Rmax/Rpeak: June 2024 {1206.0 / 1714.81:.3f}, June 2026 {1353.0 / 2055.72:.3f}; HPL/HPCG June 2026 page: {1353.0e3 / 14054.0:5.1f}; HPCG/Rpeak {14054.0 / 2055.72e3 * 100:.2f} %")
+
+print("Memory capacity and power per peak flop, slide values")
+f_cap = 9408 * (512 + 512) * 1e9 / (1714.81e15 / 1e9) / 1e6
+s_cap = 43.75e12 / (1e15 / 1e9) / 1e6
+print(f"  Frontier {f_cap:5.2f} MB per Gflop/s (512 GB DDR4 + 512 GB HBM per node, Rpeak 1,714.81 PF); Spacetime2 {s_cap:5.2f} MB per Gflop/s (43.75 TB, 1 PF); ratio {s_cap / f_cap:.1f}")
+print(f"  Rpeak per watt: Frontier {1714.81e15 / 22.786e6 / 1e9:5.1f} Gflop/s per W (22,786 kW); Spacetime2 {1e15 / 0.2e6 / 1e9:4.1f} Gflop/s per W (0.2 MW); ratio {1714.81e15 / 22.786e6 / (1e15 / 0.2e6):.0f}")
+print("Dragonfly (HPE slide, Feb 2023): switch = 16 edge + 31 local + 16 global links of 64 ports")
+nodes_group, nics_node, switches, groups = 128, 4, 32, 74
+nu = nodes_group * nics_node // switches           # terminals (NIC ports) per switch (Kim et al. write p)
+a = switches                                       # switches (routers) per group
+gamma = 16                                         # global links per switch (Kim et al. write h)
+print(f"  terminals per switch nu = {nodes_group} x {nics_node} / {switches} = {nu}; local links a-1 = {a - 1}; ports used {nu + a - 1 + gamma} of 64")
+print(f"  balance rule of Kim et al., a = 2 nu = 2 gamma: a = {a}, 2 nu = {2 * nu}, 2 gamma = {2 * gamma}")
+glinks = a * gamma
+print(f"  global links per group a*gamma = {glinks}; per other compute group: {glinks / (groups - 1):.2f} if all go to compute groups")
+print(f"  largest dragonfly with these a, gamma: g = a*gamma+1 = {glinks + 1} groups; the slide caption says 4 links per pair = {4 * (groups - 1)} of the {glinks} links")
+for per_pair in (4, glinks / (groups - 1)):
+    half = groups // 2
+    bis = half * (groups - half) * per_pair * 25.0 / 1e3        # TB/s, 25 GB/s per link per direction
+    inj = half * nodes_group * 100.0 / 1e3
+    print(f"  {per_pair:4.2f} links per pair: {half} x {groups - half} group pairs cross the cut = {bis:6.1f} TB/s one way; half of the machine injects {inj:6.1f} TB/s; ratio {bis / inj:.2f}")
+print(f"  lecture: 74 groups x 128 nodes = {74 * 128:,} against 9,408 nodes; guide: 77 cabinets x 128 = {77 * 128:,}")
+
+print("Lecture fun fact: one calculation per second per person")
+for people in (7.0e9, 8.0e9):
+    print(f"  {people:.0e} people: 1e18 operations take {1e18 / people / (365.25 * 86400):.2f} years")
+
+# ---- GH200: datasheet and whitepaper values --------------------------------------------------------
+fp64, fp64_tc, hbm, lpddr, c2c_dir, pcie_dir = 34.0e12, 67.0e12, 4.0e12, 500.0e9, 450.0e9, 64.0e9
+print("\nGH200 (datasheet 2025, whitepaper v1.21): flop per byte at each memory")
+for label, bw in [("HBM3 4 TB/s", hbm), ("LPDDR5X 500 GB/s", lpddr), ("NVLink-C2C 450 GB/s one way", c2c_dir), ("PCIe 5.0 x16 64 GB/s one way", pcie_dir)]:
+    print(f"  {label:30s} FP64 {fp64 / bw:6.1f} flop/B, FP64 tensor {fp64_tc / bw:6.1f} flop/B")
+print(f"  C2C 900 GB/s total / PCIe 5.0 x16 128 GB/s total = {900 / 128:.1f}")
+print("Jacobi sweep on the GPU, 5 flop and 16 B per point (read 8 B, write 8 B, no write-allocate)")
+for label, rate in [("grid in HBM", hbm / 16), ("grid in LPDDR5X, read over C2C, write back over C2C", min(c2c_dir / 8, lpddr / 16)), ("grid in host memory over PCIe 5.0", pcie_dir / 8)]:
+    print(f"  {label:52s} {rate / 1e9:6.1f} Gpoint/s = {5 * rate / 1e9:7.1f} Gflop/s = {5 * rate / fp64 * 100:5.2f} % of FP64 peak")
+
+grace_tf = 72 * 16 * 3.0e9
+print(f"Grace CPU: 72 cores x 16 flop/cycle x 3.0 GHz = {grace_tf / 1e12:.2f} TFLOP/s; with 500 GB/s of LPDDR5X: {grace_tf / lpddr:.1f} flop/B")
+print("Ridge points P_peak / B_peak (flop/B) against the Jacobi intensity 5/24 = 0.208 to 5/16 = 0.3125")
+ridges = [("this laptop, 12 threads (peak_fma, stream)", 202.2 / 21.75), ("this laptop, 1 thread", 66.7 / 15.6),
+          ("Grace CPU, 500 GB/s", grace_tf / lpddr), ("Hopper FP64 vector, HBM3 4 TB/s", fp64 / hbm),
+          ("Frontier GCD, slide 26.5 TF / 1.6 TB/s", 26.5 / 1.6), ("Frontier GCD, guide 23.9 TF / 1.6 TB/s", 23.9 / 1.6)]
+for label, r in ridges:
+    print(f"  {label:44s} {r:5.1f}   Jacobi is {r / (5 / 16):4.0f} to {r / (5 / 24):4.0f} times below")
+
+# ---- energy: values of the NVIDIA slide ------------------------------------------------------------
+print("\nEnergy per 64-bit operand moved against energy per flop (slide values, pJ)")
+cases = [("x86 + Hopper, DDR5 to x86", 35.0, 99.0), ("x86 + Hopper, PCIe 5 to Hopper", 6.5, 12.0),
+         ("Grace Hopper, LPDDR5X to Grace", 5.0, 62.0), ("Grace Hopper, NVLink-C2C to Hopper", 1.3, 12.0)]
+for label, pj_bit, pj_flop in cases:
+    print(f"  {label:36s} move {64 * pj_bit:7.1f} pJ, flop {pj_flop:5.1f} pJ, ratio {64 * pj_bit / pj_flop:5.1f}")
+print("  slide ratios: DDR5/LPDDR5X", 35.0 / 5.0, " PCIe/C2C", 6.5 / 1.3)
+for label, pj_bit, pj_flop in cases[::2]:
+    mem, fl = 24 * 8 * pj_bit, 5 * pj_flop
+    print(f"  Jacobi point on {label.split(',')[0]:16s}: memory {mem:6.0f} pJ, flops {fl:4.0f} pJ, memory share {mem / (mem + fl) * 100:4.1f} %")
+
+# ---- ABINIT bars of the slide: speedups and the bound from the CPU-bound part -----------------------
+cpu_bound = 0.43      # read from the chart: share of the x86 time that stays on the CPU (about +-0.03)
+print("\nABINIT chart: x86 = 1.00")
+print(f"  x86 + Hopper: 1/1.16 = {1 / 1.16:.3f}; Grace Hopper: 1/4.25 = {1 / 4.25:.3f}")
+print(f"  if only the 1 - {cpu_bound} part is accelerated, even for free: speedup &lt;= {1 / cpu_bound:.2f}")
+</code></pre>
+<pre><code class="output">Frontier, one GCD (a GPU die): balance = peak / bandwidth
+  slide 26.5 TF / 1.6 TB/s =  16.6 flop/B; guide 23.9 TF / 1.6 TB/s =  14.9 flop/B
+  26.5 TF / 36 GB/s CPU link =   736 flop/B
+Frontier, one node (8 GCDs, 1 CPU, 4 NICs): bandwidth ladder
+  HBM, 8 x 1.6 TB/s                  12800 GB/s  = 1/  1.0 of HBM
+  DDR4 of the CPU                      205 GB/s  = 1/ 62.4 of HBM
+  CPU-GPU, 8 x 36 GB/s one way         288 GB/s  = 1/ 44.4 of HBM
+  NIC injection, 4 x 25 GB/s           100 GB/s  = 1/128.0 of HBM
+Jacobi sweep on one GCD, 5 flop and 16 B per point, bound I * B_HBM
+  slide 26.5 TF: 500 Gflop/s = 1.89 % of peak; whole machine at 9,408 nodes x 8 GCDs: 37.6 PFLOP/s
+  guide 23.9 TF: 500 Gflop/s = 2.09 % of peak; whole machine at 9,408 nodes x 8 GCDs: 37.6 PFLOP/s
+  grid in the CPU's DDR4, GPU reads over the 36 GB/s link: 4.5 Gpoint/s = 22 Gflop/s = 4.5 % of the HBM-resident rate
+halo exchange of an N x N subdomain per GCD: 4 sides x N points x 8 B = 32 N bytes per sweep
+  intensity against the network I_net = 5N^2/32N = 5N/32 flop/B; network and HBM bounds meet at N = 2 B_HBM/B_net = 256
+  N =    256: halo      0.7 us, sweep       0.7 us, ratio  1.000
+  N =   1024: halo      2.6 us, sweep      10.5 us, ratio  0.250
+  N =   4096: halo     10.5 us, sweep     167.8 us, ratio  0.062
+  N =  16384: halo     41.9 us, sweep    2684.4 us, ratio  0.016
+Frontier, peak double precision (EFLOP/s)
+  slide numbers, 9,408 nodes     2.014
+  user guide GCD, 9,408 nodes    1.818
+  user guide GCD, 9,856 nodes    1.905
+  TOP500 June 2024 Rpeak 1,714.81 PF = 182.3 TF per node over 9,408 nodes
+  Rmax/Rpeak: June 2024 0.703, June 2026 0.658; HPL/HPCG June 2026 page:  96.3; HPCG/Rpeak 0.68 %
+Memory capacity and power per peak flop, slide values
+  Frontier  5.62 MB per Gflop/s (512 GB DDR4 + 512 GB HBM per node, Rpeak 1,714.81 PF); Spacetime2 43.75 MB per Gflop/s (43.75 TB, 1 PF); ratio 7.8
+  Rpeak per watt: Frontier  75.3 Gflop/s per W (22,786 kW); Spacetime2  5.0 Gflop/s per W (0.2 MW); ratio 15
+Dragonfly (HPE slide, Feb 2023): switch = 16 edge + 31 local + 16 global links of 64 ports
+  terminals per switch nu = 128 x 4 / 32 = 16; local links a-1 = 31; ports used 63 of 64
+  balance rule of Kim et al., a = 2 nu = 2 gamma: a = 32, 2 nu = 32, 2 gamma = 32
+  global links per group a*gamma = 512; per other compute group: 7.01 if all go to compute groups
+  largest dragonfly with these a, gamma: g = a*gamma+1 = 513 groups; the slide caption says 4 links per pair = 292 of the 512 links
+  4.00 links per pair: 37 x 37 group pairs cross the cut =  136.9 TB/s one way; half of the machine injects  473.6 TB/s; ratio 0.29
+  7.01 links per pair: 37 x 37 group pairs cross the cut =  240.0 TB/s one way; half of the machine injects  473.6 TB/s; ratio 0.51
+  lecture: 74 groups x 128 nodes = 9,472 against 9,408 nodes; guide: 77 cabinets x 128 = 9,856
+Lecture fun fact: one calculation per second per person
+  7e+09 people: 1e18 operations take 4.53 years
+  8e+09 people: 1e18 operations take 3.96 years
+
+GH200 (datasheet 2025, whitepaper v1.21): flop per byte at each memory
+  HBM3 4 TB/s                    FP64    8.5 flop/B, FP64 tensor   16.8 flop/B
+  LPDDR5X 500 GB/s               FP64   68.0 flop/B, FP64 tensor  134.0 flop/B
+  NVLink-C2C 450 GB/s one way    FP64   75.6 flop/B, FP64 tensor  148.9 flop/B
+  PCIe 5.0 x16 64 GB/s one way   FP64  531.2 flop/B, FP64 tensor 1046.9 flop/B
+  C2C 900 GB/s total / PCIe 5.0 x16 128 GB/s total = 7.0
+Jacobi sweep on the GPU, 5 flop and 16 B per point (read 8 B, write 8 B, no write-allocate)
+  grid in HBM                                           250.0 Gpoint/s =  1250.0 Gflop/s =  3.68 % of FP64 peak
+  grid in LPDDR5X, read over C2C, write back over C2C    31.2 Gpoint/s =   156.2 Gflop/s =  0.46 % of FP64 peak
+  grid in host memory over PCIe 5.0                       8.0 Gpoint/s =    40.0 Gflop/s =  0.12 % of FP64 peak
+Grace CPU: 72 cores x 16 flop/cycle x 3.0 GHz = 3.46 TFLOP/s; with 500 GB/s of LPDDR5X: 6.9 flop/B
+Ridge points P_peak / B_peak (flop/B) against the Jacobi intensity 5/24 = 0.208 to 5/16 = 0.3125
+  this laptop, 12 threads (peak_fma, stream)     9.3   Jacobi is   30 to   45 times below
+  this laptop, 1 thread                          4.3   Jacobi is   14 to   21 times below
+  Grace CPU, 500 GB/s                            6.9   Jacobi is   22 to   33 times below
+  Hopper FP64 vector, HBM3 4 TB/s                8.5   Jacobi is   27 to   41 times below
+  Frontier GCD, slide 26.5 TF / 1.6 TB/s        16.6   Jacobi is   53 to   80 times below
+  Frontier GCD, guide 23.9 TF / 1.6 TB/s        14.9   Jacobi is   48 to   72 times below
+
+Energy per 64-bit operand moved against energy per flop (slide values, pJ)
+  x86 + Hopper, DDR5 to x86            move  2240.0 pJ, flop  99.0 pJ, ratio  22.6
+  x86 + Hopper, PCIe 5 to Hopper       move   416.0 pJ, flop  12.0 pJ, ratio  34.7
+  Grace Hopper, LPDDR5X to Grace       move   320.0 pJ, flop  62.0 pJ, ratio   5.2
+  Grace Hopper, NVLink-C2C to Hopper   move    83.2 pJ, flop  12.0 pJ, ratio   6.9
+  slide ratios: DDR5/LPDDR5X 7.0  PCIe/C2C 5.0
+  Jacobi point on x86 + Hopper    : memory   6720 pJ, flops  495 pJ, memory share 93.1 %
+  Jacobi point on Grace Hopper    : memory    960 pJ, flops  310 pJ, memory share 75.6 %
+
+ABINIT chart: x86 = 1.00
+  x86 + Hopper: 1/1.16 = 0.862; Grace Hopper: 1/4.25 = 0.235
+  if only the 1 - 0.43 part is accelerated, even for free: speedup &lt;= 2.33</code></pre>
+<p>The HPL column of the table is the other half of the picture. Rmax, the performance on the Linpack benchmark (dense matrix factorization, in which the intensity grows with the matrix size), is 1 353 PFLOP/s on the June 2026 list, 66 % of Rpeak (70 % in June 2024). The TOP500 page for Frontier lists in addition an HPCG result of 14 054 TFLOP/s, 0.68 % of Rpeak and one ninety-sixth of Rmax. This chapter did not open the HPCG specification; it uses the pair only as an observation. A code limited by memory bandwidth reaches about one percent of the peak of such a machine, which is the order of the 1.9 % that the bound above gives for the Jacobi grid in HBM. The lecture's presentation of the peak as the measure of a machine therefore needs the companion statement that the peak is what a program of high intensity can reach, and that a program like the Jacobi sweep reaches a few percent of it.</p>
+
+<h3 id="network">The network: dragonfly groups <a class="timestamp" href="https://www.youtube.com/watch?v=iE47tWwhBKs&amp;t=1208s">W3L4 20:08</a></h3>
+<p>The lecture describes the Slingshot interconnect of Frontier as an Ethernet superset with HPC features and states that it uses a <em>dragonfly</em> topology: a group of endpoints connected to switches that are connected all-to-all, and a set of groups connected all-to-all, with at least one link between each pair of groups. Frontier has 74 compute groups with 128 nodes and 32 switches per group and 4 interfaces per node. Kim, Dally, Scott and Abts (ISCA 2008) define the topology by three parameters: \(\nu\) terminals per router, \(a\) routers per group, and \(\gamma\) global channels per router (Kim et al. write \(p\), \(a\), \(h\); this chapter keeps \(p\) for threads and \(h\) for the grid spacing). A router has radix \(r=\nu+a+\gamma-1\) (one port per terminal, \(a-1\) local channels, \(\gamma\) global channels). The routers of a group act together as one virtual router of radix \(a(\nu+\gamma)\), which is why a minimal route crosses at most one global channel (Kim et al., abstract). The largest network with these parameters has \(g=a\gamma+1\) groups and \(M=a\nu(a\gamma+1)\) terminals, with exactly one channel between each pair of groups; a smaller network has more global channels per group than there are other groups, and the excess is spread over the group pairs. For balanced load on traffic that is spread evenly, the authors recommend \(a=2\nu=2\gamma\), because a packet uses two local channels for each global channel it crosses.</p>
+<p>Apply it to Frontier with the numbers of the HPE talk of 2023: each 64-port switch has up to 16 links to nodes, 31 local links to the other switches of its group, and up to 16 global links. The group has 128 nodes with 4 interfaces, which is 512 terminals on 32 switches, so \(\nu=512/32=16\), \(a=32\), \(\gamma=16\), and \(a=2\nu=2\gamma\) holds exactly: Frontier is built to the balance rule. Of the 64 ports, 63 are in use. A group has \(a\gamma=512\) global links, 7.0 for each of the 73 other compute groups if all were used for that. The same slide states "4 links between each of the 74 compute groups", which would use 292 of the 512 links; the two statements do not agree, and the chapter does not resolve them. The listing computes both consequences for the capacity across the middle of the machine. If 37 groups send to the other 37, the number of links that cross the cut is \(37\times37\times\) (links per pair); at 25 GB/s per link per direction (an assumption: the slides call it bidirectional) that is 137 TB/s for 4 links per pair and 240 TB/s for 7.0. The 4 736 nodes of one half (37 groups of 128) inject up to 474 TB/s. The network can therefore carry between 29 % and 51 % of the injection rate across the cut, so an exchange in which every node sends to the other half is limited by the global channels, and an exchange between neighbours inside a group is not. The dragonfly is cheaper than a full network because it has fewer long cables; Kim et al. report a cost 20 % below the flattened butterfly and 52 % below a folded Clos network for 16K nodes in their model. The chapter did not test the cost claim.</p>
+<p>Two more facts of the lecture complete the picture and carry no number to check. The programming environments of Frontier include the Cray compiler (LLVM-based), the AMD ROCm compiler, GCC and oneAPI DPC++, with the models OpenMP, HIP, Kokkos, RAJA, SYCL, OpenACC, OpenCL and UPC++. The course limits itself to OpenMP, OpenACC, CUDA and MPI. The uses that the lecture shows are a NASA study of landing vehicles on Mars, which cannot be tested in flight in that atmosphere and is therefore computed, and a simulation of a mining-explosive transport accident in Utah to find safer ways of packing explosives. The lecture also shows the IIT Bombay machine Spacetime2, before the Frontier slides. From its slide, Spacetime2 has a peak of 1 PFLOP/s, a power of 0.2 MW, 43.75 TB of memory, 9 792 cores (Intel Skylake and Broadwell) and 64 P100 GPUs. The listing above gives two ratios between the machines: memory per unit of peak is 43.75 MB per GFLOP/s for Spacetime2 and 5.62 for Frontier, a factor of 7.8 less, and the peak per watt is 5.0 GFLOP/s per W against 75.3, a factor of 15. Frontier has less memory per unit of arithmetic and uses less power per unit of arithmetic.</p>
+
+<h2 id="grace">The Grace Hopper superchip and the economics of moving data <a class="timestamp" href="https://www.youtube.com/watch?v=tCj4YXGsEXE&amp;t=39s">W3L5 0:39</a></h2>
+<p>The third lecture uses slides from NVIDIA (the ATPESC 2024 watermark shows the training program that first used them). It has three parts. The first sets out the applications that motivate the design (0:39–9:14 in the recording). The second states the physical constraint, that arithmetic is cheap and data movement is not (9:14–11:29). The third describes the Grace CPU, the Hopper GPU and the superchip that joins them (11:29 to the end). The chapter takes the three parts in this order and checks the numbers of the second and third against the NVIDIA datasheet and whitepaper.</p>
+
+<h3 id="applications">The applications and the cost–error curve <a class="timestamp" href="https://www.youtube.com/watch?v=tCj4YXGsEXE&amp;t=39s">W3L5 0:39</a></h3>
+<p>The lecture lists grand-challenge applications (global climate and weather, microbiome models, aircraft and power plants, microplastics and aerosols in the environment, inverse problems in material and drug design) and states what they share: scales that span many orders of magnitude. A power plant is metres across and runs for days, while combustion happens at micrometres in microseconds; an aerosol particle is micrometres across and the ocean circulation that it influences spans thousands of kilometres. Take a plant of 100 m (an assumed size) resolved to 1 μm: a uniform three-dimensional grid has \((10^{8})^3=10^{24}\) points, while the 9.6 PB of memory of the Frontier nodes in the slide hold \(1.2\times10^{15}\) doubles. The grid is \(8\times10^{8}\) times too large, so the computation must couple scales through models. This is the same reason that the Jacobi grid of this book is small compared with the problem it stands for.</p>
+<p>The lecture then presents machine learning as the fourth pillar of scientific discovery and shows a plot of error against the logarithm of computational cost for methods of quantum chemistry. Its labelled points read: classical methods \(O(n)\), tight-binding \(O(n^2)\), density-functional theory \(O(n)\) to \(O(n^3)\), coupled-cluster CCSD(T) \(O(n^7)\), and the exact solution growing like \(\exp(n)\), with "AI surrogates" at the lower left, at low cost and low error. The slide's horizontal axis is the logarithm of the cost, so the curve shows the error against \(\log(\text{cost})\), not a cost that grows logarithmically. The orders mean that doubling the size \(n\) of the system multiplies the cost by \(2^7=128\) for CCSD(T) and by 8 for the cubic end of density-functional theory. The slide's claim that a surrogate model gives low error at low cost is a claim about a trained model on a family of problems, and the chapter does not test it. The lecture adds a weather-model slide, a digital-twin diagram and a list of workloads (simulation, simulation with AI, edge computing, digital twins, quantum-circuit emulation). The one engineering statement that matters for this chapter is the slide's requirement that a supercomputer ingest the data of scientific instruments at high throughput and run simulation and learning "in a tightly coupled loop": it makes the movement of data between memories and between machines the central cost.</p>
+
+<h3 id="energy">Moore's observation and the energy of data movement <a class="timestamp" href="https://www.youtube.com/watch?v=tCj4YXGsEXE&amp;t=554s">W3L5 9:14</a></h3>
+<p>The lecture turns from the applications to the hardware that must run them. The slide titled "Moore's observation" lists the original statement as three items: transistor density doubles, power stays the same, cost stays the same. It then states that the last two are gone, owing to the loss of Dennard scaling and to lithography and other process complications. The slide therefore states that power and cost no longer stay the same. The slide's plot of 42 years of microprocessor data (transistors, single-thread performance, frequency, typical power, number of cores), and the second plot of the cost of a 250 mm² die rising at the 7 nm and 5 nm nodes, give the evidence. Chapter 9 treats Dennard scaling quantitatively.</p>
+<p>The energy slide ("Energy dominated by memory and data") shows a bar chart of energy per multiply-accumulate against supply voltage, split by component, with the figures 70 fJ/MAC, 35 fJ/OP and 29 TOPS/W. Its legend names components of a deep-learning accelerator (weight buffer, accumulation buffer, partial-sum collector), so it describes a particular accelerator and not a CPU. The lecture's reading is that the movement of data and memory dominates the energy. The primary source that supports the statement for processors in general is Horowitz (ISSCC 2014, p. 11): the energy of a DRAM access, 1 to 2 nJ, is "a couple of orders-of-magnitude" above the cost of an internal cache access or of a functional operation, about 10 pJ, and the I/O of DRAM alone takes more than 20 pJ per bit; with efficient I/O the access would still cost about 10 pJ per bit, 0.6 nJ for 8 bytes. The ratio of 100 to 200 between one DRAM access and one operation is the energy form of the memory wall of the section on the memory wall. The slide "More than Moore" states the design rule that follows, in the words of the slide: "FLOPs not executed, Bytes that are not moved are the best FLOPs and Bytes". It also states a goal of 2 to 6 times improvement from generation to generation by optimizing algorithms, software, architecture, packaging and process together.</p>
+
+<h3 id="grace-cpu">The Grace CPU <a class="timestamp" href="https://www.youtube.com/watch?v=tCj4YXGsEXE&amp;t=689s">W3L5 11:29</a></h3>
+<p>The slides present Grace as a 64-bit server-class Arm processor on one chip (a system on a chip): Armv9.0 cores with the SVE2 vector extension, 48-bit virtual and physical addresses, a balanced design between single-thread performance, core count, memory and I/O, and standard Arm server interfaces, so that Linux and the HPC software stacks "will run out of the box". The core slide gives: a wide out-of-order superscalar pipeline with multi-stage branch prediction and advanced prefetching, a 64-byte cache line, a 64 KB level-1 instruction cache and a 64 KB level-1 data cache, a private 1 MB level-2 cache, and four 128-bit SVE2 execution pipes "capable of 16 DP FLOPS per cycle". The check of the pipes is arithmetic: each pipe has two double-precision lanes of 128 bits, each lane performs a fused multiply-add (2 flop), and \(4\times2\times2=16\). The processor slide adds up to 117 MB of shared level-3 cache, more than 3 TB/s of bisection bandwidth on the die, support for 120, 240 and 480 GB of LPDDR5X memory (LPDDR5X is a low-power DRAM standard), and hooks for GPUDirect and CPU–GPU synchronization.</p>
+<p>The datasheet of 2025 and the whitepaper v1.21 give the specification of the GH200 product. The slide "NVIDIA Grace and Grace Hopper" shows two products side by side. The Grace CPU Superchip (two Grace dies) has 144 cores and 1 TB/s of LPDDR5X; the datasheet lists 144 cores and up to 1 024 GB/s in its NVL2 column. The GH200 has one Grace die with 72 Arm Neoverse V2 cores (datasheet, key features; whitepaper, Table 1), and the whitepaper gives 3.2 TB/s as the bisection bandwidth of the on-die fabric of one Grace CPU (p. 6), where the slide gives 3.2 TB/s for the two-die product. The datasheet and the slides differ in two values. (1) The datasheet gives a level-3 cache of 114 MB and the slide gives 117 MB. (2) The slide gives 70 TFLOP/s of FP64 for the Grace Hopper Superchip. The datasheet gives 34 TFLOP/s of FP64 and 67 TFLOP/s of FP64 on the tensor cores of the Hopper GPU. The tensor-core value plus the 3.46 TFLOP/s of the Grace CPU (computed below) is 70.5 TFLOP/s, which suggests that the slide adds the two; the slide does not say so. The chapter uses the 34 TFLOP/s for the vector rate that applies to the Jacobi sweep, whose operations are additions and one multiplication and use no matrix instruction. For the memory, the datasheet gives up to 384 GB/s for the 480 GB configuration and up to 512 GB/s for the 120 GB and 240 GB configurations (read line by line from the two-line cells of its table), and the whitepaper gives "up to 500 GB/s" (Table 1, p. 7).</p>
+<p>The CPU also has a machine balance. With 72 cores, 16 flop per cycle and the datasheet's all-core SIMD frequency of 3.0 GHz, the peak is 3.46 TFLOP/s, and against 500 GB/s of LPDDR5X the ridge point of (10.9) is 6.9 flop/B (9.0 flop/B with the 384 GB/s of the 480 GB configuration). The listing of the previous section prints this value together with the others of the table below.</p>
+<div class="table-wrap"><table>
+<caption>Table 10.3. Ridge points \(I^{*}=P_{\text{peak}}/B_{\text{peak}}\) and the position of the Jacobi sweep (\(I=0.208\) to \(0.3125\)).</caption>
+<thead><tr><th scope="col">Processor and memory</th><th scope="col">\(P_{\text{peak}}\)</th><th scope="col">\(B_{\text{peak}}\)</th><th scope="col">\(I^{*}\) (flop/B)</th><th scope="col">Sweep is below the ridge by</th></tr></thead>
+<tbody>
+<tr><td>This laptop, 1 thread (measured)</td><td>66.7 Gflop/s</td><td>15.6 GB/s</td><td>4.3</td><td>14 to 21 times</td></tr>
+<tr><td>This laptop, 12 threads (measured)</td><td>202 Gflop/s</td><td>16.4 to 21.8 GB/s</td><td>9.3 to 12.3</td><td>30 to 59 times</td></tr>
+<tr><td>Grace CPU (datasheet; 16 flop/cycle assumed)</td><td>3.46 Tflop/s</td><td>500 GB/s LPDDR5X</td><td>6.9</td><td>22 to 33 times</td></tr>
+<tr><td>Hopper GPU, FP64 vector (datasheet)</td><td>34 Tflop/s</td><td>4 TB/s HBM3</td><td>8.5</td><td>27 to 41 times</td></tr>
+<tr><td>Frontier GCD (slide; OLCF guide)</td><td>26.5; 23.9 Tflop/s</td><td>1.6 TB/s HBM2E</td><td>16.6; 14.9</td><td>53 to 80; 48 to 72 times</td></tr>
+</tbody></table></div>
+<p>The table has one message. The ridge points of the machines of this chapter lie between 4 and 17 flop per byte, and a kernel of intensity 0.21 to 0.31 is 14 to 80 times to the left of every one of them. Faster arithmetic does not move the sweep. What changes the rate of the sweep from one machine to the next is the bandwidth in the third column: 22 GB/s, 500 GB/s, 4 TB/s and 1.6 TB/s. The bandwidth of this laptop is the asked-for rate of the scale kernel times 3/2 (the upper figure, 21.8 GB/s) or the rate of the streaming-store triad, whose bytes asked for and bytes moved are equal (the lower figure, 16.4 GB/s); both values are not directly comparable with the datasheet values of the others, because the latter are peaks and the former are samples taken under load; the comparison of the bandwidth column is a comparison of orders of magnitude, no more.</p>
+
+<h3 id="superchip">The superchip, NVLink-C2C and the cost of a link <a class="timestamp" href="https://www.youtube.com/watch?v=tCj4YXGsEXE&amp;t=823s">W3L5 13:43</a></h3>
+<p>The lecture describes the Grace Hopper superchip as a CPU and a GPU on one module, joined by a coherent interface of 900 GB/s. The datasheet states the same: the NVLink Chip-to-Chip (C2C) interconnect delivers up to 900 GB/s of total bandwidth, "7X higher than PCIe Gen5 lanes", and the whitepaper (Table 1, p. 7) gives 900 GB/s total and 450 GB/s per direction. Check of the ratio: a PCIe 5.0 link of 16 lanes carries 64 GB/s in each direction, 128 GB/s in total, and \(900/128=7.0\). The memories of the GH200 are 96 GB of HBM3 at up to 4 TB/s (144 GB of HBM3e at up to 4.9 TB/s in the later configuration) and up to 480 GB of LPDDR5X at up to 500 GB/s; the slide's 600 GB is 96 GB plus 480 GB, 576 GB, rounded. The whitepaper describes the property that the lecture calls true unified memory: hardware coherency lets the Grace CPU cache the memory of the GPU at cache-line granularity, and lets the GPU and the CPU access each other's memory without page migration; the operating system sees the CPU and the GPU memories as two NUMA nodes, and system-allocated memory is backed by whichever memory touches it first (whitepaper, p. 18). The NVIDIA product page adds that the CPU and the GPU share one page table per process.</p>
+<p>The relevance to the memory model of this chapter is the unit of transfer. A page migration moves 4096 bytes. If the GPU needs one 64-byte line of the page, the migration moves 64 times the bytes that were needed, and, in the section on paging, the cost of the fault is of the order of microseconds (1.2 to 3.3 μs for a minor fault on this laptop) while the bytes of a page cost 9 ns of link time at 450 GB/s. Coherent access removes the fault and the 64-fold excess; it does not remove the latency of the load. What the link changes in the roofline terms is shown by the listing of the section on Frontier. For the Jacobi sweep on the GPU, with 5 flop and 16 bytes per point, a grid in HBM3 is bounded by 250 Gpoint/s, 1.25 TFLOP/s, 3.7 % of the FP64 peak of 34 TFLOP/s. A grid in the LPDDR5X of the same module, read and written over NVLink-C2C, is bounded by 31 Gpoint/s, 156 GFLOP/s, 0.46 %: the LPDDR5X bandwidth of 500 GB/s, shared by reads and writes, binds before the 450 GB/s of one direction of the link does. A grid in host memory over PCIe 5.0 is bounded by 8 Gpoint/s, 40 GFLOP/s, 0.12 %. The three bounds differ by factors of 8 (HBM3 against LPDDR5X) and 3.9 (LPDDR5X against PCIe 5.0). This is the quantitative content of the lecture's statement that a unified superchip makes data movement less of a bottleneck: it moves the bound of a grid that does not fit in HBM3 from 40 to 156 GFLOP/s, a factor of 3.9, and it does not make the grid as fast as one that does fit.</p>
+
+<h3 id="hopper">The Hopper GPU <a class="timestamp" href="https://www.youtube.com/watch?v=tCj4YXGsEXE&amp;t=951s">W3L5 15:51</a></h3>
+<p>The lecture introduces the Hopper streaming multiprocessor by its new features: thread-block clusters, distributed shared memory between streaming multiprocessors, asynchronous transaction barriers, the tensor memory accelerator for fully asynchronous data movement, the DPX instruction set (dynamic programming) and the transformer engine. The programming-locality feature, the cluster, lets the shared-memory blocks of the multiprocessors in one processing cluster communicate directly without going through the high-bandwidth memory. The slide has the bullet "about 7X higher throughput vs. using global memory" and a bar chart whose gains are 2.0 for a 64K-point FFT, 2.7 for Longstaff–Schwartz pricing and 1.7 for histogram collection. The chart shows the gain of whole kernels with clusters; the bullet may refer to the transfer between multiprocessors. The H100 architecture whitepaper that the slide cites was not opened, so the chapter cannot say which. Chapters 19 and 21 treat the thread hierarchy and the shared memory in which the clusters live. For this chapter, one fact matters: each of these features is a way to keep a datum on the chip, closer to the arithmetic, which is the rule of the slide "More than Moore".</p>
+
+<h3 id="platform">The platform, the programming model and the NVL72 slide <a class="timestamp" href="https://www.youtube.com/watch?v=tCj4YXGsEXE&amp;t=1052s">W3L5 17:32</a></h3>
+<p>The lecture surveys the software that comes with the hardware. The slide "NVIDIA ARM HPC software ecosystem" (W3L5 15:15, before the Hopper slides) lists the HPC SDK with the compilers nvc++, nvc, nvfortran and nvcc, the core C++ libraries (CUB, Thrust, libcu++), profiling tools (CUDA-gdb, Nsight Compute, Nsight Systems, CUPTI), communication libraries (MPI, OpenSHMEM, UCX, NCCL, NVSHMEM), and the math libraries cuBLAS, cuTENSOR, cuSOLVER, cuSPARSE, cuFFT and cuRAND. The slide "Grace-Hopper" divides the work between the two processors: the GPU is a latency-hiding throughput machine that suits the dataflow-complex portions of an algorithm, and the CPU, a superscalar out-of-order core with a balanced bytes-per-flop ratio, suits the control-flow-complex portions. This is the roofline reading in other words: the portion with high data volume and regular access goes to the processor with the bandwidth, and the portion with irregular control stays where one thread is fast.</p>
+<p>The slides "Computational graph and Grace Hopper" and "Unified compute substrate" claim one programming model for the CPU and the GPU, existing CPU programming models that keep working on Grace, standards-based parallelism (ISO language parallelism) for portability, and hybrid execution graphs built from senders and receivers. The coherent memory of the previous subsection is what lets one pointer address both memories; the explicit models that the book teaches for the same hardware, CUDA and OpenACC, appear in Chapters 20 to 26. The slides state that standard-language parallelism gives productive portability. The chapter does not test the claim, which concerns programmer effort and not a bandwidth or a flop rate. The closing remarks of the lecture add that scheduling should be decoupled from the expression of the algorithm, and that the operating-system runtime should pass hardware capabilities to the scheduler as hints.</p>
+<p>The slide "GB200 with NVL72" (frame f0037) shows a rack with 36 Grace CPUs, 72 Blackwell GPUs, one NVLink domain and "130 TB/sec all-to-all bandwidth". It is a Grace Blackwell system, not a cluster of Grace Hopper superchips, and its 130 TB/s is the NVLink bandwidth among its 72 GPUs, 1.8 TB/s per GPU. The chapter gives no further analysis of it.</p>
+
+<h3 id="superchip-energy">Energy per bit and per flop <a class="timestamp" href="https://www.youtube.com/watch?v=tCj4YXGsEXE&amp;t=1283s">W3L5 21:23</a></h3>
+<p><strong>The energy slide.</strong> The slide "NVIDIA superchips save energy" compares an x86 CPU with a Hopper GPU over PCIe Gen 5 against the superchip. For x86 plus Hopper it gives 35 pJ per bit from DDR5 system memory to the x86 CPU, 6.5 pJ per bit over PCIe, 99 pJ per double-precision flop on the x86 CPU and 12 pJ per double-precision flop on Hopper. For the superchip it gives 5 pJ per bit from LPDDR5X, 1.3 pJ per bit over NVLink-C2C, 62 pJ per double-precision flop on Grace and 12 on Hopper. The slide implies that the transfer to the GPU costs 5 times less and the transfer to memory 7 times less; the ratios are \(6.5/1.3=5.0\) and \(35/5=7.0\), correct from the slide. Two primary sources bear on the values. The whitepaper (p. 13) states that NVLink-C2C "only uses 1.3 picojoules per bit transferred, which is greater than 5x more energy efficient than PCIe Gen 5", which confirms the 1.3 and the ratio. Horowitz's 1 to 2 nJ per DRAM access of 8 bytes is 16 to 31 pJ per bit, of the order of the slide's 35 pJ per bit for DDR5 system memory. The 99, 62 and 12 pJ per flop are not confirmed by a source that the chapter opened, and the slide does not say what they include.</p>
+<p>The slide's values give the quantity that the roofline has no term for. Moving one 64-bit operand costs \(64\times35=2240\) pJ from DDR5 and \(64\times5=320\) pJ from LPDDR5X, against 99 and 62 pJ for one flop on the CPU: the move costs 22.6 and 5.2 times the flop. Over the link to the GPU, a double costs 416 pJ over PCIe and 83 pJ over NVLink-C2C against 12 pJ for the flop on Hopper: 34.7 and 6.9 times. One Jacobi point has 5 flop and, in the model of case 2, 24 bytes of memory traffic. If all of it comes from system memory, the point costs \(24\times8\times35=6720\) pJ of memory energy and \(5\times99=495\) pJ of arithmetic on x86, and the memory is 93.1 % of the energy. On the superchip the memory part is \(24\times8\times5=960\) pJ and the arithmetic part is \(5\times62=310\) pJ, and the memory share is 75.6 %. The sweep is memory-bound in energy as it is in time, by a factor of 14 in the first case (6720 against 495 pJ), and the superchip lowers the energy of a point from 7.2 nJ to 1.3 nJ, 5.7 times, by lowering the cost of the movement. These are the slide's values taken at face value; the chapter did not measure energy.</p>
+
+<h3 id="abinit">Co-scheduling and the one application result <a class="timestamp" href="https://www.youtube.com/watch?v=tCj4YXGsEXE&amp;t=1410s">W3L5 23:30</a></h3>
+<p>The slide "Co-scheduling" shows the node divided among jobs: one job exclusive to the node, or job A on 64 Grace cores with its share of LPDDR5X, and job B on 8 cores plus a Hopper GPU or a slice of it (a multi-instance GPU partition, "MIG", in the slide; the datasheet describes MIG as partitioning the GPU into isolated instances). Each partition carries a label "MPAM", the Arm mechanism for partitioning and monitoring memory-system resources; the whitepaper states that administrators can partition the available LPDDR5X bandwidth and the CPU cache usage. The relation to this chapter's measurements is a reading of the chapter and not a statement of the slide: on this laptop the memory bandwidth saturates with two to four threads, so a job that takes four threads takes nearly all the bandwidth of the node, and a division of cores without a division of bandwidth does not isolate memory-bound jobs. A bandwidth partition is the control that a memory-bound job needs.</p>
+<p>The slide that closes the lecture ("Grace + Hopper makes acceleration more accessible") shows normalized execution time for ABINIT, a materials-science code: 1 on x86, 1.16 times faster on x86 plus Hopper, and 4.25 times faster on Grace Hopper. The bars could be read as the speedups of different applications. The slide's caption and the whitepaper (Figure 19, p. 30) say otherwise. The caption reads "A performance simulation for ABINIT with NVBLAS featuring Titanium 255 Atoms using the LOBPCG algorithm". It is one application and one input, and it is a simulation of performance, not a measurement on every machine; the whitepaper adds that the code was ported by redirecting its BLAS calls to the GPU through NVBLAS, so that the GPU runs the dense linear algebra and the CPU runs the rest.</p>
+<p>The bars carry more information than the two numbers. Reading the heights from the slide, with an uncertainty of about \(\pm0.03\): in the x86 bar the part that stays on the CPU is about 0.43 of the total time, and the part moved to the GPU is the remaining 0.57. If the GPU were infinitely fast and the transfers were free, the time would be 0.43 and the speedup 2.3. The simulated 1.16 for x86 plus Hopper is far below this because the segment of CPU–GPU transfers, about 0.40, takes back nearly all that the GPU gains from the 0.57. On the superchip the transfer segment is about 0.04 and the CPU segment is about 0.17, the CPU part running 2.5 times faster than on the x86 machine. The total of 0.235 is the sum of both effects, and the speedup of 4.25 is above the bound of 2.3 that the GPU alone could give, because Grace and the link both change the result. The accounting repeats the lesson of the roofline: the arithmetic that was offloaded was not the problem. The data movement between the two memories and the speed of the part that stayed behind were. The chapter reads the bars from a projected image, so the segment values are estimates; the speedups 1.16 and 4.25 are quoted from the slide.</p>
+
+<h2 id="limits">What the models establish and what they do not</h2>
+<p>The table lists the statements of the lectures that the chapter tested, and the status that the tests gave them. Frontier numbers are in Table 10.2 and are not repeated.</p>
+<div class="table-wrap"><table>
+<caption>Table 10.4. Statements of the lectures and their status in this chapter.</caption>
+<thead><tr><th scope="col">Statement of the lecture</th><th scope="col">Status</th><th scope="col">Evidence in this chapter</th></tr></thead>
+<tbody>
+<tr><td>Hierarchy slide: 1 ns registers, 2 ns L1, 6 ns L2, 100 ns DRAM, \(10^{7}\) ns disk.</td><td>Orders of magnitude confirmed for L1 and L2; DRAM higher</td><td>1.24 to 1.29 ns (16 and 32 KiB) for L1, 3.7 to 8 ns for L2 (<code>hierarchy.c</code>); dependent loads took 126 to 171 ns for working sets of 16 and 64 MiB over five runs (126 to 134 ns in the printed sample) and 189 to 251 ns at 256 MiB. The 4 and 8 MiB sets are not explained (see the section on the hierarchy). The disk was not measured.</td></tr>
+<tr><td>Registers, cache and RAM hold "a few kilobytes" and "a few gigabytes".</td><td>Refined: slide values describe an older machine</td><td>This machine: 48 KiB L1 data, 1.25 MiB L2 and 12 MiB L3 as the guest reports them; 32 GiB of DRAM.</td></tr>
+<tr><td>A read from storage costs a few thousand clock cycles.</td><td>Contradicted by the lecture's own slide</td><td>Slide: \(10^{7}\) ns, which is \(10^{7}\) cycles at 1 GHz and \(4\times10^{7}\) at 4 GHz.</td></tr>
+<tr><td>The ratios between levels are kept when technology improves.</td><td>Contradicted for latency; for bandwidth the ridge point grew by at most 3.8 times</td><td>Processor speed +50 % per year against DRAM +7 % per year makes the latency gap grow by 1.40 per year (Machanick 2002); ridge points 4.4 and 6.7 (2008) against 4.3 to 16.6 (Table 10.3).</td></tr>
+<tr><td>The width of the path grows with distance (8 B, 32 B, 4 KB).</td><td>Explained</td><td>Half-performance length \(b_{1/2}=\tau B\) (10.4): 1.87 MB for the slide's disk, 1.5 KB for DRAM.</td></tr>
+<tr><td>Disk speed 187 MBps (slide).</td><td>Unit to keep</td><td>MBps and Mbps differ by a factor of 8.</td></tr>
+<tr><td>Random access over data larger than memory causes thrashing; contiguous access avoids it.</td><td>Confirmed as a model, not run</td><td>A data set 1 % larger than the resident memory slows random access by 991 times with the slide's disk (<code>amat.py</code>); a random page fault costs 457 times a sequential page.</td></tr>
+<tr><td>Hit time is much smaller than miss penalty.</td><td>Confirmed</td><td>1.24 to 1.29 ns (16 and 32 KiB) against 126 to 134 ns for a dependent load, about 100 times.</td></tr>
+<tr><td>The CPU is a von Neumann SISD machine and the GPU is SIMD.</td><td>Refined</td><td>The CPU of this laptop runs 4-lane 256-bit SIMD (<code>peak_fma.c</code>, 66.7 Gflop/s on one thread); the GPU model is SIMT (Chapter 18).</td></tr>
+<tr><td>The performance share of accelerators is rising dramatically.</td><td>Shown for the count of systems, not for the share</td><td>The slide plots the number of TOP500 systems with accelerators, 2006–2014.</td></tr>
+<tr><td>Slingshot has 4 interfaces per node of 200 GbE each.</td><td>Confirmed</td><td>OLCF guide: 4 x 200 Gbit/s = 100 GB/s injection.</td></tr>
+<tr><td>Dragonfly groups have at least one link between each pair; Frontier has 74 groups.</td><td>Confirmed; link count unresolved</td><td>\(a=2\nu=2\gamma\) holds with 32 switches, 16 terminals and 16 global links per switch; 512 global links per group, 7.0 per pair, against the slide caption of 4 per pair.</td></tr>
+<tr><td>Slide: the Grace CPU Superchip has 144 CPU cores and 1 TB/s of LPDDR5X; the Grace Hopper Superchip has 70 TFLOP/s FP64 and 600 GB.</td><td>Cores and memory confirmed for the Grace CPU Superchip (datasheet, NVL2 column); 70 TFLOP/s not in the datasheet</td><td>GH200: 72 cores, up to 384 or 512 GB/s of LPDDR5X (500 GB/s in the whitepaper); 34 TFLOP/s FP64, 67 TFLOP/s FP64 tensor core; 96 + 480 = 576 GB.</td></tr>
+<tr><td>Thread-block clusters give 7 times the throughput of global memory.</td><td>Unresolved</td><td>The slide's chart shows 1.7 to 2.7 times for three kernels; the H100 whitepaper was not opened.</td></tr>
+<tr><td>NVLink-C2C costs 5 times less energy per bit than PCIe; LPDDR5X 7 times less than DDR5.</td><td>Arithmetic correct; 1.3 pJ/bit and 5 times confirmed</td><td>\(6.5/1.3=5.0\), \(35/5=7.0\); whitepaper p. 13: 1.3 pJ per bit, more than 5 times better than PCIe 5. The other pJ values are not confirmed.</td></tr>
+<tr><td>Grace Hopper runs different applications 4.25 times faster.</td><td>One application, from a performance simulation</td><td>ABINIT, 255-atom titanium, LOBPCG; whitepaper Figure 19, p. 30.</td></tr>
+<tr><td>A cluster of 36 Grace CPUs on NVLink gives 130 TB/s.</td><td>The slide shows 36 Grace CPUs and 72 Blackwell GPUs (GB200 NVL72)</td><td>It is not a Grace Hopper system.</td></tr>
+</tbody></table></div>
+<p>The models of the chapter establish five things. First, the run time of a program has two lower bounds, one from the arithmetic and one from each memory link, and the larger one is a bound for the run (10.1, 10.11). Second, the loads of one dependent chain are limited by latency, and the loads of an independent stream by bandwidth, and the two rates differ by 26 to 63 times on this machine for the working sets that exceed the caches. Third, the sweep of the book's Jacobi kernel has an intensity of 0.208 flop/B in the realistic case and at most 0.3125 in any case, which is 30 to 59 times below the ridge point of this machine (9.3 to 12.3 flop/B) and 14 to 80 times below the ridge points of the machines of Table 10.3. Fourth, on this machine the measured sweep rate at \(N=4096\) lies between 3.3 and 4.5 Gflop/s on 1 to 8 threads, which is 2 % of the 12-thread arithmetic peak and, at 1, 2, 4 and 8 threads, 98 to 103 % of the memory roof of case 2 for the matching thread count. Fifth, the machines of the lectures differ from the laptop mainly in bandwidth, and the lecture's numbers for them are correct to the extent that the sources of Table 10.2 show.</p>
+<p>The models leave out much. The roofline assumes full overlap of arithmetic and data movement, which (10.1) states as a bound and not as a prediction. It treats the memory system as one pipe of constant bandwidth, and the measurements show that the rate depends on the kernel and on the thread count: the kernels with stores reach 19.5 to 21.8 GB/s if every store reads its line, the read-only dot product of exercise 6 and the streaming-store triad reach 16.4 to 16.8 GB/s, and the write-only fill shows that ordinary stores do not always carry the full extra read. The chapter has no tested explanation, and the guest shows no hardware counters, so the traffic was not measured. The roofs for the Jacobi sweep therefore carry an uncertainty of up to a factor of 1.33 in \(B\) and in \(Q\) separately, which cancels in the placement because the sweep is compared with the scale kernel in the same count. The data show the spread. In the five runs of <code>jacobi_bench.c</code> the 4-thread rate at \(N=4096\) lay between 3.9 and 4.9 Gflop/s; the highest value (4.92) is 9 % above the roof of 4.53 Gflop/s. A rate above its bound means that \(B\) or \(Q\) was misestimated, as the section on the roofline says. At one thread the sample is 3 % above its roof.</p>
+<p>The measurement conditions limit the numbers. The machine has one memory module, 25.6 GB/s of pin rate, a hybrid processor and a virtualization layer that this chapter did not control; other jobs were running, and the ranges over five runs are wide (the 12-thread FMA rate ranged from 196 to 210 Gflop/s in the five runs and was 233 to 290 Gflop/s in four earlier runs, which the chapter attributes, without a test, to the thermal or power state of the laptop). Every GPU number in the chapter is a bound computed from a datasheet or a slide, not a measurement; the RTX 3050 of this machine was not used. The energy numbers are the slide's. The original paper of Wulf and McKee could not be opened. The Frontier facts are dated 2026-10-26 and the machine is being upgraded.</p>
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> For the transfer model (10.3), derive the transfer size \(b_\varphi\) at which the delivered rate \(b/t(b)\) is a fraction \(\varphi\) of \(B\). Compute \(b_{0.9}\) for the disk of the slide (\(\tau=10\) ms, \(B=187\) MB/s) and for a DRAM access with \(\tau=100\) ns and \(B=15\) GB/s. State what the second result says about a 64-byte cache line.</p>
+<details><summary>Solution</summary>
+<p>The delivered rate is \(b/(\tau+b/B)\). Set it equal to \(\varphi B\): \(b=\varphi B\tau+\varphi b\), so \(b(1-\varphi)=\varphi B\tau\) and \(b_\varphi=\dfrac{\varphi}{1-\varphi}\,\tau B=\dfrac{\varphi}{1-\varphi}\,b_{1/2}\). At \(\varphi=1/2\) this is \(b_{1/2}\), which checks (10.4). At \(\varphi=0.9\) the factor is 9. Disk: \(b_{1/2}=10^{-2}\ \text{s}\times187\times10^{6}\ \text{B/s}=1.87\) MB, so \(b_{0.9}=16.8\) MB, about 4100 pages of 4 KB. DRAM: \(b_{1/2}=100\times10^{-9}\times15\times10^{9}=1500\) B and \(b_{0.9}=13\,500\) B. A 64-byte line is 4 % of \(b_{1/2}\) and 0.5 % of \(b_{0.9}\): a single line transferred alone runs at \(64/(100\ \text{ns}+4.3\ \text{ns})=0.61\) GB/s, 4 % of \(B\). Ninety percent of the bandwidth needs about 200 lines in transit, \(13\,500/64=211\). The model counts the transfers of one request stream; the machine overlaps many (the last column of <code>hierarchy.c</code>), and (10.4) is then the number of bytes that must be in flight.</p>
+</details>
+<p><strong>Exercise 2 (compute).</strong> A blocked matrix multiplication updates a tile \(Z_{ij}\) of \(n_b\times n_b\) doubles by \(Z_{ij}\mathrel{+}=X_{ik}Y_{kj}\), with the three tiles in the cache. Per tile update it loads \(X_{ik}\) and \(Y_{kj}\) from DRAM and keeps \(Z_{ij}\) in cache across the sum over \(k\). Give its intensity in flop per byte as a function of \(n_b\). Find the smallest \(n_b\) for which the intensity reaches the ridge point of 9.3 flop/B of this machine with 12 threads, and check that three tiles fit in the 1.25 MiB level-2 cache. Compare with the matrix–vector product \(y=Ax\) on an \(N\times N\) matrix.</p>
+<details><summary>Solution</summary>
+<p>A tile update performs \(2n_b^3\) flop and loads \(2n_b^2\) doubles, \(16n_b^2\) bytes, so \(I=2n_b^3/(16n_b^2)=n_b/8\). Setting \(n_b/8\ge9.3\) gives \(n_b\ge74.4\), so \(n_b=75\) (a multiple of 8 such as 80 is better for the vector units). Three tiles of 75 × 75 doubles are \(3\times8\times75^2=135\,000\) bytes, 132 KiB, about 10 % of the level-2 cache, so they fit with room for the layer-condition margin of (10.10). The matrix–vector product reads each of the \(N^2\) matrix entries once and does 2 flop per entry: \(I=2N^2/(8N^2)=0.25\) flop/B, plus \(O(N)\) for the vectors. Its intensity is 20 % above that of the Jacobi sweep in case 2 (0.208) and it cannot be improved by blocking, because each matrix entry is used once. Its bound on this machine is \(0.25\times21.8=5.4\) Gflop/s. Matrix–matrix multiplication can reach the arithmetic roof and the matrix–vector product cannot, and the reason is the reuse that each loaded entry of \(X\) and \(Y\) receives: \(n_b\) times.</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> A student states: "The Jacobi sweep on this laptop cannot run faster than 4.5 Gflop/s, whatever the grid size." Use the measurements of the chapter to refute it, and say which assumption of the roofline the refutation breaks.</p>
+<details><summary>Solution</summary>
+<p>The first table of <code>jacobi_bench.c</code> gives, for a single thread, 12.5 Gflop/s at \(N=64\), 13.7 at 128 and 13.7 at 256, and 11.5 at 512, against the bound of 4.5 for 12 threads and 3.3 for one thread. These sweeps run from cache: the working set \(2(N+2)^2\times8\) bytes is 0.07, 0.26, 1.0 and 4.0 MiB, and the grids fit in the second-level or the third-level cache. The bound of 4.5 Gflop/s is \(I\,B_{\text{DRAM}}\), and it assumes (A2) that the bytes of the sweep cross the DRAM interface. For \(N\le512\) they do not, after the first sweep. The sweep then meets a higher bandwidth roof, that of the cache (the modelled 55 to 66 GB/s of the table, below the 120 to 250 GB/s that <code>hierarchy.c</code> measures for reads from the first and second level). The student's statement holds for grids that exceed the last-level cache, \(N\ge2048\) here, where the same program gives 3.2 to 3.4 Gflop/s on one thread; at \(N=1024\), a working set of 16 MiB just above the 12 MiB level-3 cache, the sample gives 4.6 Gflop/s, between the two regimes. The result also shows why the timing of a Jacobi code on a small grid says nothing about its behaviour at production size.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> A student reads from the STREAM table that triad reaches 15.0 GB/s with 4 threads, sets \(B_{\text{peak}}=15.0\) GB/s, computes the roofline bound of the Jacobi sweep as \((5/24)\times15.0=3.1\) Gflop/s, and then reports that the measured 4.45 Gflop/s of the 4-thread sweep "violates the roofline". Diagnose the errors and give the corrected bound.</p>
+<details><summary>Solution</summary>
+<p>There are two errors. First, the roofline needs the bandwidth in the same count as \(Q\). The sweep's \(Q=24\) bytes per point is the traffic at the DRAM interface, with write allocate. STREAM counts the bytes that the program asks for, 24 per element for triad, and a cache with write allocate moves 32. The 15.0 GB/s of the table is therefore \(15.0\times32/24=20.0\) GB/s of DRAM traffic, and the bound becomes \((5/24)\times20.0=4.17\) Gflop/s. The measured 4.45 Gflop/s is 7 % above it, so the first correction is not enough. Second, the triad has two read streams and one write stream, and the sweep has one read stream and one write stream; the kernels of STREAM with that pattern are copy and scale. Their counted rates at 4 threads are 14.4 and 14.5 GB/s, 21.6 and 21.8 GB/s of DRAM traffic (16 asked for, 24 moved), and the bound is \((5/24)\times21.8=4.53\) Gflop/s. The measured 4.45 Gflop/s is 98 % of it, so no violation. The single-thread values support the first correction: triad-nt, which avoids the write-allocate read, runs 1.32 times faster in the asked-for count than triad (15.5 against 11.7 GB/s), close to 32/24. The correction has its own uncertainty, stated in the section on limits: at 4 threads and more, triad-nt (16.4 GB/s of traffic) is below the 20 GB/s that the correction assigns to triad. \(Q\) and \(B\) are each uncertain by up to a factor of 1.33, and the uncertainty cancels in the comparison with the scale kernel. The lesson of the exercise is that a bandwidth measured in other bytes, or for another access pattern, is not a roof.</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> The code of a research group is dominated by Jacobi sweeps on grids with \(N\ge4000\), run on this laptop with a tolerance of \(10^{-5}\) on the largest change. Compare three upgrades by their effect on the roofline bound and on the answer: (a) fill the second memory slot with a module of the same type; (b) replace the processor by one with twice as many cores at the same clock; (c) change the grid from double to single precision. Which would you choose first?</p>
+<details><summary>Solution</summary>
+<p>(a) The pin rate doubles from 25.6 to 51.2 GB/s (10.2), and if the same fraction of it is sustained (21.8 of 25.6, 85 %), the sustained bandwidth is 43.6 GB/s and the bound at \(I=5/24\) is 9.1 Gflop/s, twice the present 4.5. The answer does not change. The assumption is that two channels are populated in interleaved mode and that the processor can issue enough requests to fill them; the chapter measured neither. (b) The bound is \(I\,B_{\text{peak}}\) and does not contain the core count. Eight threads gave 4.43 Gflop/s and 12 gave 4.23, and the arithmetic peak is already 45 times above the sweep. The effect is nil, or a loss if the extra threads reduce the bandwidth, as the samples of 12 threads suggest. (c) Single precision halves the bytes per point (case 2: 12 bytes) and raises the intensity to \(5/12=0.42\), so the bound doubles to 9.1 Gflop/s at the same bandwidth. The cost is the answer: the rounding unit of single precision is \(6\times10^{-8}\), and the tolerance of \(10^{-5}\) on the largest change is 170 times larger, so the iteration will meet the tolerance. The rounding errors of single precision are not removed by the iteration, their size is at least the rounding unit, and the chapter did not measure how much they grow with the number of sweeps (of the order \(N^2\); Chapter 9). Choose (a) first: it doubles the bound and changes nothing else. Choose (c) only after checking the accuracy requirement, and then in addition to (a), for a factor of 4.</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement).</strong> Write a read-only dot product \(s=\sum a_ib_i\) over two arrays of 16 million doubles, with an OpenMP reduction, and time it for 1, 2, 4, 8 and 12 threads as <code>stream_mini.c</code> does. State before running it which rate in the asked-for count the write-allocate model of the chapter predicts for 4 threads, given the copy and scale rates of 14.4 and 14.5 GB/s, and compare with the measurement.</p>
+<details><summary>Solution</summary>
+<p>The program is the loop <code>#pragma omp parallel for schedule(static) reduction(+:s)</code> over <code>s += a[i] * b[i]</code> with the same first-touch initialization and best of 7; it is built with <code>gcc -O2 -march=native -fopenmp -ffast-math</code> (the flag allows the compiler to vectorize the reduction). The dot product asks for 16 bytes per element and moves 16, because nothing is stored. The model of the chapter says that the DRAM interface delivered \(14.4\times24/16=21.6\) GB/s for copy, so a read-only kernel limited by the same interface should reach about 21.6 GB/s in the asked-for count, 2.7 Gflop/s at 2 flop per 16 bytes. Three runs on this machine gave, for 4 and 8 threads, 15.3 and 15.4, 16.2 and 16.5, and 15.4 and 16.8 GB/s, that is 1.9 to 2.1 Gflop/s, and 10.6 to 13.8 GB/s for one thread. The prediction failed by 22 to 29 %. The measurement agrees with the streaming-store triad (16.4 GB/s at 4 threads) and not with the kernels that store through the cache, so the interface did not deliver 21.6 GB/s to a stream without stores. The write-only fill of the section on STREAM decides part of the question: at 4 threads the ordinary fill asks for 14.6 GB/s, and a full write-allocate read would make it 29.2 GB/s, above the 25.6 GB/s pin rate, so at that thread count the write-allocate model overstates the traffic of the kernels with stores. How much it overstates them the chapter cannot say without counters. The exercise shows what a prediction from a model is for: the failed prediction located the limit of the byte-counting argument, which the successful predictions of the single-thread triad and of the Jacobi roof had hidden.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li>Recordings: <a href="https://www.youtube.com/watch?v=Dg69YlKdUNo">W3L3, Common Challenges with Memory in Computer Architecture</a> (slides: von Neumann architecture, execution cycle, memory hierarchy, path widths and bandwidths, virtual memory and paging, hierarchy terminology, current memory hierarchy; slide sources cited as ECE 232, UMass Amherst, and Wikipedia); <a href="https://www.youtube.com/watch?v=iE47tWwhBKs">W3L4, Organization of hardware in Large HPC systems</a> (slides: shared-memory and distributed-memory machines, MPPs, Spacetime2, CPU–GPU comparison after Hwu, the Frontier slides of Oak Ridge National Laboratory: overview, node design, MI250X, node diagram, Slingshot, network topology, programming environment, use cases, fun facts); <a href="https://www.youtube.com/watch?v=tCj4YXGsEXE">W3L5, Architecture of Nvidia's Grace Hopper Superchip</a> (NVIDIA slides, ATPESC 2024: grand challenges, ML/DL, digital twin, Moore's observation, energy, More than Moore, NV Arm, Grace Hopper, thread-block clusters, computational graph, energy, co-scheduling, ABINIT), NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay, 2025.</li>
+<li>W. A. Wulf and S. A. McKee, "Hitting the memory wall: implications of the obvious", ACM SIGARCH Computer Architecture News 23(1) (1995) 20–24, <a href="https://doi.org/10.1145/216585.216588">doi:10.1145/216585.216588</a>. The paper itself could not be downloaded; the bibliographic data were checked in Crossref (volume 23, issue 1, pages 20–24) and the argument is cited as reported by Machanick and by Ertl below.</li>
+<li>P. Machanick, <a href="https://homes.cs.ru.ac.za/Philip/Publications/Techreports/2002/Reports/memory-wall-survey.pdf">"Approaches to addressing the memory wall"</a>, technical report, University of Queensland, 2002. §1: definition of the memory wall; CPU speed improving 50 % per year (called conservative) against DRAM 7 % per year, a gap growing by 1.4 per year and doubling every 2.1 years.</li>
+<li>M. A. Ertl, <a href="https://www.complang.tuwien.ac.at/anton/memory-wall.html">"The Memory Wall Fallacy"</a>, TU Wien (undated web page). The argument that the paper assumes a fixed miss rate, that longer lines reduce compulsory misses, and that memory systems serve several misses at once.</li>
+<li>J. D. McCalpin, <a href="https://www.cs.virginia.edu/stream/ref.html">STREAM: Sustainable Memory Bandwidth in High Performance Computers, reference information</a>, University of Virginia. The size rule (each array at least 4 times the sum of the last-level caches, or 1 million elements), the best of typically 10 trials, the three byte-counting conventions ("bcopy", "STREAM", "hardware"), write allocate, and the table of 16, 16, 24, 24 bytes and 0, 1, 1, 2 flop per iteration.</li>
+<li>S. Williams, A. Waterman and D. Patterson, <a href="https://www2.eecs.berkeley.edu/Pubs/TechRpts/2008/EECS-2008-134.pdf">"Roofline: an insightful visual performance model for floating-point programs and multicore architectures"</a>, UC Berkeley Technical Report UCB/EECS-2008-134 (17 October 2008), published as Communications of the ACM 52(4) (2009). §3: operational intensity, the formula for attainable performance and the ridge point; §6.3, ridge points of 6.7 (Xeon) and 4.4 (Opteron X4) flop per DRAM byte; §6.3.3: the 7-point stencil with 8 flop per 24 bytes, intensity 0.33. The chapter read the technical report, not the CACM article.</li>
+<li>M. Horowitz, <a href="https://gwern.net/doc/cs/hardware/2014-horowitz-2.pdf">"Computing's energy problem (and what we can do about it)"</a>, ISSCC 2014 Digest of Technical Papers, 1.1, p. 11. The energy of a DRAM access, 1 to 2 nJ, against about 10 pJ for a cache access or an operation; DRAM I/O above 20 pJ per bit, and 10 pJ per bit (0.6 nJ per 8 bytes) with efficient I/O; 70 pJ per instruction of overhead.</li>
+<li>J. Kim, W. J. Dally, S. Scott and D. Abts, <a href="https://www.cs.umd.edu/class/fall2019/cmsc714/readings/Kim-Dragonfly.pdf">"Technology-driven, highly-scalable dragonfly topology"</a>, ISCA 2008, pp. 77–88 (copy hosted by the University of Maryland; not compared with the ACM version). The parameters \(p\), \(a\), \(h\) (written \(\nu\), \(a\), \(\gamma\) in this chapter); router radix \(p+a+h-1\); group radix \(a(p+h)\); at most one global channel on a minimal route; maximum size \(g=ah+1\) groups and \(N=ap(ah+1)\) terminals; the balance rule \(a=2p=2h\); cost 20 % below a flattened butterfly and 52 % below a folded Clos network at 16K nodes.</li>
+<li>NVIDIA, <a href="https://dam-cdn.nvd.orangelogic.com/AssetLink/tkno03fa645gb7f33w60rf200d330420.pdf">NVIDIA GH200 Grace Hopper Superchip datasheet</a> (March 2025), pp. 1–4. 72 Neoverse V2 cores; L1 64 KB + 64 KB; L2 1 MB per core; L3 114 MB; base and all-core SIMD frequency 3.1 and 3.0 GHz; LPDDR5X up to 480 GB at up to 384 or 512 GB/s; GH200 FP64 34 TFLOP/s and FP64 tensor core 67 TFLOP/s; 96 GB HBM3 at up to 4 TB/s or 144 GB HBM3e at up to 4.9 TB/s; NVLink-C2C 900 GB/s, "7X higher than PCIe Gen5"; the NVL2 column with 144 cores and up to 1024 GB/s.</li>
+<li>NVIDIA, <a href="https://dam-cdn.nvd.orangelogic.com/AssetLink/h125m07nuew832vthbov0q6b2rs8ta0q.pdf">NVIDIA GH200 Grace Hopper Superchip Architecture, whitepaper v1.21</a>. p. 6: 72 cores, up to 480 GB LPDDR5X, 500 GB/s, 3.2 TB/s bisection of the scalable coherency fabric; p. 7, Table 1: NVLink-C2C 900 GB/s total and 450 GB/s per direction; p. 13: NVLink-C2C at 1.3 pJ per bit, more than 5 times more efficient than PCIe Gen 5; pp. 17–18: coherency at cache-line granularity, CPU and GPU as two NUMA nodes, first-touch placement; p. 30, Figure 19: ABINIT as a performance simulation. Page numbers are the printed numbers.</li>
+<li>NVIDIA, <a href="https://www.nvidia.com/en-eu/data-center/grace-hopper-superchip.md">GH200 Grace Hopper Superchip product page</a>, retrieved 2026-10-26. 900 GB/s coherent interface, 7 times PCIe Gen5, and one shared per-process page table for the CPU and the GPU.</li>
+<li>Oak Ridge Leadership Computing Facility, <a href="https://docs.olcf.ornl.gov/systems/frontier_user_guide.html">Frontier User Guide</a>, retrieved 2026-10-26. 77 cabinets of 128 nodes (9 856 nodes); about 2 EFLOP/s peak; 512 GB DDR4 per node; 8 GCDs of 64 GB HBM2E at 1.6 TB/s and 23.9 TFLOP/s vector FP64; 36+36 GB/s CPU–GPU; 4 Slingshot NICs of 200 Gbit/s (25 GB/s), 100 GB/s injection; Orion with 679 PB.</li>
+<li>J. Glenski (HPE), <a href="https://www.olcf.ornl.gov/wp-content/uploads/2-15-23-Frontier-System-Architecture-public-v7.pdf">Frontier System Architecture</a>, OLCF, 15 February 2023. 74 cabinets and 9 408 nodes; 205 GB/s DDR4; 26.5 TFLOP/s per GCD; Slingshot switches of 64 ports with 16 edge, 31 local and 16 global links; 74 compute groups of 32 switches and 128 nodes; the caption "4 links between each of the 74 compute groups".</li>
+<li>Intel, Intel Core i5-12450H processor specifications (ARK). This chapter's own request returned HTTP 403; Chapter 7 opened the page on 2026-10-26 through a fetch agent. The maximum turbo frequency of 4.40 GHz for a performance core is used as recorded for Chapter 11.</li>
+<li>TOP500, <a href="https://www.top500.org/system/180047/">Frontier, HPE Cray EX235a</a>, retrieved 2026-10-26. Rmax, Rpeak, cores and power for June 2022 to June 2026; HPCG 14 054.0 TFLOP/s; rank per list.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-09-parallel-computing-numerical-models-and-cost.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-11-openmp-threads-and-work-distribution.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>
