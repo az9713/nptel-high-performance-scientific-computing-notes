@@ -1,5 +1,5 @@
 {
-  "checked_at_utc": "2026-10-27T13:58:56.089154+00:00",
+  "checked_at_utc": "2026-10-27T18:14:04.874075+00:00",
   "status": "passed",
   "scope": "Actual isolated build and execution of each runnable listing; exact printed-output comparison where data-check=\"exact\", successful exit only where data-check=\"returncode\"; not a scientific review",
   "machine": "WSL Ubuntu 24.04, gcc 13.3 (OpenMP, OpenACC nvptx offload), Open MPI, CUDA 13.3, NVIDIA GeForce RTX 3050 Laptop GPU (sm_86), 12 logical CPUs",
@@ -1188,7 +1188,7 @@
           "check": "exact",
           "returncode": 0,
           "passed": true,
-          "listing_sha256": "58b7a01b819911a45a2227da57561f9cd7b8172fc71ff5171e2d73184ab28bf7",
+          "listing_sha256": "51aac64302103a7f483e6f4e3c71acc8388fec20d4aaa6a97ccec8ad34857d2f",
           "stderr_tail": "",
           "output_diff": []
         }
@@ -1303,7 +1303,7 @@
           "check": "exact",
           "returncode": 0,
           "passed": true,
-          "listing_sha256": "a735b171136d485058fdaf8e2b90a265721a378810baff3f0508b518794af751",
+          "listing_sha256": "94347d93df123dbe17a748d07229f29b373ec3db8fdccc133ffe37ad9c454a89",
           "stderr_tail": "",
           "output_diff": []
         }
@@ -1330,7 +1330,7 @@
           "check": "exact",
           "returncode": 0,
           "passed": true,
-          "listing_sha256": "21a2d102f189075607040fd7c556f54bd27a6383d9b8f920bf63273b8c16355e",
+          "listing_sha256": "7c2bde3c2a61b87cfd8336050a012e9eb983b9e262a38a428f48fea90283302c",
           "stderr_tail": "",
           "output_diff": []
         },

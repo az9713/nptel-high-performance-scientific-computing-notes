@@ -1,7 +1,7 @@
 {
   "chapter": 9,
   "title": "Why parallel computing: numerical models and their cost",
-  "status": "revised after review round 2",
+  "status": "revised after review round 4",
   "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
   "recordings": [
     {
@@ -68,7 +68,7 @@
     ]
   },
   "lecture_corrections": [
-    "W3L1: transistor density is said to double 'every 18 months' (stated in two places in the recording). The lecture's own chart caption says 'approximately every two years'. Moore 1965: yearly; Moore 1975: two years expected. Rupp data fit: 27.3 months (1971-1999), 23.9 months (2000-2021). The 18-month figure is Bohr's (2007) figure for Intel transistor counts in the 1970s-1980s only. The 18-month wording rests on the machine transcript alone (it occurs twice and is not a plausible mishearing of 'two years'); the slide caption confirms the two-year figure.",
+    "W3L1: transistor density is said to double 'every 18 months' (stated in two places in the recording). The lecture's own chart caption says 'approximately every two years'. Moore 1965: yearly; Moore 1975: two years expected. Rupp data fit: 27.3 months (1971-1999), 23.9 months (2000-2021). The 18-month figure is Bohr's (2007) figure for the industry's microprocessor transistor counts (Bohr plots Intel's) in the 1970s-1980s only. The 18-month wording rests on the machine transcript alone (it occurs twice and is not a plausible mishearing of 'two years'); the slide caption confirms the two-year figure.",
     "W3L1: 'doubling the power every 18 months' conflates component count with computing power; the listed clock frequency has had a slope of -0.011 doublings per year since 2004.",
     "W3L1: Dennard scaling is said to have broken because a finite voltage is needed to tell 0 from 1. Bohr (2007, p. 12): the threshold voltage cannot scale because of sub-threshold leakage. Refined, not contradicted.",
     "W3L1: the bag-of-integers example is presented as Amdahl's law. Its serial part (adding p partial sums) grows with p; f_eff = p^2/(M(p-1)) is not constant. Pairwise addition changes the result (107 s at p = 100). The conclusion that machines with millions of cores are useless holds only at fixed problem size (Gustafson 1988).",
@@ -88,7 +88,7 @@
     "The GCC manual pages were the current online version on 2026-10-26, which may be newer than gcc 13.3 used for the runs; the 13.3 manual was not opened. The quoted statements on -ftree-parallelize-loops and -march were not tested against 13.3 text.",
     "System V AMD64 ABI draft 0.99.6 (2012) was used; the current psABI version was not opened. Printed page 9 (scope) and the register sequence on p. 124 (Appendix A.2.1) were read from the draft; section numbers are the reliable references.",
     "The stair-step pattern of successive changes (ratios alternating between rho^2 and 1.000000) was observed for N = 31 and is explained only as a candidate (the -rho eigenvalue); it was not derived. That the largest error of the canonical problem is 7.9e-3 at N = 7 and 7.2e-3 at N = 15, 31, 63 is observed for these four sizes only and was not proved to stay constant.",
-    "Timing samples (jacobi_time.c, autopar.c) were captured while other agents' jobs ran on the machine. Ranges quoted in the text come from seven runs of the timing listing (time per point update, in cache 1.0-1.6 ns, N = 1000 1.6-2.6 ns; one run under heavy load 4.3-5.3 ns) and six runs of autopar.c, plus an earlier two-run test at N = 1000 and 2000 not reproduced by a listing. A single-thread time is a time on an unknown core of the hybrid processor.",
+    "Timing samples (jacobi_time.c, autopar.c) were captured while other agents' jobs ran on the machine. Ranges quoted in the text come from seven runs of the timing listing (time per point update, in cache 1.0-1.6 ns, N = 1000 1.6-2.6 ns; one run under heavy load 4.3-5.3 ns) and seven runs of autopar.c (six while writing the chapter and the sample shown), plus an earlier two-run test at N = 1000 and 2000 not reproduced by a listing. A single-thread time is a time on an unknown core of the hybrid processor.",
     "The lecture's 'city' examples are used only as a scale for N: 10 km at 10 m spacing (N = 1000) and at 1 m (N = 10^4) are the chapter's illustration, not the lecture's numbers. Times for N >= 4000 are extrapolations of the measured rate.",
     "The claim '3 nanometer technology' (W3L1) was not checked; the dimension that a node name denotes was not looked up. The modelling error of the W3L2 pipeline is not estimated.",
     "Statements that rest on the machine transcript alone were not recorded as lecture corrections: the clock figures of about 3 GHz and 1.5 GHz, the 50 percent slowdown anecdote, the 'i and j from 0 to n' count and the wording of the Taylor-series passage were not confirmed by a slide. The anecdote is reported as told and is not tested. Timestamps are local segment times and locate topic changes to within a few seconds.",
@@ -160,9 +160,9 @@
     },
     {
       "section": "What the iteration costs, and why one core cannot keep up",
-      "video_id": null,
-      "start": null,
-      "end": null,
+      "video_id": "z75dO5juDq8",
+      "start": 1080.0,
+      "end": 1147.0,
       "lecture_material": "None (the lecture states that accuracy affects cost).",
       "research_extension": "Demmel 1995 table of solver costs.",
       "teaching_construction": "Work (9.11), measured time per point update, cost table, required speedup and Amdahl condition, work-span remark, banded Cholesky comparison.",
@@ -233,7 +233,7 @@
     {
       "title": "Bohr, A 30 year retrospective on Dennard's MOSFET scaling paper, IEEE SSCS Newsletter, Winter 2007",
       "url": "https://sscs.ieee.org/images/files/newsletter_archive/sscs_newsletter_200701.pdf",
-      "supports": "0.7x feature size per generation, 2x density; 2x per 18 months in Intel transistor counts in the 1970s-1980s, every 2 years since the mid-1990s; sub-threshold leakage limits threshold and supply voltage scaling.",
+      "supports": "0.7x feature size per generation, 2x density; 2x per 18 months in the industry's transistor counts in the 1970s-1980s (Figure 2 plots Intel microprocessors), every 2 years since the mid-1990s; sub-threshold leakage limits threshold and supply voltage scaling.",
       "page_checked": "printed pp. 11-13 of the newsletter"
     },
     {
@@ -321,11 +321,6 @@
       "definition": "Operations per sweep (5N^2), work, times on 1 and p workers, speedup, efficiency, serial fraction, parallel proportion (P = 1-f), time per point update."
     },
     {
-      "symbol": "k (Dennard), P = C V^2 f",
-      "first_section": "scaling",
-      "definition": "Linear shrink factor; switching power of a circuit (C capacitance, V voltage, f clock)."
-    },
-    {
       "symbol": "M, T(p)",
       "first_section": "amdahl",
       "definition": "Number of integers in the bag; time of p people adding them (9.1)."
@@ -361,9 +356,19 @@
       "definition": "Amplitude of the change of the slowest mode; the single-mode sweep count needs tol much smaller than c."
     },
     {
-      "symbol": "Id, Gamma, g, B(h)",
+      "symbol": "Id",
       "first_section": "jacobi",
-      "definition": "Identity matrix; banded Cholesky factor; function differentiated in the error-balance experiment; bound on the central-difference error."
+      "definition": "Identity matrix."
+    },
+    {
+      "symbol": "g, B(h)",
+      "first_section": "pipeline",
+      "definition": "Function differentiated in the error-balance experiment; bound on the central-difference error."
+    },
+    {
+      "symbol": "Gamma",
+      "first_section": "cost",
+      "definition": "Banded Cholesky factor."
     }
   ],
   "exercises": 6,
@@ -382,6 +387,16 @@
       "round": 2,
       "verdict": "ACCEPT WITH FIXES (1 blocking, 1 major, 4 minor)",
       "changes": "B1: the limits paragraph now says the 26 % underestimate holds at N = 1000 only (tol/c = 0.50) and that for larger N at tol = 1e-6 the count does not apply (tol/c > 1). M1: no cut, by the lead's decision. m1: the 1.45 value at N = 63 and the 0.82 constant are labelled in the text as computations made outside the code lab. m2: duplicated phrase removed; the directive speedup range is 2.1 to 2.7 over seven runs (text and Table 9.1). m3, m4: unchanged. No listing changed; the code lab was not rerun."
+    },
+    {
+      "round": 3,
+      "verdict": "ACCEPT WITH FIXES (3 blocking, 2 major, 11 minor)",
+      "changes": "B1: the limits paragraph now defines c, attaches the factor 1.36 to N = 1000 only, and says that for 1000 < N < 1414 the count is positive without the factor 1.36 and from N = 1414 on it is negative (tol/c > 1; tol/c = 0.501, 0.9997 and 1.0011 at N = 1000, 1413, 1414 recomputed). B2: Demmel's m ~ ((N+1)/pi)^2 is stated as the same growth with N from a linearization of rho^m; the count of (9.9) for a factor 2 is 1.39 times larger (recomputed 1.386). B3: (a) the unshareable part of a parallel version is the test of the change after combining the maxima, about log2(p)/(5 N^2) = 2e-6 at N = 1000, p = 1000; (b) the stack section names both parallelized initialization loops (init_canonical, order N^2; autopar.c fill, order N); (c) the cross-reference is (9.3). M1: length not cut, by the lead's decision. M2: Demmel's n is written N with a note that the notes use n (three places). m1: seven runs in all places (six while writing and the sample shown). m2: 1/13 of Jacobi's operations. m3: 0.2 % for N >= 15, 4 % at N = 7. m4: phi_11(r,s). m5: 606 days (5.23e7 s / 86,400 s), f <= 6.5e-4 at p = 1000, 1/606 = 1.65e-3, in four places. m6: centre error 0.16 and largest error 0.17 at N = 1000. m7: the 16.7 s run is labelled as outside the code lab (limits and Exercise 2). m8: TechPowerUp is cited as shown in a web-search summary. m9: sidecar ledger, section times and Bohr wording corrected. m10: SSE2, AVX2, FMA and consistently ordered glossed at first use. m11: comment in gauss_seidel.c reworded (comment only; the output is unchanged)."
+    },
+    {
+      "round": 4,
+      "verdict": "ACCEPT WITH FIXES (0 blocking, 2 major, 6 minor)",
+      "changes": "M1: the stencil section now defines the lecture's n as points per side and reads it as the book's N (count N^2 of interior unknowns); the Jacobi section says 'N^2 unknowns (the lecture's n^2)'. M2: the scaling section no longer says 'one company's products' (the 18 months is described as one period, the 1970s and 1980s); the Bohr reference 'supports' now says industry transistor counts, with Figure 2 plotting Intel microprocessors. m1: no cut (length open by the lead's decision). m2: agreement percentages recomputed from unrounded errors (NumPy re-run): 0.3 % for N >= 15 and 4.5 % at N = 7 in the limits paragraph; 0.2 % at N = 31, 0.04 % at N = 127, 4.5 % at N = 7 in the reading of the first table. m3: the Intel ARK and TechPowerUp entry in the primary sources now says 'requested 2026-10-26 (HTTP 403; figures as recorded in chapter 11)' and 'entry as shown in a web-search summary'. m4: band-storage comparison corrected to 0.27 MB for two grids (factor 62). m5: the time per point update of 1.1 ns and 2.0 ns is now described against the stated ranges (1.0 to 1.6 ns in cache; 1.6 to 2.6 ns at N = 1000). m6: Exercise 1 solution compares on one basis: 14 times faster at the continuous optimum with a team 69 times larger; 13 times faster with the ceilings for teams of 3334 to 10,000."
     }
   ]
 }

@@ -71,14 +71,15 @@ successful exit only; the others are checked byte for byte.
 
 ## Evidence and scope
 
-Every written chapter has two recorded independent review rounds. After each
-round the author repaired the findings, and the lead checked the repairs.
-**Final independent sign-offs remain pending for chapters 3, 9, 10 and 11**:
-their second-round reviews (verdict "accept with fixes") still recorded one
-blocking finding each. Those findings were repaired and checked by the lead,
-but no later independent zero-blocking verdict is recorded. Chapters 1, 2 and
-4–8 ended with zero blocking findings. Publication does not close those review
-gaps.
+Every written chapter has at least two recorded independent review rounds.
+After each round the author repaired the findings, and the lead checked the
+repairs. The latest recorded review of every written chapter has zero blocking
+findings. Chapters 1, 2 and 4–8 reached that verdict in round 2. Chapters 3, 9,
+10 and 11 needed more rounds: their round-2 reviews still recorded one blocking
+finding each, so each received further independent rounds until one recorded
+zero blocking findings (round 3 for chapter 3, round 4 for chapters 9 and 11,
+round 5 for chapter 10). The author then repaired the remaining major and minor
+findings of that round.
 
 The [workflow](WORKFLOW.md), [source record](source-validation-summary.json),
 [editorial record](editorial-review-summary.json), [content inventory](completion.json),

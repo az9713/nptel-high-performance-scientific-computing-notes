@@ -1,7 +1,7 @@
 {
   "chapter": 11,
   "title": "OpenMP I: shared-memory threads and the distribution of work",
-  "status": "revised after review round 2",
+  "status": "revised after review round 4",
   "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
   "recordings": [
     {
@@ -57,7 +57,7 @@
     "Amdahl (1967) was read in the 2007 IEEE SSCS News reprint (redrawn figure); the reprint's editors state the paper has no equations. The AFIPS original was not opened. The formula S = 1/(f + (1-f)/p) is presented as a later formalization derived in the chapter; the chapter's remark that 1/f gives 5 and 7.5 for housekeeping fractions of 0.20 and 0.133 is the author's reading of the paper's 'five to seven', not a statement of the paper.",
     "OpenMP 5.2 (November 2021) is the document cited for definitions. gcc 13.3 reports _OPENMP = 201511 (version 4.5). OpenMP 6.0 was not opened, so the chapter does not claim that the data-race wording is unchanged there. Page numbers are the printed page numbers of the 5.2 PDF (PDF page minus 20).",
     "Drepper (2007): the chapter reads 'overhead computed by dividing the time with a single cache line by the time with a separate cache line per thread is 390%, 734% and 1,147%' as time ratios of 3.9, 7.3 and 11.5. His text gives the percentages and the division, not the word 'ratio'.",
-    "Statements about the libgomp runtime (thread reuse between regions) rest on the author's timings only; the libgomp documentation on thread pools was not opened (only the GOMP_SPINCOUNT page was). The explanation that gcc -O2 keeps sum[id*stride] in a register is inferred from timings; the generated assembly was not inspected.",
+    "Statements about the libgomp runtime (thread reuse between regions) rest on the author's timings only; the libgomp documentation on thread pools was not opened (only the GOMP_SPINCOUNT page was). The explanation that gcc -O2 keeps sum[id*stride] in a register was first inferred from timings; in round 3 the assembly of gcc 13.3 (gcc -O2 -fopenmp -S pi_scaling.c, in WSL) showed the partial sum zeroed in a register before the loop, added to inside the loop, and stored once after it.",
     "ASR errors in the machine transcript corrected from slides: the transcript gives the four-thread time of the lecture's table as '2.97 seconds'; the slide reads 0.97. 'OMP-setnum-threads' = omp_set_num_threads; 'poo' = pooh; 'CIDR file' = header file. The slide's code prints num_steps = 100000 while its timing line says 100000000 steps; the chapter takes 10^8 from the timing line and says so. The slide's sum runs from i = 0 to N (N+1 terms) while the code runs N terms.",
     "The lecture's hello-world runs were on a MacBook (gcc-14 visible in a frame) with 8 processing cores per the lecturer's statement; the chapter uses only what was stated or shown. The lecturer's remark that the timing-study average should be taken over about five runs is reported as stated.",
     "Timestamps are section anchors from local speech-recognition segment times and locate topic changes to within a few seconds.",
@@ -246,7 +246,7 @@
       "title": "GNU libgomp manual, GOMP_SPINCOUNT",
       "url": "https://gcc.gnu.org/onlinedocs/libgomp/GOMP_005fSPINCOUNT.html",
       "supports": "A waiting thread spins 300,000 times when OMP_WAIT_POLICY is undefined (30 billion for ACTIVE, 0 for PASSIVE); if there are more OpenMP threads than available CPUs, 1000 spins (ACTIVE) and 100 spins (undefined).",
-      "page_checked": "full page text, retrieved 2026-10-26"
+      "page_checked": "full page text, online edition for the current GCC release, retrieved 2026-10-26; the chapter assumes that the libgomp of gcc 13.3 has the same default"
     }
   ],
   "symbol_ledger": [
@@ -266,9 +266,9 @@
       "definition": "Integral, midpoint sum, width 1/N, number of subintervals, integrand 4/(1+x^2)."
     },
     {
-      "symbol": "H, W, C_p",
+      "symbol": "H, L, Cat_p",
       "first_section": "hello",
-      "definition": "Events print 'hello ' and print 'world', Catalan number counting distinct outputs."
+      "definition": "Events print 'hello ' and print 'world' (L, which ends the line); Cat_p: Catalan number counting distinct outputs."
     },
     {
       "symbol": "E_N, M, [a,b]",
@@ -276,14 +276,19 @@
       "definition": "Error I - M_N, bound on |f''|, interval."
     },
     {
-      "symbol": "id, n_thr, q, r, I_t, w_t, c(i), W, E_dist",
+      "symbol": "id, n_thr, q, r, I_t, w_t, c(i), W, E_dist, Rd(i), Wr(i)",
       "first_section": "spmd",
-      "definition": "Thread number, team size, quotient and remainder of N/p, iteration set of thread t, its load, iteration cost, total work, efficiency of a distribution."
+      "definition": "Thread number, team size, quotient and remainder of N/p, iteration set of thread t, its load, iteration cost, total work, efficiency of a distribution, read set and write set of iteration i."
     },
     {
-      "symbol": "A1-A3, f_exp, C_c, C",
+      "symbol": "A1-A3, f_exp",
       "first_section": "speedup",
-      "definition": "Assumptions of Amdahl's law, experimental serial fraction, throughput of c independent copies, capacity."
+      "definition": "Assumptions of Amdahl's law, experimental serial fraction."
+    },
+    {
+      "symbol": "C, C_c",
+      "first_section": "overhead",
+      "definition": "C: speed of an oversubscribed team in units of one thread; C_c: c times the speed of the slowest of c independent copies, c v_min."
     },
     {
       "symbol": "p*, kappa_c",
@@ -294,6 +299,11 @@
       "symbol": "sigma, l(t)",
       "first_section": "false-sharing",
       "definition": "Stride in elements, cache-line index of thread t's element."
+    },
+    {
+      "symbol": "v_k, v_min",
+      "first_section": "false-sharing",
+      "definition": "Speed of logical processor k relative to one lone copy; smallest v_k among the processors in use."
     }
   ],
   "exercises": 6,
@@ -306,12 +316,22 @@
     {
       "round": 1,
       "verdict": "REVISE (5 blocking, 5 major, 13 minor)",
-      "changes": "B1: removed two TAB characters that broke math in Table 11.1 (no other tab or control character in the source). B2: model section states the hybrid processor (4 P x 2 + 4 E x 1, turbo 4.40/3.30 GHz, Intel ARK) and the synthetic WSL view. B3: C_c redefined as c times the speed of the slowest copy (C_c = c v_min); S_p = p v_min for equal shares; the plateau and the p = 24 speedup explained and hedged; matching edits in observation 3 and exercise 4. B4: Table 11.1 row on superlinear speedup corrected (triangle.c cyclic 4.27 at p = 4 in an earlier run). B5: the -O2 stride comparison restated against the table (within 15 percent; largest difference has the padded version slower). M1: the p = 10-12 region-cost rise is not attributed to the hybrid layout; occupation of all logical processors and libgomp spinning given as an untested hypothesis with its predictions. M2: triangle.c deviations explained by core speeds (reference run, slowest thread). M3: the 1000-thread model uses the session's own T_1 and a capacity C defined where it is used (C = 4.2, threshold 0.066 s). M4: Table 11.1 gained the lecture's own explanation of the table, the homework as stated, and the claim that cyclic and block distributions give the same answer. M5: limits paragraph and source_uncertainties rewritten. m1: storage timestamp moved to 1:41 (t = 101). m2: slide variable names. m3: lead names the slide's machine. m4: 'minimum of 1'. m5: T_1 of about 1.0 s. m6: row 3 conditions and row 2 section. m7: best-of-5 caveat for the copies. m8: hypothesis for the non-monotone -O0 time. m9: reason for thread 0 attributed correctly. m10: lock-step converse case. m11: probabilities for sum[2] and sum[4]. m12: no cuts made; the chapter's prose count excluding math is about 6,700 words. m13: all timing listings and shell sessions recaptured in one session (machine shared; stated in the chapter and here); all prose numbers re-checked against the new outputs; every OpenMP 5.2 page citation re-confirmed against the extracted PDF text (printed page = PDF page minus 20)."
+      "changes": "B1: removed two TAB characters that broke math in Table 11.1 (no other tab or control character in the source). B2: model section states the hybrid processor (4 P x 2 + 4 E x 1, turbo 4.40/3.30 GHz, Intel ARK) and the synthetic WSL view. B3: C_c redefined as c times the speed of the slowest copy (C_c = c v_min); S_p = p v_min for equal shares; the plateau and the p = 24 speedup explained and hedged; matching edits in observation 3 and exercise 4. B4: Table 11.1 row on superlinear speedup corrected (triangle.c cyclic 4.27 at p = 4 in an earlier run). B5: the -O2 stride comparison restated against the table (within 15 percent; largest difference has the padded version slower). M1: the p = 10-12 region-cost rise is not attributed to the hybrid layout; occupation of all logical processors and libgomp spinning given as an untested hypothesis with its predictions. M2: triangle.c deviations explained by core speeds (reference run, slowest thread). M3: the 1000-thread model uses the session's own T_1 and a capacity C defined where it is used (C = 4.2, threshold 0.066 s). M4: Table 11.1 gained the lecture's own explanation of the table, the homework as stated, and the claim that cyclic and block distributions give the same answer. M5: limits paragraph and source_uncertainties rewritten. m1: storage timestamp moved to 1:41 (t = 101). m2: slide variable names. m3: lead names the slide's machine. m4: 'minimum of 1'. m5: T_1 of about 1.0 s. m6: row 3 conditions and row 2 section. m7: best-of-5 caveat for the copies. m8: hypothesis for the non-monotone -O0 time. m9: reason for thread 0 attributed correctly. m10: lock-step converse case. m11: probabilities for sum[2] and sum[4]. m12: no cuts made; the chapter's prose count excluding math is about 6,700 words as counted in round 1. m13: all timing listings and shell sessions recaptured in one session (machine shared; stated in the chapter and here); all prose numbers re-checked against the new outputs; every OpenMP 5.2 page citation re-confirmed against the extracted PDF text (printed page = PDF page minus 20)."
     },
     {
       "round": 2,
       "verdict": "ACCEPT WITH FIXES (1 blocking, 1 major, 8 minor)",
       "changes": "B1: the falseshare p = 8 sentence now states the fall from 8 to 2 threads per line and the rise from sigma = 4 (0.22 s) to sigma = 8 (0.26 s) against the prediction. M1: 'consistent with every table' replaced; the explanation fits p <= 8 (94-104 % of C_p) and does not account for p = 12 (80 % of C_12); sidecar item (a) records the gap. m1: rounding slips fixed (104 %, 102 %, 94 %, 80 %; 94-104 %; C_c quoted to two decimals; f_exp 0.10 at p = 2; S_p quoted as printed; 28 ms; 0.31 s). m2: the region-cost rise starts at p = 11 in the final sample; limits and sidecar item (c) say p = 10 to 12. m3: the model section and the sidecar state which sessions were recaptured and that the hello-world counts come from an earlier session. m4: exercise 3 states the -O2 versions are at most 15 % apart. m5: Table 11.1 superlinear row says two earlier measurements. m6: duplicated sentence in the SPMD section removed. m7: 'converse cause' replaced. m8: no cuts (the reviewer does not require them). No listing changed, so the code lab was not rerun; the last run (11 of 11 passed) stands."
+    },
+    {
+      "round": 3,
+      "verdict": "ACCEPT WITH FIXES (3 blocking, 3 major, 18 minor)",
+      "changes": "B1: the pi_scaling paragraph says best time of 5 runs (REPS is 5). B2: observation (3) says S_p is below p at every p (E_p 0.90 at p = 2, 0.46 at p = 8). B3: exercise 4 solution says about a microsecond per region at p = 8 (1.03 us). M1: the 2-copy v_min below 1 now lists three unseparated causes and the earlier 0.96. M2: C_c is defined where the overhead section first uses it. M3: source note names Intel ARK and the libgomp manual. m1: the minimum-of-repetitions statement excludes the first regions and the single runs. m2: shared and private variables are objects made of memory units. m3: hello-world sample gives 5.7 expected outputs in 100 runs and probability 0.05 for the rarest. m4: SIMD and WSL 2 defined. m5: within 7 % in the speedup section and Table 11.1. m6: lecture table gains at most 6 % over two. m7: extra cost about 17 us per region, stall 1.7 ms in 1 %. m8: threads are created once; the lecture's creation and destruction cost is paid only by the first region. m9: the slowest of four copies runs at 0.75. m10: the explanation S_p = p v_min is named in the three sentences of the last paragraph. m11: omp_get_wtime is not consistent across threads (OpenMP 5.2 18.10.1, p. 414); the test needs clock_gettime(CLOCK_MONOTONIC). m12: the gcc 13.3 -O2 assembly was checked and the hedge replaced by the result; source_uncertainties updated. m13: block distribution at p = 8 explained (threads 0 to 3 carry at most 7/64 of W), marked untested. m14: N = 10^8 and p <= 12 bound of 1.4e-6 in the SPMD section and exercise 5. m15: matched comparison with Drepper (1.04 and 2.0 against 11.5). m16: exercise 1 solution gives 3.8 as half of p* = 7.7. m17: symbol ledger split (C and C_c in overhead; v_k and v_min added). m18: no cut and no change (the length and the 100 s listing are carried notes). No listing changed, so the code lab was not rerun."
+    },
+    {
+      "round": 4,
+      "verdict": "ACCEPT WITH FIXES (0 blocking, 1 major, 9 minor)",
+      "changes": "M1: Catalan number renamed Cat_p (hello, Table 11.1 row 1, limits); events H, W renamed H, L in the text and in interleavings.py (output unchanged); read and write sets renamed Rd(i), Wr(i) in the spmd section; the capacity C_p is defined as C_c at c = p where first used; symbol ledger updated. m1: cyclic load difference stated for neighbouring threads and for threads 0 and p-1, relative difference less than 2p/N. m2: Amdahl housekeeping 40 % reduced to about 13 % (40/3). m3: thread-reuse sentence split; creation cost paid once by the first region, no destruction cost between regions. m4: 18.6 us at p = 12 in both places. m5: duplicated 1.04 and 2.0 removed; Drepper's 11.5 for 4 threads kept. m6: iteration i of the pi loop reads sum. m7: libgomp spin-count default dated 2026-10-26 and marked as the current GCC release, with the gcc 13.3 assumption, in the text and in primary sources. m8: length not cut (carried by the lead's decision); round-1 word count qualified in the sidecar. m9: serial part of a few microseconds is a separate sentence."
     }
   ]
 }

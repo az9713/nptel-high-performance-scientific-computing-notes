@@ -1,7 +1,7 @@
 {
   "chapter": 3,
   "title": "The Linux file system: names, inodes, permission bits and ownership",
-  "status": "revised after review round 2",
+  "status": "revised after review round 3",
   "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
   "recordings": [
     {
@@ -131,7 +131,7 @@
     {
       "where": "W1L4 chmod +x file2",
       "slide": "frames f0080-f0082 show 664 to 775",
-      "chapter": "a clause without who is a minus the bits of the umask: all under 002, owner and group under 027 (chmod_session.sh, chmod_model.py)"
+      "chapter": "a clause without who acts like a, minus the bits of the umask: execute for all classes under 002, for owner and group only under 027 (chmod_session.sh, chmod_model.py)"
     },
     {
       "where": "W1L4 chown",
@@ -158,8 +158,8 @@
     "GNU chmod prints 'new permissions are r--r--rw-, not r--r--r--' and exits with status 1 for chmod -w on mode 646 under umask 002. The resulting mode (446) equals the model's result; the reason for the warning was inferred, not read in the source code.",
     "The effect of a set-user-ID program (effective user = file owner) rests on Ritchie and Thompson (1974) and inode(7); no set-user-ID program was run. The mode of /usr/bin/passwd is a fact of the verification machine.",
     "The claim that the 9p-mounted Windows drive does not store Linux modes rests on one test on this machine: chmod 000 on a new file under /mnt/c gave mode 555 in stat. The mount options were not varied.",
-    "The directory sizes 4096 and 35 bytes are read from the lecture's slide. The link-count rule (3.1) is verified on this machine's ext4 and assumed for the lecture's file system; link-count conventions of other file systems were not tested.",
-    "The chapter does not cover the other parts of the W1L3 outline that the lecture announces (process management, text processing, memory and network commands); they belong to Chapters 2 and 4."
+    "The directory sizes 4096, 6, 25, 27, 30, 47, 141 (entries of one home directory) and 35 (/home) are read from the W1L3 ls -la slide; the 4096 of a new empty directory is measured on the verification machine's ext4 /tmp; the file system of the lecture's machine is not named on the screens. The link-count rule (3.1) is verified on this machine's ext4 and assumed for the lecture's file system; link-count conventions of other file systems were not tested.",
+    "The chapter does not cover the other parts of the W1L3 outline that the lecture announces (process management, text processing, memory and network commands); they belong to Chapter 4."
   ],
   "sections": [
     {
@@ -207,7 +207,7 @@
       "video_id": "t8tAOMqb3qc",
       "start": 1431.0,
       "end": 1898.0,
-      "lecture_material": "W1L3 23:51-31:38: mkdir, rmdir, mv; W1L4 0:37-25:14 (video bc4gkkRVn4Q, t=37-1514): touch, vim, gedit, rm, rm -r, cp, cp -r",
+      "lecture_material": "W1L3 23:51-31:38: mkdir, rmdir, mv; W1L4 0:37-13:14 and 21:52-25:14 (video bc4gkkRVn4Q, t=37-794 and 1312-1514): touch, vim, gedit, rm, rm -r, cp, cp -r",
       "research_extension": "mkdir(2), rmdir(2), open(2), unlink(2), rename(2); Coreutils 11.4, 11.5",
       "teaching_construction": "Table 3.1; files_session.sh",
       "evidence_class": "engineering check"
@@ -423,18 +423,43 @@
       "symbol": "K, b, sigma_K(b), A",
       "first_section": "chmod",
       "definition": "set of classes named by the who of a symbolic clause (renamed from W), the 3-bit permission value (renamed from P), its placement in those classes, and the mask of bits the clause may change"
+    },
+    {
+      "symbol": "c(q,f)",
+      "first_section": "permissions",
+      "definition": "class (u, g or o) that the kernel selects for process q and file f, equation (3.2)"
+    },
+    {
+      "symbol": "d, [r], [w], [x]",
+      "first_section": "permissions",
+      "definition": "octal digit of one class and the 0/1 indicators of read, write and execute in equation (3.4)"
+    },
+    {
+      "symbol": "m'",
+      "first_section": "chmod",
+      "definition": "mode after a symbolic clause is applied to the mode m, equation (3.5)"
+    },
+    {
+      "symbol": "m_req, m_new",
+      "first_section": "special",
+      "definition": "mode that a program requests when it creates a file, and the mode the file receives, m_new = m_req AND NOT mu, equation (3.6)"
     }
   ],
   "review_rounds": [
     {
       "round": 1,
-      "verdict": "ACCEPT WITH FIXES (5 blocking, 7 major, 12 minor)",
+      "verdict": "ACCEPT WITH FIXES (3 blocking, 6 major, 11 minor; 5, 7 and 13 items listed, of which B3, B4, M2, m7 and m8 were resolved during the review)",
       "changes": "B1: directory-size paragraph rewritten from the W1L3 screen (sizes 4096, 6 to 141, 35) and /tmp. B2: mv failure text follows Coreutils 11.4 (partial copy removed; already-copied directories stay). B3: free -h text now reports what the slide shows; no speech-based correction. B4: chmod +x text and table row rewritten (all classes in the demonstration; the lecture states the who-less clause acts on all classes; not general). B5: symbols renamed (p to q, S_p to Sigma_q, W to K, D to delta, P to b) in text, equations, exercises and ledger. M1: lecturer narration removed; 'The lecture does not discuss it'; 'It follows that'. M2: date column stated as a fact, no attribution. M3: three conditions and the non-fitting directories (Desktop 755, home 700, simpleproject) stated; source-note says inference under stated conditions. M4: login.defs(5) opened; the 022 to 002 sentence is sourced to the machine's /etc/login.defs comment; unsupported background claim removed. M5: budget bug fixed (walk stops); thresholds replace bare booleans; sample counts given; owner-class exhaustiveness stated; the order of the group class and the other class is stated as not tested on the kernel (no new root run, as instructed by the lead). M6: exercise 5 lemma replaced and PI-in-lab condition added. M7: stdin-not-a-terminal stated at both transcripts. m1: whoami spelling remark deleted. m2: free_used.py comment agrees (8:15). m3: free -h wording. m4: frame IDs replaced by recording label and time in the public text (kept in the sidecar). m5: chown(2) quote completed. m6: fsuid clause added. m7: redirection wording. m8: chown wording and the wheel/shadow remark. m9: sentence on section order added. m10: conversion sentence of the free digression removed; no further cuts. m11: execute exception added to the privileged-process definition. m12: 'before the operation'. m13: the chmod sentence now speaks of the lecture's result, not a statement."
     },
     {
       "round": 2,
       "verdict": "ACCEPT WITH FIXES (1 blocking, 0 major, 7 minor)",
       "changes": "N1: the access_predicate walk is described as measured (1516, 206, 1093 and 3000 entries; 2997 owner-class entries are the test user's own files under /home, 42 group-class under /var/log, 1946 other-class); the lead says 'files in all three classes'; sidecar matches. n2: the limits summary qualifies the 002 inference. n3: the two remaining statements about the lecture's words are replaced by what the demonstration shows and by the failing assumption. n4: pam_umask(8) option usergroups cited and quoted, 'Ubuntu's shadow-utils' replaced by 'shadow and PAM configuration of Ubuntu 24.04', pam_umask(8) added to sources and references. n5: d in the rmdir row is code, not the digit symbol. n6: not changed (lead: length needs no change). n7: sidecar records that the group-before-other order was not tested and that root_a.sh/out were restored at 21:07 to the original content."
+    },
+    {
+      "round": 3,
+      "verdict": "ACCEPT WITH FIXES (0 blocking, 2 major, 11 minor)",
+      "changes": "M1: the set-group-ID argument now rests on the mode string drwxr-xr-x of Desktop (W1L4 4:45), x not s in the group position. M2: touch and vim produce the same mode under the lecture's mask; the request 0666 is an assumption. m1: four uses of cd. m2: modes with or without a leading zero. m3: G_q eight members, seven other groups, Sigma_q also contains 1000. m4: three commands, not three clauses; 16 symbolic modes (13 single clauses, 3 lists). m5: this reading. m6: files that the test user owns. m7: Table 3.3 first cell states the demonstration. m8: w_max replaces a in exercise 1(a). m9: exercise 4(c) names the consequence, not R2. m10: exercise 5(c) says only unprivileged user who can remove files that other people created. m11: sidecar round-1 verdict, directory sizes, chmod +x correction text, Chapter 4 reference, four ledger entries, W1L4 ranges."
     }
   ],
   "exercises": 6,

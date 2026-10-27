@@ -1,7 +1,7 @@
 {
   "chapter": 10,
   "title": "Memory bottlenecks, the organization of large HPC systems and the Grace Hopper superchip",
-  "status": "revised after review round 2",
+  "status": "revised after review round 5",
   "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
   "recordings": [
     {
@@ -132,12 +132,12 @@
     "Williams, Waterman and Patterson: the chapter read the Berkeley technical report UCB/EECS-2008-134 (October 2008). The published CACM article 52(4) (2009) was not opened; page numbers of the CACM article are not given.",
     "Intel ARK page for the i5-12450H returned HTTP 403 to this chapter's scripted requests; Chapter 7 opened it on 2026-10-26 through a fetch agent. The maximum turbo frequency of 4.40 GHz is taken from Chapter 11's record. The 16 double-precision flop per cycle of a performance core (two 256-bit FMA pipes) was not checked in an Intel manual; the measured 66.7 Gflop/s on one thread is 95 % of 4.40 GHz x 16.",
     "Kim et al. (ISCA 2008): the University of Maryland copy of the paper was read; it was not compared with the ACM version. The exact lower bound on channels per group pair in non-maximum dragonflies is garbled in the text extraction and is not quoted.",
-    "Frontier numbers: the lecture's slides (ORNL, 2024 data) agree with TOP500 for June 2024 (8 699 904 cores, 22 786 kW, Rpeak 1 714.81 PFLOP/s, Rmax 1 206.00 PFLOP/s). The OLCF user guide (retrieved 2026-10-26) gives 77 cabinets and 9 856 nodes and 23.9 TFLOP/s per GCD; the HPE talk of February 2023 gives 9 408 nodes in 74 cabinets and 26.5 TFLOP/s per GCD. The three peak values (2.014, 1.818 and 1.715 EFLOP/s) are not reconciled. The HPE slide says 16 global links per switch (512 per group, 7.0 per other group) and also '4 links between each of the 74 compute groups'; this contradiction is not resolved. The lecture's 74 groups x 128 nodes = 9 472 differs from 9 408 nodes; not resolved. The HPCG value of 14 054.0 TFLOP/s is read from the TOP500 system page without a list date; the HPCG specification was not opened.",
-    "The 2025 GH200 datasheet table has two-line cells for the LPDDR5X size (480 GB; 120 GB, 240 GB) and bandwidth (up to 384 GB/s; up to 512 GB/s); the chapter reads them line by line (480 GB with 384 GB/s). The whitepaper (v1.21) says 'up to 500 GB/s'. The slide's 70 TFLOP/s FP64 is not explained by the datasheet (34 vector, 67 tensor core). The 7x of thread-block clusters (slide) was not checked against the H100 whitepaper, which was not opened.",
+    "Frontier numbers: the lecture's slides (ORNL, 2024 data) agree with TOP500 for June 2024 (8 699 904 cores, 22 786 kW, Rpeak 1 714.81 Pflop/s, Rmax 1 206.00 Pflop/s). The OLCF user guide (retrieved 2026-10-26) gives 77 cabinets and 9 856 nodes and 23.9 Tflop/s per GCD; the HPE talk of February 2023 gives 9 408 nodes in 74 cabinets and 26.5 Tflop/s per GCD. The three peak values (2.014, 1.818 and 1.715 Eflop/s) are not reconciled. The HPE slide says up to 16 global links per switch (at most 512 per group, 7.0 per other group) and also '4 links between each of the 74 compute groups' (292 of the 512 ports; the two statements are compatible); the slide does not say where the other 220 global ports of a group go; support and storage groups are separate. The lecture's 74 groups x 128 nodes = 9 472 differs from 9 408 nodes; not resolved. The HPCG value of 14 054.0 Tflop/s is first listed on the HPCG list of November 2022 and unchanged to June 2026; compared with the Rpeak and Rmax of November 2022; the HPCG specification was not opened.",
+    "The 2025 GH200 datasheet table has two-line cells for the LPDDR5X size (480 GB; 120 GB, 240 GB) and bandwidth (up to 384 GB/s; up to 512 GB/s); the chapter reads them line by line (480 GB with 384 GB/s). The whitepaper (v1.21) says 'up to 500 GB/s'. The slide's 70 Tflop/s FP64 is not explained by the datasheet (34 vector, 67 tensor core). The 7x of thread-block clusters (slide) was not checked against the H100 whitepaper, which was not opened.",
     "Energy values (35, 6.5, 5, 1.3 pJ per bit; 99, 62, 12 pJ per flop) are the values of an NVIDIA slide. The whitepaper (p. 13) confirms 1.3 pJ per bit for NVLink-C2C and a ratio above 5 to PCIe Gen 5. Horowitz (ISSCC 2014) supports the order of magnitude of DRAM access energy. The pJ per flop values are not confirmed by an opened source, and the slide does not state what they include.",
     "The ABINIT segment heights (CPU-bound about 0.43; transfer about 0.40 and 0.04; CPU about 0.17) are read from a projected chart with an uncertainty of about 0.03; the speedups 1.16 and 4.25 are quoted from the slide, which the whitepaper (Figure 19, p. 30) calls a performance simulation.",
     "Measurement conditions: one 32 GiB DDR4-3200 module (Windows CIM query, 2026-10-26), single channel, pin rate 25.6 GB/s; WSL 2 guest; hybrid processor; other agents' jobs shared the machine. Thread placement was not controlled. The guest shows no hardware performance counters (/sys/bus/event_source/devices lists only software events), so DRAM traffic per point was not measured: the 24 bytes per point are a model with write allocate. Printed timing tables are the best of five complete runs by a stated rule and are faster than typical runs; ranges over the five runs are given in the text.",
-    "Unexplained measurements: dependent loads from working sets of 4 and 8 MiB cost 96-158 ns although the guest reports a 12 MiB L3; kernels with stores reach 19.5-21.8 GB/s of assumed DRAM traffic while the read-only dot product and the streaming-store triad reach 16.4-16.8 GB/s; the best of five Jacobi runs at 4 threads (4.92 Gflop/s) is 9 % above the roof computed from the scale kernel (4.53); twelve threads are slower than eight in all five runs of the sweep; the 12-thread FMA rate was 196-210 Gflop/s in the five kept runs and 233-290 Gflop/s in four earlier runs (thermal or power state suspected, not tested). The dot-product program of exercise 6 was run three times and is not a code-lab listing. The write-only fill (fill_mini.c) gives a streaming-over-ordinary ratio of 2.05-2.21 at 1 thread and 1.17-1.46 at 4 threads; at 4 threads the ordinary fill (14.6 GB/s asked for) would move 29.2 GB/s under full write allocate, above the 25.6 GB/s pin rate, so the 3/2 factor for the scale kernel is an upper estimate and the sweep's Q lies between 16 and 24 bytes per point.",
+    "Unexplained measurements: dependent loads from working sets of 4 and 8 MiB cost 96-158 ns although the guest reports a 12 MiB L3; kernels with stores reach 19.5-21.8 GB/s of assumed DRAM traffic while the read-only dot product of exercise 6 reaches 15.3-16.8 GB/s at 4 and 8 threads and the streaming-store triad 16.4 GB/s at 4 threads in the sample; the best of five Jacobi runs at 4 threads (4.92 Gflop/s) is 9 % above the roof computed from the scale kernel (4.53); twelve threads are slower than eight in all five runs of the sweep; the 12-thread FMA rate was 196-210 Gflop/s in the five kept runs and 233-290 Gflop/s in four earlier runs (thermal or power state suspected, not tested). The dot-product program of exercise 6 was run three times and is not a code-lab listing. The write-only fill (fill_mini.c) gives a streaming-over-ordinary ratio of 2.05-2.21 at 1 thread and 1.17-1.46 at 4 threads; at 4 threads the ordinary fill (14.6 GB/s asked for) would move 29.2 GB/s under full write allocate, above the 25.6 GB/s pin rate, so the 3/2 factor for the scale kernel is an upper estimate and the sweep's Q lies between 16 and 24 bytes per point.",
     "Timestamps are section anchors from local speech-recognition segment times and locate topic changes to within a few seconds.",
     "The machine transcript mishears technical words; all numbers and names in the chapter were taken from slide frames or from the sources, and no statement is attributed to the speech where the slide or a source gives the value."
   ],
@@ -163,8 +163,8 @@
       "evidence": "slide f0022 (W3L4)"
     },
     {
-      "claim": "Slide: 70 TFLOP/s FP64 for the Grace Hopper Superchip.",
-      "correction": "Datasheet: 34 TFLOP/s FP64 and 67 TFLOP/s FP64 tensor core; 67 + 3.46 (Grace CPU) = 70.5 suggests the slide adds the two, which it does not say.",
+      "claim": "Slide: 70 Tflop/s FP64 for the Grace Hopper Superchip.",
+      "correction": "Datasheet: 34 Tflop/s FP64 and 67 Tflop/s FP64 tensor core; 67 + 3.46 (Grace CPU) = 70.5 suggests the slide adds the two, which it does not say.",
       "evidence": "slide f0028 (W3L5); GH200 datasheet p. 4"
     },
     {
@@ -178,8 +178,8 @@
       "evidence": "slide f0037 (W3L5)"
     },
     {
-      "claim": "Frontier peak 1.7 EFLOP/s (overview) and 2 EFLOP/s (fun facts); 26.5 TFLOP/s per GCD.",
-      "correction": "Two bases for peak; OLCF guide gives 23.9 TFLOP/s per GCD.",
+      "claim": "Frontier peak 1.7 Eflop/s (overview) and 2 Eflop/s (fun facts); 26.5 Tflop/s per GCD.",
+      "correction": "Two bases for peak; OLCF guide gives 23.9 Tflop/s per GCD.",
       "evidence": "slides f0013, f0050 (W3L4); OLCF guide; TOP500"
     }
   ],
@@ -349,7 +349,7 @@
     {
       "title": "NVIDIA GH200 Grace Hopper Superchip datasheet (March 2025)",
       "url": "https://dam-cdn.nvd.orangelogic.com/AssetLink/tkno03fa645gb7f33w60rf200d330420.pdf",
-      "supports": "72 Neoverse V2 cores; caches; LPDDR5X sizes and bandwidths; FP64 34 TFLOP/s, FP64 tensor 67; HBM3 4 TB/s; NVLink-C2C 900 GB/s; NVL2 column.",
+      "supports": "72 Neoverse V2 cores; caches; LPDDR5X sizes and bandwidths; FP64 34 Tflop/s, FP64 tensor 67; HBM3 4 TB/s; NVLink-C2C 900 GB/s; NVL2 column.",
       "page_checked": "pp. 1-4 (specification table on p. 4)"
     },
     {
@@ -367,20 +367,32 @@
     {
       "title": "OLCF Frontier User Guide",
       "url": "https://docs.olcf.ornl.gov/systems/frontier_user_guide.html",
-      "supports": "77 cabinets, 9 856 nodes; about 2 EFLOP/s; node design; 23.9 TFLOP/s per GCD; 36+36 GB/s; 4 NICs of 200 Gbit/s; 679 PB Orion.",
+      "supports": "77 cabinets, 9 856 nodes; about 2 Eflop/s; node design; 23.9 Tflop/s per GCD; 36+36 GB/s; 4 NICs of 200 Gbit/s; 679 PB Orion.",
       "page_checked": "System Overview and Frontier Compute Nodes, retrieved 2026-10-26"
     },
     {
       "title": "Glenski (HPE), Frontier System Architecture, OLCF, 15 February 2023",
       "url": "https://www.olcf.ornl.gov/wp-content/uploads/2-15-23-Frontier-System-Architecture-public-v7.pdf",
-      "supports": "74 cabinets, 9 408 nodes; 205 GB/s DDR4; 26.5 TFLOP/s per GCD; switch links 16/31/16; 74 groups; caption of 4 links per group pair.",
+      "supports": "74 cabinets, 9 408 nodes; 205 GB/s DDR4; 26.5 Tflop/s per GCD; switch links up to 16 edge, 31 local, up to 16 global; 74 groups; caption of 4 links per group pair.",
       "page_checked": "slides 2-9"
     },
     {
       "title": "TOP500, Frontier system page",
       "url": "https://www.top500.org/system/180047/",
-      "supports": "Rmax, Rpeak, cores, power June 2022 to June 2026; HPCG 14 054.0 TFLOP/s; ranks.",
+      "supports": "Rmax, Rpeak, cores, power June 2022 to June 2026; ranks.",
       "page_checked": "whole page, retrieved 2026-10-26"
+    },
+    {
+      "title": "TOP500, HPCG list of November 2022 (with the lists of November 2024 and June 2026)",
+      "url": "https://www.top500.org/lists/hpcg/2022/11/",
+      "supports": "Frontier HPCG 14 054.00 Tflop/s first listed in November 2022 (8 730 112 cores, Rmax 1 102.00 Pflop/s), unchanged on the lists of November 2024 and June 2026 (9 066 176 cores); no Frontier entry on the HPCG list of June 2022. Rpeak 1 685.65 Pflop/s is from the TOP500 list of November 2022.",
+      "page_checked": "list tables, retrieved 2026-10-27"
+    },
+    {
+      "title": "HPCG benchmark",
+      "url": "https://www.hpcg-benchmark.org/",
+      "supports": "The kernels of the benchmark: sparse matrix-vector multiplication, a symmetric Gauss-Seidel smoother, a multigrid-preconditioned conjugate-gradient iteration.",
+      "page_checked": "home page, retrieved 2026-10-27"
     }
   ],
   "symbol_ledger": [
@@ -392,7 +404,7 @@
     {
       "symbol": "P_peak, B_peak, I*",
       "first_section": "model",
-      "definition": "Peak arithmetic rate, peak DRAM bandwidth, ridge point P_peak/B_peak."
+      "definition": "Peak arithmetic rate, peak DRAM bandwidth, ridge point P_peak/B_peak. B_peak is a sustained rate measured with STREAM; B_pin (10.2) is the pin-rate limit."
     },
     {
       "symbol": "tau, b, B, b_{1/2}, n",
@@ -433,6 +445,26 @@
       "symbol": "N, u, u^new, IDX",
       "first_section": "model",
       "definition": "Interior points per side, grid and its update, index macro (as Chapter 9)."
+    },
+    {
+      "symbol": "B_pin",
+      "first_section": "model",
+      "definition": "Pin-rate limit of the memory module, transfers per second times bytes per transfer (10.2); upper limit of B_peak."
+    },
+    {
+      "symbol": "w",
+      "first_section": "stream",
+      "definition": "Fraction of a full write-allocate read that an ordinary store costs, 0 <= w <= 1; the sweep moves Q = 16 + 8w bytes per point."
+    },
+    {
+      "symbol": "x",
+      "first_section": "hierarchy",
+      "definition": "Fraction of the bytes of a working set served by DRAM."
+    },
+    {
+      "symbol": "phi, b_phi",
+      "first_section": "exercises",
+      "definition": "phi: fraction of the bandwidth B that a transfer reaches; b_phi: transfer size that reaches it, phi/(1-phi) * tau*B."
     }
   ],
   "exercises": 6,
@@ -445,12 +477,27 @@
     {
       "round": 1,
       "verdict": "REVISE (6 blocking, 7 major, 12 minor)",
-      "changes": "B1 Grace CPU Superchip panel and 70 TFLOP/s rewritten; B2 ABINIT is a performance simulation; B3 roofs matched to the thread count (2 threads 101 %, 8 threads 102 %); B4 10.2 times the cache; B5 only slide-confirmed corrections kept; B6 diffusion in the Jacobi check; M1 4 and 8 MiB not used as DRAM, bound from the 41.2 GB/s read; M2 write-allocate premise tested with a write-only fill (fill_mini.c), roofs given as a range; M3 latency versus bandwidth in the memory-wall argument; M4 platform and NVL72 subsection; M5 symbols renamed; M6 assumption A2; M7 second-module claim; minors m1-m12 applied except m11 (partly) and the STREAM array letters."
+      "changes": "B1 Grace CPU Superchip panel and 70 Tflop/s rewritten; B2 ABINIT is a performance simulation; B3 roofs matched to the thread count (2 threads 101 %, 8 threads 102 %); B4 10.2 times the cache; B5 only slide-confirmed corrections kept; B6 diffusion in the Jacobi check; M1 4 and 8 MiB not used as DRAM, bound from the 41.2 GB/s read; M2 write-allocate premise tested with a write-only fill (fill_mini.c), roofs given as a range; M3 latency versus bandwidth in the memory-wall argument; M4 platform and NVL72 subsection; M5 symbols renamed; M6 assumption A2; M7 second-module claim; minors m1-m12 applied except m11 (partly) and the STREAM array letters."
     },
     {
       "round": 2,
       "verdict": "ACCEPT WITH FIXES (1 blocking, 1 major, 6 minor)",
-      "changes": "B1 the case-2 roof is 4.53 Gflop/s for every write-allocate fraction w (Q = 16+8w, scale traffic 14.5(1+w/2)), 5.1 is the streaming-store roof, the asked-for scale rate is 14.5 GB/s; M1 stale sentences in exercises 4 and 6 and in the limits (30 to 59 times) corrected; m1 126 ns confirmed against the run logs (16 MiB minimum 126.26, 64 MiB minimum 133.85); m2 duplicated phrase; m3 software slide timestamp 15:15; m4 backslash; m6 STREAM array names stated; m5 length not cut."
+      "changes": "B1 the case-2 roof is 4.53 Gflop/s for every write-allocate fraction w (Q = 16+8w, scale traffic 14.5(1+w/2)), 5.1 is the streaming-store roof, the asked-for scale rate is 14.5 GB/s; M1 stale sentences in exercises 4 and 6 and in the limits (30 to 45 times) corrected; m1 126 ns confirmed against the run logs (16 MiB minimum 126.26, 64 MiB minimum 133.85); m2 duplicated phrase; m3 software slide timestamp 15:15; m4 backslash; m6 STREAM array names stated; m5 length not cut."
+    },
+    {
+      "round": 3,
+      "verdict": "ACCEPT WITH FIXES (1 blocking, 4 major, 9 minor)",
+      "changes": "B1 distance to the ridge is 45 times with ordinary stores for every write-allocate fraction and 30 to 39 times with streaming stores (Table 10.3 and limits; 59 removed); M1 L1 latency 1.26 and 1.24 ns in the sample, 1.24 to 1.39 ns over five runs (Tables 10.1 and 10.4); M2 GCD, HBM, Rpeak, Rmax and HPCG defined (HPCG inference made conditional, specification not opened); M3 latency measurement bears on the memory-wall premise; M4 the 4 links per pair and the 16 global links per switch are compatible (292 of 512 ports, support and storage groups separate), 29 % and at most 51 %; m1 dot product 15.3 to 16.8 GB/s at 4 and 8 threads, triad 16.4 GB/s; m2 26 to 62 times for 16 MiB and more; m3 16 to 22 GB/s and neither value comparable; m4 frame name replaced by W3L5 18:06; m5 selection rules for jacobi_bench.c and fill_mini.c stated; m6 GH200 page and Intel ARK added to research extensions; m7 M for the terminal count in the Kim et al. entry; m8 length not cut; m9 streaming fill 17 to 21 GB/s stated as the sample."
+    },
+    {
+      "round": 4,
+      "verdict": "ACCEPT WITH FIXES (1 blocking, 2 major, 13 minor)",
+      "changes": "B1 uncertainty of the roofs is a factor of 1.5 in Q (16 to 24 bytes per point) and in B (14.5 to 21.8 GB/s), cancelling in the placement (limits and exercise 4); M1 HPCG 14 054 Tflop/s first listed November 2022, compared with Rpeak 1 685.65 and Rmax 1 102 Pflop/s of that list (0.83 %, one seventy-eighth), systems.py output and sources updated; M2 exercise 1 separates the 211-line single transfer from the 21 to 23 lines in flight; m1 equation (10.7) referred to; m2 B_pin for the pin rate; m3 five more symbols, ledger extended with B_pin, w, x, phi, b_phi; m4 intensity 5/(16+8w) between 0.208 and 0.3125; m5 one lower bound from the arithmetic and one from each link, 1.6 to 2.2 % of the arithmetic peak; m6 matrix-vector bound 5.4 (store pattern) and 3.8 to 4.2 Gflop/s (read-only rate); m7 STREAM roles of the listing stated; m8 L2 latency 3.7 to 8.0 ns stated as the printed sample; m9 HPCG kernels sourced, name removed from the argument; m10 16K nodes and more, up to 16 edge and global links; m11 duplicate 100 % removed; m12 Gflop/s, Tflop/s, Pflop/s, Eflop/s spelling in prose and tables (program output unchanged); m13 length not cut."
+    },
+    {
+      "round": 5,
+      "verdict": "ACCEPT (0 blocking, 0 major, 2 minor)",
+      "changes": "m1 sidecar item 5 and Glenski reference say \"up to 16\" global links; m2 length not cut."
     }
   ]
 }

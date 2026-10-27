@@ -39,10 +39,10 @@ selected scope. This edition contains chapters 1–11 (items 2–21).
    editorial material remain outside the repository.
 
 Chapters 1–11 are written; chapters 12–31 are not. The second-round reviews of
-chapters 3, 9, 10 and 11 still recorded one blocking finding each. The findings
-were repaired and checked by the lead, but independent sign-off on those
-repairs remains outstanding. The [editorial record](editorial-review-summary.json)
-preserves this distinction. Historical review verdicts are not retrospectively
+chapters 3, 9, 10 and 11 still recorded one blocking finding each. Those
+chapters received further independent rounds (3, 4, 5 and 4 rounds in all)
+until the latest round recorded zero blocking findings. The
+[editorial record](editorial-review-summary.json) lists the rounds and verdicts. Historical review verdicts are not retrospectively
 rewritten, and content inventory or rendering success is not scientific
 acceptance.
 

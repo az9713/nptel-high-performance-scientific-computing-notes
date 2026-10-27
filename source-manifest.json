@@ -7,15 +7,10 @@
   "playlist": "PLOzRYVm0a65fSrgx3kroerFJtFjGGIcXm",
   "format": "HTML",
   "publication": "GitHub Pages",
-  "status": "partial edition: chapters 1-11 of 31 written; final independent review pending for chapters 3, 9, 10, 11",
+  "status": "partial edition: chapters 1-11 of 31 written; each written chapter has an independent zero-blocking review verdict",
   "scope_note": "75 recordings (playlist items 2-76) are grouped into 31 chapters. Week 12 revision lectures (items 71-74) supply practice material. The 2-minute course trailer (item 1) is out of scope.",
-  "final_review_pending_chapters": [
-    3,
-    9,
-    10,
-    11
-  ],
-  "edition_note": "This reading edition is partial. Chapters 1-11 cover the first 20 recordings (Week 0 to Week 4, Lecture 1) and have recorded independent reviews; chapters 12-31 are not yet written. Final independent sign-offs remain pending for chapters 3, 9, 10 and 11: their last review findings were repaired and checked by the lead, but no later independent zero-blocking verdict is recorded.",
+  "final_review_pending_chapters": [],
+  "edition_note": "This reading edition is partial. Chapters 1-11 cover the first 20 recordings (Week 0 to Week 4, Lecture 1) and have recorded independent reviews; chapters 12-31 are not yet written. The latest recorded review of each written chapter has zero blocking findings: chapters 3, 9, 10 and 11 needed further rounds (3, 4, 5 and 4 rounds) to reach that verdict.",
   "chapters": [
     {
       "order": 1,
