@@ -1,0 +1,1302 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="cc41306bff32514a87e931c4627b8d8291aea035c2468107701a4c764e382ec9"><title>Concurrency and synchronization: races, locks, atomic instructions and barriers · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>Concurrency and synchronization: races, locks, atomic instructions and barriers</h1>
+<p class="lead">Four threads each add 1 to one shared counter 1 000 000 times, with a short computation between the additions. The correct total is 4 000 000. Without synchronization, the program of this chapter printed 1 740 739 in the sample run below, which is 43.5 % of the correct total. Six runs of the same program printed totals between 0.90 and 1.87 million. With a mutex, the total is correct and the run takes 203.7 ms, against 31.6 ms for one thread that performs all 4 000 000 additions: the four threads are 6.4 times slower than one. An atomic fetch-and-add takes 102.7 ms. Four private counters that are added to the shared total once, at the end, take 8.7 ms and give the same total, 23 times faster than the mutex. This chapter defines the objects behind these numbers: schedules, data races, critical sections, locks, atomic instructions and barriers. It proves exactly when the unsynchronized program is right, derives a bound on the speedup that a lock allows, and tests the bound against measurements. It shows with an exhaustive search and with a hardware test that a lock built from ordinary loads and stores fails on this machine unless a fence orders them, and it ends with the failure that locks themselves can cause.</p>
+<p class="source-note">Grounded in one recording of the NPTEL course <em>High Performance Scientific Computing</em> (Prof. Shivasubramanian Gopalakrishnan, IIT Bombay): <a href="https://www.youtube.com/watch?v=ulprOSZPAu0">W2L6, Concurrency and Synchronization in Parallel Programming</a>. <strong>Lecture material:</strong> concurrency by time slicing and its interleaving and overlapping on one and on several processors; the data race, with the two-thread increment example and its two outcomes; synchronization by lock and key; the overhead of waiting and the advice to restructure the code; the figure on updating a shared cache copy only when necessary; contention-only and data-sharing threads; the critical section and the lock that protects it; the mutex, with a <code>pthread</code> example and its internal 0/1 variable; atomic instructions, with test-and-set and compare-and-swap; barriers, with a level-crossing analogy, phases, dependencies and checkpointing; the summary that links these primitives to OpenMP, MPI and CUDA. The slides credit William Stallings ("OS Design Principles", 7th edition, for the figure on interleaving), Abraham Silberschatz (<em>Operating System Concepts</em>, 9th edition, for the test-and-set and compare-and-swap code) and an Intel article on shared-cache systems for their figures. <strong>Research extensions:</strong> the C11 draft N1570 (the definition of a data race, atomic operations, release and acquire); POSIX Issue 7 (memory synchronization by mutex and barrier functions, relocking, barrier return values); OpenMP 5.2 (<code>critical</code>, <code>barrier</code>, <code>atomic</code>); Lamport (1979, sequential consistency and a two-process mutual-exclusion protocol); Dijkstra (EWD123, the problem of mutual exclusion and its rejected solutions); Peterson (1981, bibliographic data only); Coffman, Elphick and Shoshani (1971, bibliographic data only; the attribution of the four deadlock conditions is confirmed from a secondary source); Intel ARK (the processor's core counts, as in chapter 11); Sewell and others (2010, the x86-TSO programmer's model); Drepper (2011, a three-state futex mutex); Mellor-Crummey and Scott (1991, the sense-reversing barrier and queue locks); Chandy and Lamport (1985, snapshots without stopping); Tian and Shih (2012, the Intel article behind the lecture's cache figure). <strong>Original teaching constructions:</strong> the formal model of schedules and the running counter; the lost-update theorem with its counting corollary and the exhaustive search that checks it; the serialization bound and the batching model; the explicit-state search over two memory models for four lock algorithms; the hardware tests of store buffering and of Peterson's algorithm; the spinlock, compare-and-swap and barrier programs; the deadlock demonstration; all measurements; the six exercises.</p>
+
+
+<h2 id="model">The objects of the chapter and the running case</h2>
+<p>The chapter studies programs in which several threads of one process share memory. A <em>thread</em> is a sequence of instructions with its own program counter and call stack; the threads of one process address the same memory (chapter 11 gives the same definition for OpenMP threads). The operating system decides on which processor, and when, each thread runs. The chapter takes the memory operations of a thread from a small set. A <em>load</em> copies the value of a memory location into a register. A <em>store</em> copies a register into a memory location. A <em>read-modify-write</em> operation (RMW) loads a location, computes a new value and stores it as one step that no other thread's operation on that location can enter; the section on atomic instructions defines the RMW operations that hardware provides. An <em>event</em> is one execution of one operation by one thread. The events of one thread are totally ordered by <em>program order</em>. A <em>schedule</em> is a total order of all events of all threads that respects every program order. The operating system and the hardware choose the schedule; the program does not.</p>
+<p><strong>Memory model.</strong> Until the section on Peterson's algorithm, the chapter assumes <em>sequential consistency</em>. Lamport (1979, p. 690) states it for a multiprocessor: "the result of any execution is the same as if the operations of all the processors were executed in some sequential order, and the operations of each individual processor appear in this sequence in the order specified by its program." In this model a memory operation takes effect at one point of the schedule, and a load returns the value of the latest earlier store to its location. The assumption is false for the hardware of this chapter's machine, and the section on Peterson's algorithm shows how and what it costs.</p>
+<p><strong>Conflicts, data races and race conditions.</strong> Two operations <em>conflict</em> when they are on the same memory location and at least one of them modifies it (C11 draft N1570, §5.1.2.4 ¶4, p. 17). An operation <em>A</em> <em>happens before</em> an operation <em>B</em> when A precedes B in the program order of one thread, or when A is a <em>release</em> operation that <em>synchronizes with</em> an <em>acquire</em> operation B that reads the value A wrote, or by transitivity of these two rules (§5.1.2.4 ¶11, p. 18, for synchronizes with; ¶16 and ¶18, p. 19, for happens before; the standard's full definition adds rules for dependencies that this chapter does not use). A lock release is such a release and a lock acquisition is such an acquire; the section on mutual exclusion states this for mutexes. The standard then defines the hazard: "The execution of a program contains a data race if it contains two conflicting actions in different threads, at least one of which is not atomic, and neither happens before the other. Any such data race results in undefined behavior" (§5.1.2.4 ¶25, p. 20). The chapter uses two terms with distinct meanings. A <em>data race</em> is the standard's notion: a pair of conflicting, unordered operations of which one is not atomic. A <em>race condition</em> is a property of a program and its inputs: the result depends on the schedule, so that two schedules give two results. A program can have either one without the other; the section on the lost update gives a program with a race condition and no data race.</p>
+<p><strong>Synchronization.</strong> A <em>synchronization primitive</em> is an operation that orders events of different threads. The chapter treats three: the <em>lock</em> with its acquire and release, the <em>atomic instruction</em> (with the C11 functions that compile to it) and the <em>barrier</em>. An atomic operation with <em>relaxed</em> memory order is indivisible but is neither a release nor an acquire, so it creates no happens-before relation between threads (N1570 §7.17.3 ¶2, p. 275: "For memory_order_relaxed, no operation orders memory"). A <em>critical section</em> is a region of code that at most one thread may execute at a time with respect to a given shared resource; <em>mutual exclusion</em> is that property. A <em>barrier</em> is a point that no thread passes until all threads of a group have reached it.</p>
+<p><strong>The running case.</strong> One shared variable <code>x</code> of type <code>long</code> starts at 0. Each of \(p\) threads executes \(n\) iterations. An iteration computes for a time \(w\) on private data, which is the part of the work that needs no synchronization, and then performs the update <code>x = x + 1</code>. The compiler turns the update into a load of <code>x</code>, an addition in a register and a store to <code>x</code> (the assembly that gcc 13.3 emits at <code>-O2</code> for the program below has a separate <code>movq</code> load and <code>movq</code> store for the <code>volatile</code> counter). The correct final value is \(pn\). The case stands for any program in which threads add contributions to one result: the hit count of a Monte Carlo estimate, a histogram bin, the global sum of the midpoint-rule loop for \(\pi\) of chapter 11, or a residual norm in the Jacobi iteration. The work time \(w\) is a loop of 8 dependent multiply–adds in the programs below, about 8 ns per iteration (8.4 ms for \(10^6\) iterations on one thread in the thread sweep of the section on atomic instructions). Where the chapter varies the number of updates between shared updates, it calls that number the <em>batch size</em> \(K\): a thread adds to a private counter and updates the shared variable once every \(K\) iterations.</p>
+<p><strong>Performance symbols.</strong> The book-wide symbols apply: \(p\) is the number of threads, \(T_1\) and \(T_p\) are the wall-clock times of the program on one thread and on \(p\) threads, \(S_p=T_1/T_p\) is the speedup. The chapter adds \(n\) (iterations per thread), \(w\) (work per iteration outside the critical section), \(c\) (the time per critical section, including acquiring and releasing the lock), \(K\) (the batch size) and \(\varphi=c/(w+c)\) (the fraction of an iteration that is critical). Each symbol is repeated at its first substantive use.</p>
+<p><strong>The machine.</strong> Every measurement comes from the machine of the other chapters of this book: an Intel Core i5-12450H laptop under Windows 11, with programs built and run by gcc 13.3 in a WSL 2 Ubuntu 24.04 guest. The processor is a hybrid design with 4 performance cores of 2 hardware threads and 4 efficient cores of 1 hardware thread, 12 logical processors in all (<a href="https://www.intel.com/content/www/us/en/products/sku/132222/intel-core-i512450h-processor-12m-cache-up-to-4-40-ghz/specifications.html">Intel ARK, i5-12450H specifications</a>, retrieved 2026-10-26, as used in chapter 11). The guest shows a synthetic topology of 6 cores with 2 threads each, and it does not let the programs control on which physical core a thread runs. The timings below are the minimum of 3 repetitions inside one program run, with other jobs present on the machine, which lowers every speed by an unknown amount. A listing whose output contains times or totals that depend on the schedule is checked only by its return code, and the output under it is one sample. Runs differ, and the text gives ranges where it has several runs. Shell sessions run in a fresh directory as the user <code>az9713</code>; the tab characters of the assembly output are shown as spaces, and no other line of a session was edited.</p>
+<pre><code class="language-bash">$ gcc --version | head -1
+gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+$ nproc
+12
+$ lscpu | grep -E 'Model name|Thread|Core|Socket|L1d|L2|L3'
+Model name:                           12th Gen Intel(R) Core(TM) i5-12450H
+Thread(s) per core:                   2
+Core(s) per socket:                   6
+Socket(s):                            1
+L1d cache:                            288 KiB (6 instances)
+L2 cache:                             7.5 MiB (6 instances)
+L3 cache:                             12 MiB (1 instance)
+$ getconf LEVEL1_DCACHE_LINESIZE
+64
+</code></pre>
+<p>The cache line size of 64 bytes matters for the cost of sharing a variable between cores; chapter 7 treats caches, and chapter 11 measures false sharing, so this chapter takes the line size as given.</p>
+
+
+<h2 id="concurrency">Concurrency, interleaving and overlap <a class="timestamp" href="https://www.youtube.com/watch?v=ulprOSZPAu0&amp;t=68s">W2L6 1:08</a></h2>
+<p>The lecture starts from the observation that a sequential program executes its instructions in the order the programmer wrote, and that a parallel program uses several cores that each perform a task independently, although the tasks may have to interact. It then separates two situations. On one core, the operating system switches between the tasks of a program by time slicing, so that "the execution of these threads is interleaved over time, because the CPU core can execute only one thread at a time." The lecture calls this concurrency. On several cores, the system assigns a thread to each core and the threads run in parallel. The lecture's figure, credited to Stallings, draws three processes as bars over time. With one processor (panel a) only one bar is running at any time, and the others are blocked. With two processors (panel b) two bars run at the same time, so the executions are interleaved and also overlapped.</p>
+<p><strong>What the chapter takes from this.</strong> For the correctness of a program, the number of cores does not matter. What matters is the set of schedules that the system can produce, as defined in the section on the model. On one core, the kernel may switch threads at any instruction boundary, because an interrupt may arrive after any instruction. On several cores, instructions of different threads also overlap in time. The model of this chapter describes both cases by the same object, a total order of events, and the section on Peterson's algorithm states when that description is wrong. The lecture's term "concurrency" for time slicing on one core is the special case of one processor. Chapter 11 records the definitions of the recording W3L6: tasks are <em>concurrent</em> when several are active, none is ordered with respect to the others, and each makes forward progress under some scheduling policy; they run <em>in parallel</em> when they make progress at the same time. This chapter uses the same sense in a form that a proof can use: two events are <em>concurrent</em> when neither happens before the other.</p>
+<p><strong>How many schedules there are.</strong> A program of \(p\) threads with \(s\) events each has
+</p>
+\[
+\frac{(ps)!}{(s!)^{p}} \tag{8.1}
+\]
+<p>schedules, because a schedule chooses which positions of the sequence of \(ps\) events belong to each thread. For the running case an iteration has two events that matter, a load and a store, so \(s=2n\). For \(p=2\) and \(n=1\) the count is 6. For \(p=4\) and \(n=10^{6}\), the case of the lead, it is a number with about 4.8 million decimal digits (computed from the logarithm of the gamma function, \(\log_{10}\approx 4\,816\,470\)). No test can visit these schedules, and the operating system does not sample them uniformly. The next section shows that almost all of them give a wrong result, so the correctness of the program must be argued, not observed.</p>
+<p><strong>One core is enough for a race.</strong> The interleaving in the lecture's second table (next section) does not need two processors: every step of it occurs at its own time, and a single core that switches threads between the load and the store of an increment produces it. The effect is rare on one core, because the switch must fall inside a window of a few cycles. The session below runs the program of the next section on one logical processor (<code>taskset -c 0</code>) three times. No update was lost in the three samples, each of 4 000 000 updates. That is a statement about how often the kernel switches threads at that point, and the theorem of the next section holds on one core as it does on four.</p>
+<pre><code class="language-bash">$ for i in 1 2 3; do taskset -c 0 ./counter 4 1000000 8 1 | grep -E 'plain|load then'; done
+plain read-modify-write         4000000         0      49.7
+load then store (atomic)        4000000         0      37.7
+plain read-modify-write         4000000         0      35.3
+load then store (atomic)        4000000         0      35.3
+plain read-modify-write         4000000         0      37.1
+load then store (atomic)        4000000         0      36.2
+</code></pre>
+<p>The same program on four processors loses 56 % of the updates in the sample of the next section (listing <code>counter.c</code>). On four processors two threads can be inside the load–store window of the same counter at the same time. On one processor a second thread can enter that window only if the kernel switches threads inside it. The program is the same in both cases, and so is its correctness argument.</p>
+
+
+<h2 id="race">The lost update: a data race and a race condition <a class="timestamp" href="https://www.youtube.com/watch?v=ulprOSZPAu0&amp;t=279s">W2L6 4:39</a></h2>
+<p>The lecture defines a race condition as the situation in which two threads try to access the same variable at the same time, and it says that this "is likely to cause problems sometimes". It names two consequences: the result of the computation is <em>indeterminate</em>, which the lecture explains as "you can't tell for sure what it will be", and <em>inconsistent</em>, which it explains as a result that varies across runs. Its example has two threads that each increment a shared variable <code>x</code> that starts at 0. A thread reads the value, increases it and writes it back. The lecture shows two schedules of the six steps. Table 8.1 reproduces them, with the increase folded into the write because it acts on a register.</p>
+<div class="table-wrap"><table>
+<caption>Table 8.1. The two schedules of the lecture's example. Each row is one step; <code>x</code> is the shared value after the step.</caption>
+<thead><tr><th scope="col">Step</th><th scope="col">Schedule A: operation</th><th scope="col">\(x\)</th><th scope="col">Schedule B: operation</th><th scope="col">\(x\)</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>thread 1 loads \(x\), reads 0</td><td>0</td><td>thread 1 loads \(x\), reads 0</td><td>0</td></tr>
+<tr><td>2</td><td>thread 1 stores 0 + 1</td><td>1</td><td>thread 2 loads \(x\), reads 0</td><td>0</td></tr>
+<tr><td>3</td><td>thread 2 loads \(x\), reads 1</td><td>1</td><td>thread 1 stores 0 + 1</td><td>1</td></tr>
+<tr><td>4</td><td>thread 2 stores 1 + 1</td><td>2</td><td>thread 2 stores 0 + 1</td><td>1</td></tr>
+</tbody></table></div>
+<p>Schedule A gives 2, the intended result. In schedule B thread 2 stores a value computed from a stale load, and the store of thread 1 is lost. In general the final value is one more than the value that the thread with the last store had loaded.</p>
+<p><strong>The lecture's wording, made precise.</strong> Three statements of the lecture need a sharper form. First, nothing in schedule B happens "at the same time": the four steps occur one after another, so the race exists on one processor, as the previous section measured. A race condition needs a conflict between operations that nothing orders, and simultaneity is not required. Second, "indeterminate" and "inconsistent" describe one property seen from two sides: the result is a function of the schedule, so two runs with two schedules give two results. The C standard states a stronger consequence for a data race, which the model section quotes: the behavior is undefined, which allows the compiler to assume that no data race occurs. Third, a race condition does not require a data race. The programs below show both cases.</p>
+<p><strong>Theorem 8.1 (lost update).</strong> Let \(p\) threads each execute \(n\) increments of <code>x</code>, starting from 0, and let each increment be a load followed later by a store of the loaded value plus 1. Under sequential consistency, (a) the final value of <code>x</code> is at most \(pn\); and (b) it equals \(pn\) if and only if the \(pn\) intervals from a load to its own store are pairwise disjoint, that is, if and only if the schedule runs the increments one after another, each as an unbroken load–store pair.</p>
+<p><em>Proof.</em> Let \(x(t)\) be the value of <code>x</code> and \(s(t)\) the number of stores executed up to time \(t\). <em>Claim 1:</em> \(x(t)\le s(t)\) at all times. It holds at the start, since both are 0, and a load changes neither side. A store at time \(t\) writes \(r+1\), where \(r=x(t_L)\) was loaded at an earlier time \(t_L\). By the claim at \(t_L\), \(r\le s(t_L)\le s(t^-)\), the number of earlier stores, so the new value satisfies \(r+1\le s(t^-)+1=s(t)\). At the end \(s=pn\), which proves (a). <em>Claim 2:</em> if \(x(t)=s(t)\) just after a store at \(t\), then no store occurred between that increment's load and its store, and \(x(t_L)=s(t_L)\). Equality means \(r+1=s(t^-)+1\), and \(r\le s(t_L)\le s(t^-)\) forces \(s(t_L)=s(t^-)\) and \(x(t_L)=s(t_L)\). For (b), suppose the intervals are pairwise disjoint. Then the schedule is a sequence of whole increments, each loading the current value and storing its successor, so \(x\) grows by 1 per increment and ends at \(pn\). Conversely, suppose the final value is \(pn=s\). The equality \(x=s\) holds after the last store, so by Claim 2 no store lies inside the interval of that last increment, and the equality holds at its load time. No store lies between that load and the last store, so the equality holds just after the previous store, and Claim 2 applies to that store as well. Repeating the step backwards shows that no store lies inside the interval of any increment. Two intervals that overlap would have to contain a store of the other increment, either because one nests in the other or because they cross, so the intervals are disjoint. \(\blacksquare\)</p>
+<p><strong>Corollary 8.2 (counting).</strong> Schedules with the correct result are the orders in which the \(pn\) indivisible increments can run, and their number is
+</p>
+\[
+\frac{(pn)!}{(n!)^{p}}, \tag{8.2}
+\]
+<p>out of the \((2pn)!/((2n)!)^p\) schedules of (8.1). For \(p=2\) the share of correct schedules is \(\binom{2n}{n}/\binom{4n}{2n}\), which is about \(\sqrt2\,4^{-n}\) for large \(n\). The share falls by a factor of 4 for each added increment per thread. For \(p=4\) and \(n=1000\) it is about \(10^{-2408}\).</p>
+<p><strong>Check by exhaustive search.</strong> The program counts all schedules of small cases by their final value, with a memoized search over the state (program counters, registers, value of <code>x</code>). It asserts the total of (8.1) and the number of correct schedules of (8.2) for every case. The listing prints the share of correct schedules and the smallest and largest final values. The search is deterministic, so the check is exact.</p>
+<pre><code class="language-python" data-file="interleave.py" data-build="" data-run="python3 interleave.py" data-check="exact">"""Count the schedules of p threads that each increment a shared counter n times.
+
+One increment is two steps: load (register := x) and store (x := register + 1).
+A schedule is an interleaving that keeps each thread's own order.
+The search counts schedules by final value of x, without listing them.
+A schedule gives the correct value p*n exactly when the p*n increments do not overlap,
+so the number of correct schedules is the number of orders of p*n indivisible increments.
+"""
+from functools import lru_cache
+from math import factorial
+
+
+def final_values(p, n):
+    """Return {final value of x: number of schedules that end with it}."""
+    steps = 2 * n
+
+    @lru_cache(maxsize=None)
+    def go(pcs, regs, x):
+        if all(pc == steps for pc in pcs):
+            return ((x, 1),)
+        out = {}
+        for t in range(p):
+            pc = pcs[t]
+            if pc == steps:
+                continue
+            npcs = pcs[:t] + (pc + 1,) + pcs[t + 1:]
+            if pc % 2 == 0:                                   # load
+                sub = go(npcs, regs[:t] + (x,) + regs[t + 1:], x)
+            else:                                             # store
+                sub = go(npcs, regs, regs[t] + 1)
+            for value, count in sub:
+                out[value] = out.get(value, 0) + count
+        return tuple(sorted(out.items()))
+
+    return dict(go((0,) * p, (0,) * p, 0))
+
+
+print(" p n  schedules  correct  share  smallest  largest  distinct")
+for p, n in ((2, 1), (2, 2), (2, 3), (2, 4), (3, 1), (3, 2), (4, 1)):
+    counts = final_values(p, n)
+    total = sum(counts.values())
+    assert total == factorial(2 * n * p) // factorial(2 * n) ** p
+    right = counts.get(p * n, 0)
+    assert right == factorial(p * n) // factorial(n) ** p      # increments as indivisible units
+    print(f"{p:2d}{n:2d}{total:11d}{right:9d}{right / total:7.3f}"
+          f"{min(counts):10d}{max(counts):9d}{len(counts):10d}")
+</code></pre>
+<pre><code class="output"> p n  schedules  correct  share  smallest  largest  distinct
+ 2 1          6        2  0.333         1        2         2
+ 2 2         70        6  0.086         2        4         3
+ 2 3        924       20  0.022         2        6         5
+ 2 4      12870       70  0.005         2        8         7
+ 3 1         90        6  0.067         1        3         3
+ 3 2      34650       90  0.003         2        6         5
+ 4 1       2520       24  0.010         1        4         4</code></pre>
+<p>The assertions pass for all seven cases, so the totals agree with (8.1) and the counts of correct schedules agree with (8.2). For two threads with one increment each, 2 of 6 schedules are correct (schedule A and its mirror), as in Table 8.1. For two threads with four increments each, 70 of 12 870 are correct, 0.54 %; the approximation \(\sqrt2\,4^{-4}\) gives 0.55 %. The smallest final value is 1 for \(n=1\) and 2 for every case with \(p\ge2\) and \(n\ge2\) in the table: the lost updates can erase almost all the work. A schedule for \(p=2\) and any \(n\ge2\) shows that the final value 2 is reachable: thread 1 loads 0; thread 2 runs \(n-1\) complete increments, so that \(x=n-1\); thread 1 stores 1; thread 2 loads 1; thread 1 runs its remaining \(n-1\) increments, so that \(x=n\); thread 2 stores 2. The table checks this only for the cases listed, and the schedule above is the argument for all \(n\ge2\) with \(p=2\).</p>
+<p><strong>The program on the machine.</strong> The listing below is the running case. Its worker runs the iterations of the section on the model: a work step, an increment of a private counter <code>mine</code>, and, once every <code>batch</code> iterations, one shared update of the strategy chosen by <code>mode</code>. With <code>batch</code> equal to 1 every iteration updates the shared counter. The program runs each strategy three times and prints the first total (the totals of the racing strategies change from run to run) and the minimum time. The input is the thread count, the iterations per thread, the number of work steps and the batch size. The two racing strategies are the first rows of interest. <code>plain read-modify-write</code> is the program of the lecture: a <code>volatile long</code> that every thread loads, adds 1 to and stores. The qualifier <code>volatile</code> forces the compiler to perform the load and the store in every iteration; it does not make the update atomic, and under the C standard the program has a data race. <code>load then store (atomic)</code> declares the counter <code>_Atomic</code> and does the update as an atomic load followed by an atomic store, both with relaxed memory order. Every conflicting access is then atomic, so the program has no data race in the sense of the standard. The remaining rows are the subject of the following sections. The run is one sample on the machine of the model section; the check is the return code.</p>
+<pre><code class="language-c" data-file="counter.c" data-build="gcc -O2 -pthread counter.c -o counter" data-run="timeout 60 ./counter 4 1000000 8 1" data-check="returncode">#include &lt;pthread.h&gt;
+#include &lt;stdatomic.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;time.h&gt;
+
+enum { SERIAL, PLAIN, SPLIT, MUTEX, TAS, CAS, FETCH_ADD, PRIVATE, NMODES };
+static const char *name[NMODES] = {
+    "serial (1 thread)", "plain read-modify-write", "load then store (atomic)",
+    "mutex", "spinlock, test-and-set", "spinlock, compare-and-swap",
+    "atomic fetch-and-add", "private count, one add"};
+
+static int nthreads, work_steps;
+static long batch = 1;
+static long per_thread;
+static int mode;
+
+static volatile long plain_count;           /* data race when shared */
+static _Atomic long atomic_count;
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+static atomic_flag tas_lock = ATOMIC_FLAG_INIT;
+static _Atomic int cas_lock;
+static volatile uint64_t sink[64 * 8];      /* keeps the work from being optimized away */
+
+static inline uint64_t work(uint64_t w)     /* work_steps dependent multiply-adds */
+{
+    for (int k = 0; k &lt; work_steps; k++)
+        w = w * 6364136223846793005ULL + 1442695040888963407ULL;
+    return w;
+}
+
+static inline void flush(long v)            /* one shared update that adds v */
+{
+    switch (mode) {
+    case SERIAL:
+    case PLAIN:  plain_count = plain_count + v; break;
+    case SPLIT:
+        atomic_store_explicit(&amp;atomic_count,
+            atomic_load_explicit(&amp;atomic_count, memory_order_relaxed) + v,
+            memory_order_relaxed);
+        break;
+    case MUTEX:
+        pthread_mutex_lock(&amp;lock);
+        plain_count = plain_count + v;
+        pthread_mutex_unlock(&amp;lock);
+        break;
+    case TAS:
+        while (atomic_flag_test_and_set_explicit(&amp;tas_lock, memory_order_acquire))
+            ;
+        plain_count = plain_count + v;
+        atomic_flag_clear_explicit(&amp;tas_lock, memory_order_release);
+        break;
+    case CAS: {
+        int expected = 0;
+        while (!atomic_compare_exchange_strong_explicit(&amp;cas_lock, &amp;expected, 1,
+                   memory_order_acquire, memory_order_relaxed))
+            expected = 0;
+        plain_count = plain_count + v;
+        atomic_store_explicit(&amp;cas_lock, 0, memory_order_release);
+        break;
+    }
+    case FETCH_ADD:
+    case PRIVATE: atomic_fetch_add_explicit(&amp;atomic_count, v, memory_order_relaxed); break;
+    }
+}
+
+static void *worker(void *arg)
+{
+    long id = (long)arg, mine = 0;
+    long every = (mode == PRIVATE) ? per_thread + 1 : batch;   /* private: shared update only at the end */
+    uint64_t w = 88172645463325252ULL + id;
+    for (long i = 0; i &lt; per_thread; i++) {
+        w = work(w);
+        mine++;
+        if (mine == every) { flush(mine); mine = 0; }
+    }
+    if (mine) flush(mine);
+    sink[id * 8] = w;
+    return NULL;
+}
+
+static double now(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &amp;t);
+    return t.tv_sec + 1e-9 * t.tv_nsec;
+}
+
+static double run(int m, long *result)
+{
+    pthread_t t[64];
+    int p = (m == SERIAL) ? 1 : nthreads;
+    long n = (m == SERIAL) ? per_thread * nthreads : per_thread;
+    long save = per_thread;
+    mode = m;
+    per_thread = n;
+    plain_count = 0;
+    atomic_store(&amp;atomic_count, 0);
+    double t0 = now();
+    for (long k = 0; k &lt; p; k++) pthread_create(&amp;t[k], NULL, worker, (void *)k);
+    for (int k = 0; k &lt; p; k++) pthread_join(t[k], NULL);
+    double dt = now() - t0;
+    per_thread = save;
+    *result = (m == SPLIT || m == FETCH_ADD || m == PRIVATE) ? atomic_load(&amp;atomic_count) : plain_count;
+    return dt;
+}
+
+int main(int argc, char **argv)
+{
+    nthreads = argc &gt; 1 ? atoi(argv[1]) : 4;
+    per_thread = argc &gt; 2 ? atol(argv[2]) : 1000000;
+    work_steps = argc &gt; 3 ? atoi(argv[3]) : 8;
+    batch = argc &gt; 4 ? atol(argv[4]) : 1;
+    long expected = per_thread * nthreads;
+    printf("threads %d, increments per thread %ld, work steps %d, batch %ld, expected %ld\n",
+           nthreads, per_thread, work_steps, batch, expected);
+    printf("%-28s %10s %9s %9s\n", "strategy", "result", "lost", "ms");
+    for (int m = 0; m &lt; NMODES; m++) {
+        long result = 0, first = 0;
+        double best = 1e9;
+        for (int rep = 0; rep &lt; 3; rep++) {
+            double dt = run(m, &amp;result);
+            if (rep == 0) first = result;
+            if (dt &lt; best) best = dt;
+        }
+        printf("%-28s %10ld %9ld %9.1f\n", name[m], first, expected - first, best * 1e3);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">threads 4, increments per thread 1000000, work steps 8, batch 1, expected 4000000
+strategy                         result      lost        ms
+serial (1 thread)               4000000         0      31.6
+plain read-modify-write         1740739   2259261      31.6
+load then store (atomic)        1956317   2043683      33.4
+mutex                           4000000         0     203.7
+spinlock, test-and-set          4000000         0     218.5
+spinlock, compare-and-swap      4000000         0     240.3
+atomic fetch-and-add            4000000         0     102.7
+private count, one add          4000000         0       8.7</code></pre>
+<p>The racing rows lose most of the updates. <code>plain read-modify-write</code> kept 1 740 739 of 4 000 000 updates in this sample, and <code>load then store (atomic)</code> kept 1 956 317. Their times, 31.6 ms and 33.4 ms, equal the 31.6 ms of the correct program in which one thread performs all 4 000 000 additions: four racing threads do not finish earlier than one thread. This chapter did not determine why. The second row is the example of a race condition without a data race: every access is atomic, and the result is still wrong, because the atomicity of the load and of the store separately does not make the pair indivisible. Theorem 8.1 covers both, since its proof uses only the order of loads and stores. The remedy for the lost update is therefore not a stronger access, it is a larger unit that nothing else can enter: a critical section or an atomic read-modify-write.</p>
+<p><strong>Detectors and tests.</strong> A dynamic data-race detector reports a data race on an execution, whether or not the result is wrong. The session compiles a two-thread program with an unprotected counter under <code>-fsanitize=thread</code>. It reports the race in a run that printed the correct total 2000. Under the definition of a data race, a detector has nothing to report for the load-then-store program above; this chapter did not run a detector on it. Chapter 27 treats debugging tools; the point here is that a test that checks only the total cannot find a race that happens to give the right total.</p>
+<pre><code class="language-c">#include &lt;pthread.h&gt;
+#include &lt;stdio.h&gt;
+
+static long count;                      /* shared, unprotected */
+
+static void *worker(void *arg)
+{
+    (void)arg;
+    for (int i = 0; i &lt; 1000; i++)
+        count = count + 1;
+    return NULL;
+}
+
+int main(void)
+{
+    pthread_t t[2];
+    for (int k = 0; k &lt; 2; k++) pthread_create(&amp;t[k], NULL, worker, NULL);
+    for (int k = 0; k &lt; 2; k++) pthread_join(t[k], NULL);
+    printf("count = %ld\n", count);
+    return 0;
+}
+</code></pre>
+<pre><code class="language-bash">$ gcc -g -O1 -fsanitize=thread -pthread tsan_demo.c -o tsan_demo
+$ setarch x86_64 -R ./tsan_demo 2&gt;&amp;1 | grep -E 'WARNING|Read of|Write of|Previous write|SUMMARY|count ='
+WARNING: ThreadSanitizer: data race (pid=1573)
+  Read of size 8 at 0x555555558018 by thread T2:
+  Previous write of size 8 at 0x555555558018 by thread T1:
+SUMMARY: ThreadSanitizer: data race …/tsan_demo.c:9 in worker
+count = 2000
+</code></pre>
+<p>The session needed <code>setarch x86_64 -R</code> to run: without it, the ThreadSanitizer runtime of this gcc stopped with "unexpected memory mapping" under the WSL 2 kernel, which an earlier attempt on this machine showed. The command line does not matter for the point.</p>
+<p><strong>Infrequent updates hide the race.</strong> The probability that a given update is lost depends on how often threads update the shared variable. The next session runs the program with a batch size \(K\) from 1 to 100 000: the first row of each block is the racing program. At \(K=1\) every iteration updates the shared counter. At \(K=10\) a thread updates it once per 10 iterations, and each update adds 10.</p>
+<pre><code class="language-bash">$ gcc -O2 -pthread counter.c -o counter
+$ for K in 1 10 100 1000 100000; do ./counter 4 1000000 8 $K | grep -E 'batch|plain|mutex|fetch|private'; done
+threads 4, increments per thread 1000000, work steps 8, batch 1, expected 4000000
+plain read-modify-write         1778958   2221042      39.9
+mutex                           4000000         0     198.3
+atomic fetch-and-add            4000000         0     119.0
+private count, one add          4000000         0       8.4
+threads 4, increments per thread 1000000, work steps 8, batch 10, expected 4000000
+plain read-modify-write         2054260   1945740      20.2
+mutex                           4000000         0      57.1
+atomic fetch-and-add            4000000         0      24.1
+private count, one add          4000000         0       9.1
+threads 4, increments per thread 1000000, work steps 8, batch 100, expected 4000000
+plain read-modify-write         3844600    155400      10.3
+mutex                           4000000         0      12.3
+atomic fetch-and-add            4000000         0      10.3
+private count, one add          4000000         0       8.5
+threads 4, increments per thread 1000000, work steps 8, batch 1000, expected 4000000
+plain read-modify-write         3987000     13000       9.7
+mutex                           4000000         0       8.9
+atomic fetch-and-add            4000000         0       8.9
+private count, one add          4000000         0       8.6
+threads 4, increments per thread 1000000, work steps 8, batch 100000, expected 4000000
+plain read-modify-write         4000000         0       8.5
+mutex                           4000000         0       8.8
+atomic fetch-and-add            4000000         0       8.6
+private count, one add          4000000         0       8.7
+</code></pre>
+<p>Each lost update at batch size \(K\) loses \(K\) increments. At \(K=1\), 2 221 042 of 4 000 000 updates were lost, 55.5 %. At \(K=10\), 1 945 740 increments were lost, which is 194 574 of 400 000 updates, 48.6 %. At \(K=100\), 155 400 increments, 1554 of 40 000 updates, 3.9 %. At \(K=1000\), 13 000 increments, 13 of 4000 updates, 0.33 %. At \(K=100\,000\), no update was lost among 40. A program that updates its shared variable rarely can pass a test and still contain the race: this sample loses nothing at \(K=100\,000\) from a program that loses 55 % at \(K=1\). The chance that a test exposes the race is a property of the update rate, so a clean run does not show correctness.</p>
+
+
+<h2 id="exclusion">Mutual exclusion and the critical section <a class="timestamp" href="https://www.youtube.com/watch?v=ulprOSZPAu0&amp;t=579s">W2L6 9:39</a></h2>
+<p>The lecture introduces the remedy with a lock and a key. Two people who want one room are kept apart by a lock: the first to enter locks the door, and the second waits until the first leaves. The lecture's figure applies this to the shared variable \(x\) in four numbered steps. Thread 1 gets access to \(x\) (step 1). Thread 2 also wants access and has to wait (step 2). Thread 1 completes its access (step 3). Then thread 2 gets access (step 4). The variable goes from 0 to 1 to 2, so the result is correct. The lecture then names the price: threads wait, and the slide says that this "may lead to reduction in application performance". The lecture adds that the results stay consistent. It concludes that the amount of synchronization should be minimized by restructuring the code, and sometimes the algorithm.</p>
+<p>The lecture then defines the unit that the lock protects. Every thread that uses the shared variable performs three tasks: read it, operate on it (for example, increment it) and write it. A thread that only reads needs no protection. The code that performs the three tasks is the <em>critical section</em>. The lecture says it is critical because its execution "should not be interrupted by any other thread", and that once one thread has entered its critical section and left it, another thread may enter its own critical section for the same variable. The protected resource may be a memory location, a peripheral device, a network connection or a data structure. The thread acquires a lock before the section and releases it after.</p>
+<p><strong>What a correct solution must satisfy.</strong> The statement "no other thread may interrupt" mixes two requirements, and the literature separates them. Dijkstra (EWD123, §2.1, pp. 11–18 of the typescript) states the problem for two cyclic processes that each pass through a critical section, "critical in the sense that the processes have to be constructed in such a way, that at any moment at most one of the two is engaged in its critical section". He adds three conditions. The solution may not assume anything about the relative speeds of the processes. A process that is stopped well outside its critical section must not be able to block the other (p. 13). And it must be impossible to arrange speeds so that the decision about which process enters first is postponed forever (p. 16). Dijkstra assumes that a read of a common variable and an assignment to it are each indivisible. For threads of this chapter, the four requirements are these.</p>
+<ol>
+<li><strong>Exclusion.</strong> At most one thread is inside a critical section for a given resource at any time.</li>
+<li><strong>No speed assumptions.</strong> The argument for exclusion does not depend on how fast threads run or on the number of processors.</li>
+<li><strong>Progress.</strong> A thread that is not inside, and not trying to enter, a critical section does not prevent another thread from entering.</li>
+<li><strong>No indefinite postponement.</strong> A thread that tries to enter eventually enters. A stronger form, bounded waiting, limits how many entries by other threads can precede its own; chapters on operating systems use that name.</li>
+</ol>
+<p>The lecture's wording corresponds to the first requirement only, and with a correction. A thread inside a critical section can be interrupted by the kernel and descheduled while it holds the lock; the requirement is that no other thread enters a critical section for the same resource in the meantime. The other threads that need the lock wait, and the threads that do not need it continue. A descheduled lock holder is a performance hazard, because the waiting threads cannot proceed until it runs again; the section on atomic instructions measures a case that is consistent with this hazard.</p>
+<p>There is a second job that the lock has to do, and the lecture does not mention it. The results of the critical section must be visible to the next thread that enters. The POSIX specification says that applications must restrict access so that no thread reads or modifies a memory location while another may be modifying it, that this is done with functions that synchronize thread execution and also synchronize memory, and that the list of these functions includes <code>pthread_mutex_lock</code>, <code>pthread_mutex_unlock</code>, <code>pthread_barrier_wait</code> and <code>pthread_spin_lock</code> (POSIX Issue 7, §4.12, <em>Memory Synchronization</em>). It ends with the sentence "Applications may allow more than one thread of control to read a memory location simultaneously", which is the lecture's remark about threads that only read. The C standard states the same for mutexes in a note: all operations on a given mutex occur in a single total order, and each acquisition reads the value written by the last release (N1570 §5.1.2.4 ¶13, NOTE 6, p. 18). Together with the definition of happens-before in the section on the model, this makes the release of a lock happen before the next acquisition, and so everything that the first thread wrote in the critical section happens before everything that the next thread reads there.</p>
+<p><strong>Two wrong solutions.</strong> Dijkstra builds his solution through rejected trials, and two of them are worth keeping. The first trial uses a variable <code>turn</code> that says whose turn it is. It satisfies exclusion, but a process must wait for the other even when the other is far from its critical section, and a stopped process blocks the other forever; it fails requirement 3 (EWD123 p. 13). The second trial gives each process a flag that says "I am inside", and each process waits until the other's flag is clear and then sets its own. Dijkstra's argument (p. 14) is that the first process can find the other's flag clear, the second can do the same immediately afterwards, and both "will conclude that they can enter their own section safely": it fails requirement 1. The second trial is the natural first attempt at a lock, and it is also what the lecture's mutex looks like if the test of the 0/1 variable and its change are two steps. The section on Peterson's algorithm checks both trials by exhaustive search.</p>
+<p><strong>The price of waiting, as a bound.</strong> The lecture's statement that synchronization costs performance has a precise form. Let each of \(p\) threads perform \(n\) iterations. An iteration does work of duration \(w\) outside any critical section and then one critical section of duration \(c\), measured from the start of the lock acquisition to the end of the lock release. Let \(T_1\) be the time of the serial program that performs all \(pn\) iterations. Three assumptions hold. (B1) The critical sections of different iterations are mutually exclusive, so their time intervals do not overlap. (B2) Each critical section lasts at least \(c\). (B3) \(T_1=pn(w+c)\). By B1 and B2 the \(pn\) critical sections occupy \(pn\) disjoint intervals of length at least \(c\) inside the interval \([0,T_p]\), so \(T_p\ge pnc\). Each thread alone needs at least \(n(w+c)\), so \(T_p\ge n(w+c)\). Hence
+</p>
+\[
+T_p \;\ge\; \max\bigl\{\,n\,(w+c),\;p\,n\,c\,\bigr\}, \qquad S_p=\frac{T_1}{T_p}\;\le\;\min\Bigl\{p,\;\frac{w+c}{c}\Bigr\}=\min\Bigl\{p,\;\frac1{\varphi}\Bigr\}, \tag{8.3}
+\]
+<p>with \(\varphi=c/(w+c)\), the critical fraction of an iteration. The ceiling \(1/\varphi\) is the limit of Amdahl's law with the serial fraction \(f=\varphi\) as \(p\) grows (chapter 11 derives the law and lists its assumptions). The bound (8.3) is weaker than Amdahl's law for finite \(p\), because the critical sections of one thread may overlap the private work of the others, which Amdahl's model does not allow: Amdahl's model makes the fraction \(\varphi\) serial for the whole program; the lock serializes the critical sections only among themselves. When \(w\) is small against \(c\), no number of threads helps, and \(T_p\) grows in proportion to \(p\) when the number of iterations per thread is fixed, because the critical sections of all threads queue behind each other. The bound separates two regimes. With \(w\ge(p-1)c\), the second term of the maximum is not larger than the first, and the lock may not limit the time. With \(w\lt(p-1)c\), the lock limits it. The bound is a necessary condition and not a prediction: it uses the time \(c\) of a section that runs alone, and it leaves out the time to hand a lock from one core to the next, which the measurements below show to exceed \(c\) by a large factor. It also does not say how many threads wait or sleep.</p>
+<p><strong>Restructuring: batch the shared updates.</strong> The lecture's remedy has a form that the model can analyze. A thread that adds its contributions to a private variable and updates the shared variable once every \(K\) iterations has \(n/K\) critical sections instead of \(n\). If the critical section of a batch lasts \(c\) as before, the bound becomes
+</p>
+\[
+T_p \;\ge\; \max\bigl\{\,n\,(w+c/K),\;p\,(n/K)\,c\,\bigr\}, \tag{8.4}
+\]
+<p>and the critical fraction falls to \(c/(Kw+c)\). The limit \(K=n\) gives \(T_p\ge nw\), a speedup of \(p\). The section on mutex locks tests this bound against the measurements of the batch-size sweep.</p>
+<p><strong>The lecture's cache figure.</strong> The lecture illustrates the same advice with a figure from an Intel article (Tian and Shih, 2012; the article was opened from an archived copy of 2019-07-22, because the Intel address answered with an access error to a script). The figure shows two threads, each over a private L1 cache, and a shared L2 cache. Panel (A), "update shared data frequently", draws several arrows between each L1 cache and the L2 cache. Panel (B), "update shared data only when necessary", draws one. The lecture reads the panels as two CPUs, CPU 1 and CPU 2, and the following slide places the shared variable "In Shared Memory like L2 cache". In the article the two panels show two ways to organize the same pair of threads on one shared-cache system: the "hold approach", in which each thread "maintain[s] its own private copy of data, only updating the shared copy when it is necessary". The article names the OpenMP <code>reduction</code> clause as an example. The lecture's conclusion is correct and is the model above: batch size \(K=1\) is panel (A), and a large \(K\) is panel (B). The variable does not have to be in the shared cache: a shared variable lives in memory, and each cache holds copies of its line that the coherence protocol keeps consistent (chapter 7). The article's own text adds that a private L1 cache still needs coherence traffic when two threads write different parts of one line, which is the false sharing of chapter 11. The lecture also separates <em>contention-only threads</em>, which share a cache but no data, from <em>data-sharing threads</em>. The first kind needs no synchronization, so no correctness problem arises. The article notes that such threads still compete for the capacity of the cache, and recommends placing them on cores that do not share it.</p>
+
+
+<h2 id="mutex">Mutex locks <a class="timestamp" href="https://www.youtube.com/watch?v=ulprOSZPAu0&amp;t=1370s">W2L6 22:50</a></h2>
+<p>The lecture's lock is the <em>mutex</em>, short for mutual exclusion. Its example, from a slide with <code>#include &lt;pthread.h&gt;</code>, declares <code>pthread_mutex_t count_mutex</code> and <code>long count</code> and defines a function <code>increment_count</code> that calls <code>pthread_mutex_lock(&amp;count_mutex)</code>, executes <code>count = count + 1</code> and calls <code>pthread_mutex_unlock(&amp;count_mutex)</code>. The section between the two calls is the critical section. For the inside of a mutex, the lecture says that every mutex has an associated binary variable that holds 0 or 1, initialized to 1. A thread that enters the critical section decreases it to 0, which acquires the lock. Another thread that tries to enter sees the value 0 and waits. The thread that holds the lock sets the value back to 1 when it leaves.</p>
+<p><strong>What the abstraction does and does not say.</strong> The 0/1 variable is the abstraction of a binary semaphore: a counter that can be 0 or 1, with an acquire that waits for 1 and sets 0 and a release that sets 1. As a model of mutual exclusion it is correct on one condition that the lecture's wording hides: the test of the value and its change to 0 must be one indivisible step. If a thread first sees 1 and then, in a separate step, sets 0, then two threads can both see 1, and both enter. That is the second trial of Dijkstra in the previous section. The exhaustive search in the section on Peterson's algorithm finds a schedule of 6 steps in which both threads enter. The indivisible step is what the atomic instructions of the next sections provide.</p>
+<p>A POSIX mutex is not exactly a binary semaphore. It has an owner. The specification of <code>pthread_mutex_lock</code> says that the call blocks while another thread holds the mutex, that it returns with the calling thread as owner, and that unlocking a mutex that the caller does not hold gives undefined behavior for the default and the normal types and an error for the error-checking type (POSIX Issue 7, <code>pthread_mutex_lock</code>, table of relock and unlock behavior). A semaphore has no owner, so any thread may release it. The ownership is what lets an implementation detect two programming errors that the deadlock section shows: the second lock of one thread, and the release by a thread that never locked.</p>
+<p>Real mutexes also do more than one variable can. Drepper (2011, pp. 6–8) develops a mutex on the Linux futex (a kernel facility that lets a thread sleep on a memory word until another thread wakes it) in three versions. The final design keeps the state in one integer with three values, 0 for unlocked, 1 for locked with no waiters, and 2 for locked with one or more waiters. A thread acquires an unlocked mutex with one compare-and-swap, and releases it with one atomic decrement. A thread that finds the mutex held sets the value to 2 with an atomic exchange and sleeps in the kernel by a system call. The release of a mutex in state 2 wakes one sleeping thread by another system call. The design separates a fast path with no system call from a slow path in which waiting threads sleep and do not use a processor. The article describes a design for the Linux kernel's futex facility. It is not a statement about the implementation that this machine's C library uses, which this chapter did not inspect.</p>
+<p><strong>The cost, measured.</strong> The listing of the section on the lost update measures the mutex in the row <code>mutex</code>. In that sample, four threads with a mutex around every update took 203.7 ms for 4 000 000 updates: 50.9 ns per update, and 6.4 times the 31.6 ms of one thread doing all the updates. The slide on synchronization overhead says that waiting "may lead to reduction in application performance". For this program the reduction is a factor of 6.4; the size depends on the work \(w\) between updates and on the batch size, as the bound (8.3) says. The uncontended cost of the lock is the difference between the one-thread times with and without a mutex in the thread sweep below, 15.0 ms against 8.4 ms for \(10^6\) iterations, so \(c\approx6.6\) ns, \(w+c\approx15.0\) ns, \(\varphi\approx0.44\) and, by (8.3), \(S_p\le2.3\) (here \(T_1=pn(w+c)\approx60\) ms is the serial program with the lock; the row <code>serial</code> measures the program without it, \(pnw\approx31.6\) ms). The bound on the time of the sample is \(pnc=4\,000\,000\times6.6\ \mathrm{ns}=26.4\) ms. The measured time is 7.7 times that. (The value 6.6 ns comes from the thread-sweep session below and 203.7 ms from the sample of the section on the lost update; the \(p=4\) run of the sweep itself, 198.9 ms, is 7.5 times the bound.) The bound holds.</p>
+<p>The thread sweep shows how the cost depends on \(p\). The session runs the program with 1, 2, 4, 8 and 12 threads and \(10^6\) iterations per thread, for a mutex, a test-and-set spinlock (next section) and an atomic fetch-and-add (next section). The row <code>serial</code> is one thread doing the whole count of updates, and it grows in proportion to \(p\).</p>
+<pre><code class="language-bash">$ for p in 1 2 4 8 12; do ./counter $p 1000000 8 1 | grep -E 'threads|serial|mutex|test-and|fetch'; done
+threads 1, increments per thread 1000000, work steps 8, batch 1, expected 1000000
+serial (1 thread)               1000000         0       8.4
+mutex                           1000000         0      15.0
+spinlock, test-and-set          1000000         0       8.4
+atomic fetch-and-add            1000000         0       8.4
+threads 2, increments per thread 1000000, work steps 8, batch 1, expected 2000000
+serial (1 thread)               2000000         0      16.3
+mutex                           2000000         0      90.3
+spinlock, test-and-set          2000000         0      45.7
+atomic fetch-and-add            2000000         0      34.0
+threads 4, increments per thread 1000000, work steps 8, batch 1, expected 4000000
+serial (1 thread)               4000000         0      31.7
+mutex                           4000000         0     198.9
+spinlock, test-and-set          4000000         0     184.0
+atomic fetch-and-add            4000000         0      91.5
+threads 8, increments per thread 1000000, work steps 8, batch 1, expected 8000000
+serial (1 thread)               8000000         0      66.8
+mutex                           8000000         0     615.3
+spinlock, test-and-set          8000000         0    1168.1
+atomic fetch-and-add            8000000         0     285.2
+threads 12, increments per thread 1000000, work steps 8, batch 1, expected 12000000
+serial (1 thread)              12000000         0     100.2
+mutex                          12000000         0     872.4
+spinlock, test-and-set         12000000         0    2175.2
+atomic fetch-and-add           12000000         0     374.9
+</code></pre>
+<p>Table 8.2 gives the times of the session relative to the serial time of the same number of updates.</p>
+<div class="table-wrap"><table>
+<caption>Table 8.2. Time of the same total number of updates, as a multiple of the serial time, from the session above (batch size 1, work step 8; one sample).</caption>
+<thead><tr><th scope="col">\(p\)</th><th scope="col">serial (ms)</th><th scope="col">mutex</th><th scope="col">test-and-set spinlock</th><th scope="col">atomic fetch-and-add</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>8.4</td><td>1.8</td><td>1.0</td><td>1.0</td></tr>
+<tr><td>2</td><td>16.3</td><td>5.5</td><td>2.8</td><td>2.1</td></tr>
+<tr><td>4</td><td>31.7</td><td>6.3</td><td>5.8</td><td>2.9</td></tr>
+<tr><td>8</td><td>66.8</td><td>9.2</td><td>17.5</td><td>4.3</td></tr>
+<tr><td>12</td><td>100.2</td><td>8.7</td><td>21.7</td><td>3.7</td></tr>
+</tbody></table></div>
+<p>The mutex column has two features. First, adding a second thread multiplies the time by 5.5 against the serial time, and the factor stays between 5.5 and 9.2 up to 12 threads. No team size is faster than the serial loop, consistent with (8.3), which allows at most 2.3: with \(w+c\approx15\) ns against a hand-off that costs tens of nanoseconds, the lock is the bottleneck. Second, the time per update, the mutex time divided by the number of updates, is 45 ns at \(p=2\), 50 ns at \(p=4\), 77 ns at \(p=8\) and 73 ns at \(p=12\). The lock passes 20 to 22 million updates per second at \(p=2\) and \(p=4\), and 13 to 14 million per second at \(p=8\) and \(p=12\). That the throughput of the lock stays near-constant while the number of waiting threads rises from 2 to 12 is the signature of a resource that serializes the threads. The drop between \(p=4\) and \(p=8\) coincides with the processor's layout: 4 performance cores, then efficient cores and sibling hardware threads (the section on the model). This chapter did not control thread placement and did not test the connection.</p>
+<p><strong>Restructuring, measured.</strong> The session in the previous section ran the program with batch sizes from 1 to 100 000. The mutex times were 198.3, 57.1, 12.3, 8.9 and 8.8 ms for \(K=1,10,100,1000,100\,000\), and the time of the strategy with a private count and one shared add at the end was 8.4 to 9.1 ms in the same session. Bound (8.4), with \(w=8.4\) ns and \(c=6.6\) ns, gives 26.4, 9.1, 8.5, 8.4 and 8.4 ms. The measured times are 7.5, 6.3, 1.45, 1.06 and 1.05 times the bound. The restructuring that the lecture recommends works as the model says: with \(K=1000\), the mutex run is 22 times faster than with \(K=1\) and within 6 % of the bound. The model does not predict the time at small \(K\). The time beyond 8.4 ms (the private-count time in the \(K=1\) block), divided by the number of shared updates, is 47.5 ns per update at \(K=1\) (the lock is always contended), 121.8 ns at \(K=10\) and 97.5 ns at \(K=100\). A shared update at \(K=10\) or \(K=100\), which often finds the lock idle, costs 2.0 to 2.6 times as much as one in a queue of waiting threads at \(K=1\). This chapter did not find the reason. A hypothesis is that an idle lock is picked up by a thread whose last wake-up was by a system call, or whose cache lines for the lock and the counter are in another core. A test would count the system calls of the mutex runs with <code>strace -c</code>, and compare them with the spinlock, which never sleeps. Neither test was run.</p>
+
+
+<h2 id="peterson">Locks from loads and stores: Peterson's algorithm and the store buffer</h2>
+<p>The lecture says that atomic instructions need the cooperation of the hardware. This section asks why. Can two threads exclude each other with ordinary loads and stores only? Dijkstra posed this problem in 1965 for processes that share only memory cells, and the answer under sequential consistency is yes. Peterson (1981) gave a short solution for two threads. The paper (<em>Information Processing Letters</em> 12(3), pp. 115–116) could not be opened for this chapter, so the algorithm below is the form found in textbooks, and the exhaustive search that follows tests that form. Each thread \(i\) has the other thread \(j=1-i\). The shared variables are two flags <code>flag[0]</code> and <code>flag[1]</code>, both 0 at the start, and an integer <code>turn</code>. Thread \(i\) runs</p>
+<pre><code class="language-c">flag[i] = 1;                          /* I want to enter */
+turn = j;                             /* but you may go first */
+while (flag[j] == 1 &amp;&amp; turn == j)
+    ;                                 /* wait */
+/* critical section */
+flag[i] = 0;                          /* I am done */
+</code></pre>
+<p><strong>Mutual exclusion under sequential consistency.</strong> Suppose that both threads are in the critical section at the same time \(t^*\). Each thread wrote <code>turn</code> once in its entry protocol: thread 0 wrote 1 (write \(w_0\)) and thread 1 wrote 0 (write \(w_1\)). The two writes are ordered, so let \(w_0\) come first; the other case is symmetric. Thread 1 left its loop at a test before \(t^*\), so at that test the condition <code>flag[0] == 1 &amp;&amp; turn == 0</code> was false. After \(w_1\), <code>turn</code> is 0 until some thread writes it again, and neither thread writes it again before the critical section: thread 0's write \(w_0\) came earlier, and thread 1's write is \(w_1\). So <code>turn == 0</code> at the test, and the test must have read <code>flag[0] == 0</code>. But thread 0 wrote <code>flag[0] = 1</code> before \(w_0\), and \(w_0\) precedes \(w_1\), which precedes the test. Thread 0 resets its flag only after it leaves the critical section, which is after \(t^*\), and so after the test. The test therefore read <code>flag[0] == 1</code>, which contradicts the previous sentence. The proof uses one fact: the order of the writes in the schedule is the order in which the later reads of the other thread see them. The proofs of progress and of bounded waiting need further arguments that this chapter does not give, and the search below does not test them.</p>
+<p><strong>An exhaustive search over two memory models.</strong> The program below checks lock algorithms for two threads, each of which enters the critical section once and leaves. A state is the program counter and register of each thread, the memory, and the store buffer of each thread. The search visits every reachable state and asks whether both program counters can be at the critical-section instruction in one state. It has two memory models. In <code>SC</code> a store writes memory at once. In <code>TSO</code> the model follows the rules of x86-TSO, the programmer's model of Sewell and others (2010, §3.1). Each thread has a FIFO <em>store buffer</em>. A store enters the buffer of its thread. A load returns the newest value that the thread's own buffer holds for the address, or, if there is none, the value in memory. The oldest buffered store may reach memory at any time. A fence (<code>MFENCE</code>) is enabled only when the thread's buffer is empty. A locked instruction, which includes <code>XCHG</code>, first empties the buffer of its thread and then reads and writes memory in one step. Sewell and others let the instruction end only when the buffer is empty (their rule 7); because no other thread can read or propagate meanwhile, emptying the buffer first gives the same reachable states. The algorithms are Dijkstra's second trial (called check-then-set here: wait while the other flag is 1, then set one's own), Peterson's algorithm, Peterson's algorithm with a fence between the write of <code>turn</code> and the first read, and a test-and-set lock (a locked exchange of the lock variable with 1, repeated until it returns 0). The search finds the shortest violating schedule by breadth first search. Its output is deterministic.</p>
+<pre><code class="language-python" data-file="lock_model.py" data-build="" data-run="python3 lock_model.py" data-check="exact">"""Exhaustive check of two-thread locks under sequential consistency and under x86-TSO.
+
+Each thread runs the lock algorithm once: enter, critical section, leave.
+A state is (pc of each thread, registers, memory, store buffer of each thread).
+The check searches every reachable state and reports whether both threads can be
+at the critical-section instruction ("cs") in the same state.
+
+Memory models
+  SC   a store writes memory at once.
+  TSO  a store enters a FIFO buffer of its thread; a load reads the newest buffered
+       value for its address, else memory; the oldest buffered store may reach memory
+       at any time; fence and xchg first empty the buffer of their thread
+       (rules 1-5 and 7 of Sewell et al., CACM 53(7), 2010, section 3.1).
+"""
+from collections import deque
+
+VARS = ("flag0", "flag1", "turn", "lock", "busy0", "busy1")
+IDX = {v: i for i, v in enumerate(VARS)}
+
+
+def naive(i, fence=False):
+    """Dijkstra's check-then-set: wait while the other busy flag is 1, set own, enter."""
+    j = 1 - i
+    return [("ld", "r", f"busy{j}"),        # 0
+            ("jeq", "r", 1, 0),             # 1  other is busy: look again
+            ("st", f"busy{i}", 1),          # 2
+            ("cs",),                        # 3
+            ("st", f"busy{i}", 0),          # 4
+            ("end",)]                       # 5
+
+
+def peterson(i, fence=False):
+    j = 1 - i
+    prog = [("st", f"flag{i}", 1),          # 0
+            ("st", "turn", j)]              # 1
+    if fence:
+        prog.append(("fence",))
+    n = len(prog)
+    prog += [("ld", "r", f"flag{j}"),       # n     wait while flag[j] and turn == j
+             ("jeq", "r", 0, n + 4),        # n+1   flag[j] is 0: enter
+             ("ld", "r", "turn"),           # n+2
+             ("jeq", "r", j, n),            # n+3   turn is j: look again
+             ("cs",),                       # n+4
+             ("st", f"flag{i}", 0),         # n+5
+             ("end",)]
+    return prog
+
+
+def test_and_set(i, fence=False):
+    return [("xchg", "r", "lock", 1),       # 0  r := lock; lock := 1, as one locked step
+            ("jeq", "r", 1, 0),             # 1  lock was held: try again
+            ("cs",),                        # 2
+            ("st", "lock", 0),              # 3
+            ("end",)]
+
+
+def initial(progs):
+    return (tuple(0 for _ in progs), tuple(0 for _ in progs),
+            tuple(0 for _ in VARS), tuple(() for _ in progs))
+
+
+def successors(state, progs, tso):
+    pcs, regs, mem, bufs = state
+    for t, prog in enumerate(progs):
+        # a buffered store reaches memory
+        if tso and bufs[t]:
+            (var, val), rest = bufs[t][0], bufs[t][1:]
+            m = list(mem); m[var] = val
+            b = list(bufs); b[t] = rest
+            yield (f"T{t} buffer -&gt; memory: {VARS[var]} = {val}", (pcs, regs, tuple(m), tuple(b)))
+        op = prog[pcs[t]]
+        kind = op[0]
+        npc = list(pcs); nreg = list(regs); m = list(mem); b = list(bufs)
+        npc[t] += 1
+        if kind == "st":
+            var, val = IDX[op[1]], op[2]
+            if tso:
+                b[t] = bufs[t] + ((var, val),)
+                text = f"T{t} store {op[1]} = {val} (buffered)"
+            else:
+                m[var] = val
+                text = f"T{t} store {op[1]} = {val}"
+        elif kind == "ld":
+            var = IDX[op[2]]
+            val = mem[var]
+            for v, x in reversed(bufs[t]):
+                if v == var:
+                    val = x
+                    break
+            nreg[t] = val
+            text = f"T{t} load {op[2]} -&gt; {val}"
+        elif kind == "jeq":
+            if regs[t] == op[2]:
+                npc[t] = op[3]
+            text = f"T{t} test r == {op[2]}"
+        elif kind == "fence":
+            if bufs[t]:
+                continue                     # enabled only when the buffer is empty
+            text = f"T{t} fence"
+        elif kind == "xchg":
+            if bufs[t]:
+                continue                     # a locked instruction first empties the buffer
+            var = IDX[op[2]]
+            nreg[t] = mem[var]; m[var] = op[3]
+            text = f"T{t} xchg {op[2]}: old {mem[var]}, new {op[3]}"
+        elif kind == "cs":
+            text = f"T{t} enters the critical section"
+        elif kind == "end":
+            npc[t] -= 1
+            continue
+        yield (text, (tuple(npc), tuple(nreg), tuple(m), tuple(b)))
+
+
+def check(maker, tso, fence=False):
+    progs = [maker(0, fence), maker(1, fence)]
+    in_cs = [[k for k, op in enumerate(p) if op[0] == "cs"][0] for p in progs]
+    start = initial(progs)
+    parent = {start: None}
+    queue = deque([start])
+    while queue:
+        s = queue.popleft()
+        if s[0][0] == in_cs[0] and s[0][1] == in_cs[1]:
+            trace = []
+            while parent[s]:
+                text, prev = parent[s]
+                trace.append(text); s = prev
+            return len(parent), trace[::-1]
+        for text, nxt in successors(s, progs, tso):
+            if nxt not in parent:
+                parent[nxt] = (text, s)
+                queue.append(nxt)
+    return len(parent), None
+
+
+rows = [("check-then-set flag", naive, False, False), ("check-then-set flag", naive, True, False),
+        ("Peterson", peterson, False, False), ("Peterson", peterson, True, False),
+        ("Peterson + fence", peterson, True, True),
+        ("test-and-set (xchg)", test_and_set, False, False), ("test-and-set (xchg)", test_and_set, True, False)]
+print(f"{'algorithm':22s} {'model':5s} {'states':&gt;7s}  both threads in the critical section?")
+shown = None
+for label, maker, tso, fence in rows:
+    states, trace = check(maker, tso, fence)
+    print(f"{label:22s} {'TSO' if tso else 'SC':5s} {states:7d}  "
+          f"{'yes, in ' + str(len(trace)) + ' steps' if trace else 'no'}")
+    if label == "Peterson" and tso:
+        shown = trace
+print()
+print("Shortest schedule that breaks Peterson under TSO:")
+for k, step in enumerate(shown, 1):
+    print(f"{k:3d}. {step}")
+</code></pre>
+<pre><code class="output">algorithm              model  states  both threads in the critical section?
+check-then-set flag    SC         39  yes, in 6 steps
+check-then-set flag    TSO        52  yes, in 6 steps
+Peterson               SC        143  no
+Peterson               TSO       247  yes, in 8 steps
+Peterson + fence       TSO       274  no
+test-and-set (xchg)    SC         32  no
+test-and-set (xchg)    TSO        40  no
+
+Shortest schedule that breaks Peterson under TSO:
+  1. T0 store flag0 = 1 (buffered)
+  2. T0 store turn = 1 (buffered)
+  3. T0 load flag1 -&gt; 0
+  4. T0 test r == 0
+  5. T1 store flag1 = 1 (buffered)
+  6. T1 store turn = 0 (buffered)
+  7. T1 load flag0 -&gt; 0
+  8. T1 test r == 0</code></pre>
+<p>The check-then-set lock fails under both models, in 6 steps: one thread reads the other's flag, the other thread does the same, and both write. Peterson's algorithm is safe under sequential consistency, in all 143 reachable states, in agreement with the proof above. Under TSO it fails in 8 steps. The trace shows the failure: thread 0 buffers its two stores, loads <code>flag1</code> and reads 0 from memory, because thread 1's store of <code>flag1</code> is not yet there, and enters; thread 1 does the same with the roles exchanged. No step of the schedule moves a buffer to memory. With the fence after the write of <code>turn</code> the lock is safe in all 274 states of the TSO model. The test-and-set lock is safe in both models. The search covers one entry per thread, not repeated entries, and the model is the published abstraction of the processor, not the processor. For the fence the search establishes only that this placement is enough for one entry per thread; Exercise 4 asks which other placements work.</p>
+<p><strong>The step of the proof that fails.</strong> The proof used the order of the writes in the schedule as the order in which reads see them. In the TSO model a load may complete before an earlier store of the same thread to another address has reached memory. This is the weakness of the memory model. Lamport (1979) stated it for a two-process mutual-exclusion protocol that sets its own flag first and then reads the other flag, as Peterson's entry does: process 1 executes <code>a := 1; if b = 0 then critical section</code>, and process 2 executes <code>b := 1; if a = 0 then critical section</code>. His note shows that the protocol fails if a memory module does not execute two requests in the order in which it received them (a different hardware mechanism with the same effect as a store buffer), and it states requirements that a computer must meet to execute such protocols correctly. The minimal pattern is the <em>store-buffering</em> test of Sewell and others (2010, §1): thread 0 executes <code>x = 1</code> and then reads <code>y</code>; thread 1 executes <code>y = 1</code> and then reads <code>x</code>. Sequential consistency forbids the outcome in which both reads return 0. The x86-TSO model allows it, and the authors present it as a behavior of real x86 multiprocessors.</p>
+<p><strong>The hardware shows it.</strong> The first test is the store-buffering test, written with C11 atomics. In each round both threads agree on a start time about 20 µs ahead, wait for it by reading the clock, load both variables to bring their lines into both caches, then perform the two operations, and a counter records rounds in which both reads returned 0. The two variables sit on separate cache lines. The listing runs 100 000 rounds with relaxed memory order, and again with sequentially consistent order. The memory order is a macro argument on purpose: the compiler needs a constant. An earlier draft of this harness chose the order with a run-time variable and observed no outcome with both reads 0 in 500 000 rounds on each of six pairs of logical processors. gcc treats a memory-order argument that is not a compile-time constant as sequentially consistent, and the assembly of that draft stored with <code>xchg</code>, which is a locked instruction. Because the outcome depends on timing, the check is the return code.</p>
+<pre><code class="language-c" data-file="sb.c" data-build="gcc -O2 -pthread sb.c -o sb" data-run="./sb 100000" data-check="returncode">#include &lt;pthread.h&gt;
+#include &lt;stdalign.h&gt;
+#include &lt;stdatomic.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;time.h&gt;
+
+#define RELAXED memory_order_relaxed
+#define SEQCST memory_order_seq_cst
+
+static alignas(64) _Atomic int x;
+static alignas(64) _Atomic int y;
+static alignas(64) _Atomic long arrived[2];     /* round numbers, for the start rendezvous */
+static alignas(64) _Atomic long finished[2];
+static alignas(64) _Atomic long target;         /* start time of the current round, ns */
+static alignas(64) int seen[2];                 /* what each thread read in the current round */
+static long rounds, both_zero;
+
+static long now_ns(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &amp;t);
+    return t.tv_sec * 1000000000L + t.tv_nsec;
+}
+
+static void rendezvous(_Atomic long *flag, int i, long k)
+{
+    atomic_store_explicit(&amp;flag[i], k + 1, SEQCST);
+    while (atomic_load_explicit(&amp;flag[1 - i], RELAXED) &lt; k + 1)
+        ;
+}
+
+/* The memory order must be a compile-time constant: gcc treats a variable order as seq_cst. */
+#define LITMUS(NAME, ORDER)                                                             \
+static void *NAME(void *arg)                                                            \
+{                                                                                       \
+    int i = (int)(long)arg;                                                             \
+    _Atomic int *mine = i ? &amp;y : &amp;x, *other = i ? &amp;x : &amp;y;                              \
+    volatile int warm;                                                                  \
+    for (long k = 0; k &lt; rounds; k++) {                                                 \
+        if (i == 0) atomic_store_explicit(&amp;target, now_ns() + 20000, RELAXED);          \
+        rendezvous(arrived, i, k);                                                      \
+        while (now_ns() &lt; atomic_load_explicit(&amp;target, RELAXED))   /* start together */ \
+            ;                                                                           \
+        warm = atomic_load_explicit(&amp;x, RELAXED) + atomic_load_explicit(&amp;y, RELAXED);   \
+        atomic_store_explicit(mine, 1, ORDER);                      /* x = 1  or  y = 1 */ \
+        seen[i] = atomic_load_explicit(other, ORDER);               /* r = y  or  r = x */ \
+        rendezvous(finished, i, k);                                                     \
+        if (i == 0 &amp;&amp; seen[0] == 0 &amp;&amp; seen[1] == 0) both_zero++;                        \
+        atomic_store_explicit(mine, 0, SEQCST);                                         \
+    }                                                                                   \
+    return NULL;                                                                        \
+}
+
+LITMUS(relaxed_worker, RELAXED)
+LITMUS(seqcst_worker, SEQCST)
+
+int main(int argc, char **argv)
+{
+    rounds = argc &gt; 1 ? atol(argv[1]) : 100000;
+    void *(*worker[2])(void *) = {relaxed_worker, seqcst_worker};
+    const char *name[2] = {"relaxed", "seq_cst"};
+    for (int v = 0; v &lt; 2; v++) {
+        pthread_t t[2];
+        both_zero = 0;
+        for (int k = 0; k &lt; 2; k++) { atomic_store(&amp;arrived[k], 0); atomic_store(&amp;finished[k], 0); }
+        for (long k = 0; k &lt; 2; k++) pthread_create(&amp;t[k], NULL, worker[v], (void *)k);
+        for (int k = 0; k &lt; 2; k++) pthread_join(t[k], NULL);
+        printf("%-8s accesses: %ld of %ld rounds ended with both loads returning 0\n",
+               name[v], both_zero, rounds);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">relaxed  accesses: 10097 of 100000 rounds ended with both loads returning 0
+seq_cst  accesses: 0 of 100000 rounds ended with both loads returning 0</code></pre>
+<p>In the sample, 10 097 of 100 000 rounds, 10.1 %, ended with both loads returning 0 under relaxed order, and none under sequentially consistent order. Earlier runs of the harness, including runs with the two threads pinned to six pairs of logical processors, gave between 7.4 % and 14.1 %. The model's allowed outcome occurs often on this machine, and the stronger order removes it.</p>
+<p>The second test runs Peterson's algorithm on the machine. Each thread executes the entry protocol, increments a plain <code>volatile long</code> counter that only the lock protects, and leaves; a second counter, <code>inside</code>, records an entry that finds the other thread already inside. The program has three variants: relaxed accesses, relaxed accesses with a sequentially consistent fence after the write of <code>turn</code>, and sequentially consistent accesses. Each round starts with the same time agreement as in the previous test. The two flags share one cache line; <code>turn</code>, the counters and the arrival variables are on lines of their own. The output has the total, the lost increments, and the entries that overlapped. The run takes about 7 s.</p>
+<pre><code class="language-c" data-file="peterson.c" data-build="gcc -O2 -pthread peterson.c -o peterson" data-run="./peterson 100000" data-check="returncode">#include &lt;pthread.h&gt;
+#include &lt;stdalign.h&gt;
+#include &lt;stdatomic.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;time.h&gt;
+
+#define RELAXED memory_order_relaxed
+#define SEQCST memory_order_seq_cst
+
+static alignas(64) _Atomic int flag[2];
+static alignas(64) _Atomic int turn;
+static alignas(64) _Atomic int inside;       /* threads now in the critical section */
+static alignas(64) _Atomic long arrived[2];  /* round numbers, for the start rendezvous */
+static alignas(64) _Atomic long target;      /* start time of the current round, ns */
+static alignas(64) volatile long counter;    /* protected by the lock */
+static long rounds, overlaps[2];
+
+static long now_ns(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &amp;t);
+    return t.tv_sec * 1000000000L + t.tv_nsec;
+}
+
+static void start_together(int i, long k)    /* both threads leave this call within a few ns */
+{
+    if (i == 0) atomic_store_explicit(&amp;target, now_ns() + 20000, RELAXED);
+    atomic_store_explicit(&amp;arrived[i], k + 1, SEQCST);
+    while (atomic_load_explicit(&amp;arrived[1 - i], RELAXED) &lt; k + 1)
+        ;
+    long t0 = atomic_load_explicit(&amp;target, RELAXED);
+    while (now_ns() &lt; t0)
+        ;
+}
+
+static inline void critical_section(int i)
+{
+    if (atomic_fetch_add_explicit(&amp;inside, 1, RELAXED) != 0) overlaps[i]++;
+    counter = counter + 1;
+    atomic_fetch_sub_explicit(&amp;inside, 1, RELAXED);
+}
+
+/* The memory order must be a compile-time constant: gcc treats a variable order as seq_cst. */
+#define PETERSON(NAME, ST, LD, FENCE)                                                   \
+static void *NAME(void *arg)                                                            \
+{                                                                                       \
+    int i = (int)(long)arg, j = 1 - i;                                                  \
+    for (long k = 0; k &lt; rounds; k++) {                                                 \
+        start_together(i, k);                                                           \
+        atomic_store_explicit(&amp;flag[i], 1, ST);                                         \
+        atomic_store_explicit(&amp;turn, j, ST);                                            \
+        FENCE;                                                                          \
+        while (atomic_load_explicit(&amp;flag[j], LD) &amp;&amp; atomic_load_explicit(&amp;turn, LD) == j) \
+            ;                                                                           \
+        critical_section(i);                                                            \
+        atomic_store_explicit(&amp;flag[i], 0, memory_order_release);                       \
+    }                                                                                   \
+    return NULL;                                                                        \
+}
+
+PETERSON(relaxed_worker, RELAXED, RELAXED, (void)0)
+PETERSON(fenced_worker, RELAXED, RELAXED, atomic_thread_fence(SEQCST))
+PETERSON(seqcst_worker, SEQCST, SEQCST, (void)0)
+
+int main(int argc, char **argv)
+{
+    rounds = argc &gt; 1 ? atol(argv[1]) : 100000;
+    void *(*worker[3])(void *) = {relaxed_worker, fenced_worker, seqcst_worker};
+    const char *name[3] = {"relaxed accesses", "relaxed + seq_cst fence", "seq_cst accesses"};
+    printf("2 threads, %ld critical sections each\n", rounds);
+    printf("%-26s %10s %8s %9s\n", "variant", "counter", "lost", "overlaps");
+    for (int v = 0; v &lt; 3; v++) {
+        pthread_t t[2];
+        counter = 0; overlaps[0] = overlaps[1] = 0;
+        atomic_store(&amp;arrived[0], 0); atomic_store(&amp;arrived[1], 0);
+        for (long k = 0; k &lt; 2; k++) pthread_create(&amp;t[k], NULL, worker[v], (void *)k);
+        for (int k = 0; k &lt; 2; k++) pthread_join(t[k], NULL);
+        printf("%-26s %10ld %8ld %9ld\n", name[v], (long)counter, 2 * rounds - counter,
+               overlaps[0] + overlaps[1]);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">2 threads, 100000 critical sections each
+variant                       counter     lost  overlaps
+relaxed accesses               199780      220      3903
+relaxed + seq_cst fence        200000        0         0
+seq_cst accesses               200000        0         0</code></pre>
+<p>With relaxed accesses, the lock failed in the sample: 3903 of 200 000 entries (2.0 %) found the other thread inside, and 220 increments were lost. Earlier runs of 200 000 rounds per thread gave 6957 to 9596 overlapping entries of 400 000 (1.7 % to 2.4 %) and 135 to 194 lost increments. Both other variants had no overlap and no lost increment in every run. That is the prediction of the model: the lock is correct if a fence orders the store of <code>turn</code> before the load of the other flag, and it fails without it. The model is x86-TSO. Under the C11 model the fenced variant still has a data race on <code>counter</code>: its relaxed loads synchronize with nothing, so no critical section happens before the next (the rule stated for the spinlocks in the section on atomic instructions). The sequentially consistent variant is correct in both models; a portable fenced version needs acquire loads and a release store of <code>turn</code>. The start-up and arrival variables of both harnesses are read with relaxed loads, so the harnesses rely on x86 ordering as well; the counts are for this processor.</p>
+<p>The session compiles the program to assembly and shows what the compiler emits for the fence. The fenced worker stores <code>flag[i]</code> and <code>turn</code> with plain <code>movl</code> instructions and then executes <code>lock orq $0, (%rsp)</code>, a locked instruction that adds nothing to the stack word. gcc 13.3 uses it for the sequentially consistent fence on x86-64 (the lines shown are the fence of <code>fenced_worker</code> with the two stores before it; the loads of the other flag follow it in program order, and the compiler may not move them across it). By the rule of Sewell and others, a locked instruction empties the store buffer, which is what the fence has to do.</p>
+<pre><code class="language-bash">$ gcc -O2 -pthread -S peterson.c -o peterson.s
+$ grep -n -B4 -A3 'lock orq' peterson.s
+125-    movl    %r12d, %edi
+126-    call    start_together
+127-    movl    $1, (%r15)
+128-    movl    %ebx, turn(%rip)
+129:    lock orq        $0, (%rsp)
+130-    jmp     .L18
+131-    .p2align 4,,10
+132-    .p2align 3
+</code></pre>
+<p><strong>What follows for locks.</strong> The lecture's statement is right, and the reason is stronger than indivisibility. A lock built from atomic read-modify-write instructions works because such an instruction both reads and writes in one step, and because it orders the accesses around it: on x86 it empties the store buffer. Peterson's algorithm and Dekker's two-process solution (which Dijkstra presents in EWD123 §2.1) are correct only on a machine, or in a language, that gives sequential consistency or the fences that restore it. Modern lock implementations use atomic instructions, and the language's release and acquire operations are what the lock functions use inside.</p>
+
+
+<h2 id="atomics">Atomic instructions <a class="timestamp" href="https://www.youtube.com/watch?v=ulprOSZPAu0&amp;t=1509s">W2L6 25:09</a></h2>
+<p>The lecture defines atomics as "instructions that execute without any interruption" and gives two examples, from Silberschatz's textbook. <code>test_and_set(target)</code> takes a pointer to a Boolean. It copies the old value into a local variable <code>rv</code>, sets <code>*target</code> to true and returns <code>rv</code>. A lock uses it in the loop <code>while (test_and_set(&amp;lock)) ; /* do nothing */</code>, then the critical section, then <code>lock = false</code>, with <code>lock</code> initialized to false. <code>compare_and_swap(value, expected, new_value)</code> copies <code>*value</code> to <code>temp</code>, assigns <code>new_value</code> to <code>*value</code> if <code>*value == expected</code>, and always returns <code>temp</code>, the original value. A lock uses it in the loop <code>while (compare_and_swap(&amp;lock, 0, 1) != 0) ;</code>, then the critical section, then <code>lock = 0</code>. A further slide states that atomic operations are performed on a memory location, that is, an address, and that the hardware ensures that no other thread can access the location until the atomic operation is complete.</p>
+<p><strong>Reading the two loops.</strong> The slides' loops are the reference for this section. The test-and-set loop spins while the function returns true: true means that the old value was true and another thread holds the lock, so the thread enters when the function returns false. The compare-and-swap loop spins while the result is not 0, and it enters when the result is 0, the old value of an unlocked lock. Both loops use the function's return value as the old value of the lock variable. A reader who takes "returns true" or "returns 1" as the entry condition reverses both loops; the locks of the listing below follow the slides.</p>
+<p><strong>What "atomic" means.</strong> The phrase "without interruption" is inexact. An interrupt can arrive between two instructions of a thread, and the kernel can switch threads there. An atomic operation is <em>indivisible with respect to the other threads</em>: no operation of another thread on the same location takes effect between its read and its write. The C11 draft defines the compare-and-exchange functions as follows: "Atomically, compares the value pointed to by <code>object</code> for equality with that in <code>expected</code>, and if true, replaces the value pointed to by <code>object</code> with <code>desired</code>, and if false, updates the value in <code>expected</code> with the value pointed to by <code>object</code>", and calls the operations "atomic read-modify-write operations" (N1570 §7.17.7.4 ¶2, p. 283). The function <code>atomic_flag_test_and_set</code> "atomically sets the value pointed to by <code>object</code> to true", again as an atomic read-modify-write operation (§7.17.8.1 ¶2, p. 285). The function <code>atomic_fetch_add</code> atomically replaces the value with the result of the addition and returns "the value pointed to by <code>object</code> immediately before the effects" (§7.17.7.5 ¶3–4, pp. 284–285). The standard also says that "all modifications to a particular atomic object M occur in some particular total order, called the modification order of M" (§5.1.2.4 ¶7, p. 18). This order is what lets one argue about locks.</p>
+<p><strong>Why the test-and-set lock excludes.</strong> Let the lock variable start false and be changed only by <code>test_and_set</code>, which sets it to true, and by the holder's store of false at the exit. All operations on it are ordered. A <code>test_and_set</code> returns false only if the variable was false just before it. After such a call the variable is true, and it stays true until a store of false. The only such store is the one the holder executes when it leaves the critical section. Consider two threads that both entered; each entered on a call that returned false. The variable was false before the second of the two calls, and after the first call it was true; so a store of false lies between them, which only the first thread can have executed, when it left. So the second thread entered after the first one left, and the critical sections do not overlap. The same argument holds for the compare-and-swap lock, where the call that changes 0 to 1 plays the role of the call that returns false. The argument gives exclusion only. When no thread is inside and the variable is false, the next call succeeds, so a free lock is taken. It does not give bounded waiting: nothing orders the threads that fail, and one thread can lose every time.</p>
+<p><strong>The locks on the machine.</strong> The listing implements the lecture's two spinlocks with C11 atomics, and next to them the <code>pthread</code> mutex, each around a plain <code>long</code> counter that nothing else protects. The test-and-set lock uses <code>atomic_flag_test_and_set_explicit</code> with acquire order to take the lock and <code>atomic_flag_clear_explicit</code> with release order to free it. The compare-and-swap lock uses <code>atomic_compare_exchange_strong_explicit</code>; on failure the function writes the old value into <code>expected</code>, so the loop resets it to 0. The release and acquire orders carry the second job of a lock from the section on mutual exclusion: the store of the release synchronizes with the exchange of the next acquisition that reads its value, so the counter written in one critical section happens before the counter read in the next (N1570 §7.17.3 ¶3–4, p. 275, and §5.1.2.4 ¶11, p. 18). With relaxed order the lock variable would still be atomic, but the standard would give no happens-before between the sections, and the accesses to the counter would form a data race. Four threads add 100 000 times each, and the program prints the total for each lock. The output is deterministic when the locks work.</p>
+<pre><code class="language-c" data-file="locks.c" data-build="gcc -O2 -pthread locks.c -o locks" data-run="./locks" data-check="exact">#include &lt;pthread.h&gt;
+#include &lt;stdatomic.h&gt;
+#include &lt;stdio.h&gt;
+
+#define THREADS 4
+#define PER_THREAD 100000L
+
+enum { MUTEX, TAS, CAS };
+static const char *name[] = {"pthread mutex", "test-and-set spinlock", "compare-and-swap spinlock"};
+
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static atomic_flag tas_lock = ATOMIC_FLAG_INIT;       /* clear = free, set = held */
+static _Atomic int cas_lock;                          /* 0 = free, 1 = held */
+static long count;                                    /* ordinary variable, protected by the lock */
+static int kind;
+
+static void acquire(void)
+{
+    if (kind == MUTEX) {
+        pthread_mutex_lock(&amp;mutex);
+    } else if (kind == TAS) {
+        while (atomic_flag_test_and_set_explicit(&amp;tas_lock, memory_order_acquire))
+            ;                                         /* returned true: held, look again */
+    } else {
+        int expected = 0;
+        while (!atomic_compare_exchange_strong_explicit(&amp;cas_lock, &amp;expected, 1,
+                   memory_order_acquire, memory_order_relaxed))
+            expected = 0;                             /* a failed exchange wrote the old value here */
+    }
+}
+
+static void release(void)
+{
+    if (kind == MUTEX) pthread_mutex_unlock(&amp;mutex);
+    else if (kind == TAS) atomic_flag_clear_explicit(&amp;tas_lock, memory_order_release);
+    else atomic_store_explicit(&amp;cas_lock, 0, memory_order_release);
+}
+
+static void *worker(void *arg)
+{
+    (void)arg;
+    for (long i = 0; i &lt; PER_THREAD; i++) {
+        acquire();
+        count = count + 1;                            /* critical section: load, add, store */
+        release();
+    }
+    return NULL;
+}
+
+int main(void)
+{
+    for (kind = MUTEX; kind &lt;= CAS; kind++) {
+        pthread_t t[THREADS];
+        count = 0;
+        for (int k = 0; k &lt; THREADS; k++) pthread_create(&amp;t[k], NULL, worker, NULL);
+        for (int k = 0; k &lt; THREADS; k++) pthread_join(t[k], NULL);
+        printf("%-26s %ld of %ld\n", name[kind], count, THREADS * PER_THREAD);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">pthread mutex              400000 of 400000
+test-and-set spinlock      400000 of 400000
+compare-and-swap spinlock  400000 of 400000</code></pre>
+<p>All three locks produce 400 000 of 400 000, so exclusion held in this run for each of them. A run proves nothing about the schedules it did not visit; the arguments above do. The critical section is the load, add and store of the lost-update program; only the lock calls around it are new.</p>
+<p><strong>Compare-and-swap builds any update.</strong> A lock is one use of compare-and-swap. The loop "read the old value, compute the new value, try to install it, and retry if the value changed" turns any function of one word into an atomic update. The standard has atomic addition for integers and none for <code>double</code> in this form, and the midpoint-rule sum for \(\pi\) of chapter 11 adds <code>double</code> terms. The listing below adds each term to a shared total with a compare-and-swap loop on the bit pattern of the <code>double</code>, and compares it with the strategy of the lecture's cache figure: each thread sums in a private variable and adds it once. The weak form of the function is used in the loop. The standard says a weak compare-and-exchange may fail spuriously even if the values are equal, so that it can map to "load-locked store-conditional machines" (N1570 §7.17.7.4 ¶4–5, p. 284). In a loop a spurious failure only causes one more iteration, and OpenMP 5.2 notes that a weak form can improve performance when a compare-and-swap is used in a loop (§15.8.3, p. 311, note on the <code>weak</code> clause). A thread whose attempt fails knows that another thread's store changed the word, if the function is the strong form. This is why such a loop is <em>lock-free</em>: a descheduled thread cannot keep the others from finishing, as a descheduled lock holder can. The sum is checked against \(\pi\) with a tolerance of \(10^{-9}\), not bit for bit, because floating-point addition is not associative and the order of the additions depends on the schedule (chapter 11 measured differences of 2 units in the last place for two distributions of one loop).</p>
+<pre><code class="language-c" data-file="cas_pi.c" data-build="gcc -O2 -pthread cas_pi.c -o cas_pi -lm" data-run="./cas_pi" data-check="exact">#include &lt;math.h&gt;
+#include &lt;pthread.h&gt;
+#include &lt;stdatomic.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+#define THREADS 4
+#define NUM_STEPS 1000000L
+
+static _Atomic uint64_t total;                 /* bit pattern of a double */
+static int private_sums;                       /* 0: one CAS update per term, 1: one per thread */
+
+/* x &lt;- x + v as a compare-and-swap loop: any update function can be built this way. */
+static void atomic_add_double(_Atomic uint64_t *x, double v)
+{
+    uint64_t old = atomic_load_explicit(x, memory_order_relaxed), desired;
+    do {
+        double d;
+        memcpy(&amp;d, &amp;old, sizeof d);
+        d += v;
+        memcpy(&amp;desired, &amp;d, sizeof desired);
+    } while (!atomic_compare_exchange_weak_explicit(x, &amp;old, desired,
+                 memory_order_relaxed, memory_order_relaxed));   /* on failure old is reloaded */
+}
+
+static void *worker(void *arg)
+{
+    long id = (long)arg;
+    double h = 1.0 / (double)NUM_STEPS, mine = 0.0;
+    for (long i = id; i &lt; NUM_STEPS; i += THREADS) {
+        double x = (i + 0.5) * h, term = h * 4.0 / (1.0 + x * x);
+        if (private_sums) mine += term;
+        else atomic_add_double(&amp;total, term);
+    }
+    if (private_sums) atomic_add_double(&amp;total, mine);
+    return NULL;
+}
+
+static double run(int priv)
+{
+    pthread_t t[THREADS];
+    double sum;
+    uint64_t bits = 0;
+    atomic_store(&amp;total, bits);                /* the bit pattern 0 is the double 0.0 */
+    private_sums = priv;
+    for (long k = 0; k &lt; THREADS; k++) pthread_create(&amp;t[k], NULL, worker, (void *)k);
+    for (int k = 0; k &lt; THREADS; k++) pthread_join(t[k], NULL);
+    bits = atomic_load(&amp;total);
+    memcpy(&amp;sum, &amp;bits, sizeof sum);
+    return sum;
+}
+
+int main(void)
+{
+    double a = run(0), b = run(1);
+    printf("one CAS update per term:    %.10f\n", a);
+    printf("one CAS update per thread:  %.10f\n", b);
+    printf("both within 1e-9 of pi:     %s, %s\n", fabs(a - M_PI) &lt; 1e-9 ? "yes" : "no",
+           fabs(b - M_PI) &lt; 1e-9 ? "yes" : "no");
+    return 0;
+}
+</code></pre>
+<pre><code class="output">one CAS update per term:    3.1415926536
+one CAS update per thread:  3.1415926536
+both within 1e-9 of pi:     yes, yes</code></pre>
+<p>Both strategies give 3.1415926536 and both are within \(10^{-9}\) of \(\pi\); the truncation error of the midpoint rule with \(10^{6}\) steps is \(h^2/12=8.3\times10^{-14}\) (chapter 11, equation 11.2). The first strategy performs \(10^{6}\) atomic updates under contention and the second only 4. The program does not time them.</p>
+<p><strong>The instructions.</strong> The session compiles four small functions to x86-64 assembly and prints the instructions without directives.</p>
+<pre><code class="language-c">#include &lt;stdatomic.h&gt;
+
+long fetch_add(_Atomic long *p, long v) { return atomic_fetch_add(p, v); }
+int  test_and_set(atomic_flag *f)       { return atomic_flag_test_and_set(f); }
+int  cas(_Atomic int *p, int *e, int d) { return atomic_compare_exchange_strong(p, e, d); }
+long plain_add(long *p, long v)         { *p += v; return *p; }
+</code></pre>
+<pre><code class="language-bash">$ gcc -O2 -S atomics.c -o atomics.s
+$ grep -v -E '^[[:space:]]*\.|^[0-9]+:' atomics.s
+fetch_add:
+        endbr64
+        movq    %rsi, %rax
+        lock xaddq      %rax, (%rdi)
+        ret
+test_and_set:
+        endbr64
+        movl    $1, %eax
+        xchgb   (%rdi), %al
+        movzbl  %al, %eax
+        ret
+cas:
+        endbr64
+        movl    (%rsi), %eax
+        lock cmpxchgl   %edx, (%rdi)
+        sete    %dl
+        je      .L5
+        movl    %eax, (%rsi)
+        movzbl  %dl, %eax
+        ret
+plain_add:
+        endbr64
+        movq    (%rdi), %rax
+        addq    %rsi, %rax
+        movq    %rax, (%rdi)
+        ret
+</code></pre>
+<p><code>atomic_fetch_add</code> compiles to <code>lock xaddq</code>, the exchange-and-add with the lock prefix. <code>atomic_flag_test_and_set</code> compiles to <code>xchgb</code> with a memory operand, which is implicitly locked on x86 (Sewell and others, 2010, §3). <code>atomic_compare_exchange_strong</code> compiles to <code>lock cmpxchgl</code>, followed by <code>sete</code>, and the failure path stores the old value to <code>*expected</code>. The ordinary function <code>plain_add</code>, for contrast, is a load (<code>movq</code>), an addition and a store: the instruction sequence of the lost update. In the model of Sewell and others, a locked instruction ends only when the store buffer of its thread is empty. This is how the same instructions serve as the fences of the previous section.</p>
+<p><strong>Order and waiting.</strong> The slide's statement is the property that the arguments above use: the atomic operations on one location are executed in one order, one after another. It does not say which of several waiting threads goes next, and a hardware queue that holds waiting threads in the order of their arrival does not exist for a spin loop. In a spin loop a thread that fails a <code>test_and_set</code> retries. Which retry succeeds after a release depends on which core obtains the cache line of the lock variable, and nothing records arrival order. This is why the lock above has no bounded waiting. A lock that orders its waiters needs a queue in software. Mellor-Crummey and Scott (1991) give one: each waiting thread appends a record to a list with one atomic swap and spins on a flag in its own record, and the releasing thread writes to the flag of the next waiter (their Figure 5, p. 30). In their abstract's words, the lock generates \(O(1)\) remote references per acquisition, independent of the number of processors that compete, and needs no hardware support beyond a swap-with-memory instruction. The MCS lock guarantees first-in first-out ordering of acquisitions when compare-and-swap is available (§2.4, p. 29); with swap alone the guarantee is lost, although the authors expect acquisitions to remain very nearly first-in first-out in practice (p. 30).</p>
+<p><strong>The cost of the atomic strategies.</strong> Table 8.2 of the previous section gives the thread sweep. The atomic fetch-and-add is the cheapest strategy of the table at every \(p\ge2\): 2.1 to 4.3 times the serial time, against 5.5 to 9.2 times for the mutex. On one thread, the table shows no difference between the fetch-and-add or the spinlock and the plain loop (8.4 ms for both, \(10^{6}\) updates): the locked instruction costs less than the 0.1 ms resolution of the table. A possible reason is that its latency overlaps the dependent multiplications of the work step; this chapter did not test it. The mutex costs 6.6 ms more on one thread. Contended, an atomic add costs 17 ns per update at \(p=2\) (34.0 ms for \(2\times10^{6}\)), 23 ns at \(p=4\), 36 ns at \(p=8\) and 31 ns at \(p=12\); the update serializes on the cache line that holds the counter, which moves from core to core. The test-and-set spinlock is faster than the mutex at \(p=2\) (2.8 against 5.5 times), about equal at \(p=4\) (5.8 and 6.3 times) and falls away from \(p=8\): 17.5 times at 8 threads and 21.7 times at 12, against 9.2 and 8.7 for the mutex. A spinning thread keeps its processor busy until it obtains the lock. With 12 threads on 12 logical processors that are shared with the Windows host and with other jobs, a thread that holds the lock can be descheduled while 11 threads spin. That description fits the numbers and the section on mutual exclusion states the hazard; this chapter did not test it, for example with a count of the context switches of the lock holder. In the listing's sample at \(p=4\), the four strategies are mutex 203.7 ms, test-and-set 218.5 ms, compare-and-swap 240.3 ms and fetch-and-add 102.7 ms.</p>
+<p><strong>The costs, in the model's terms.</strong> The two bounds (8.3) and (8.4) treat the lock and the atomic instruction alike: both have a critical section whose time \(c\) is the update of one shared word. The measurement gives the atomic instruction a smaller effective \(c\). From the batch-size session, the time per shared update beyond the 8.4 ms of private work was 27.7 ns at \(K=1\), 39.3 ns at \(K=10\) and 47.5 ns at \(K=100\) for the fetch-and-add (from 119.0, 24.1 and 10.3 ms). The corresponding values for the mutex are in the section on mutex locks. For both strategies the cost per update is higher at \(K=10\) and \(K=100\) than at \(K=1\): the update costs more when it is rare. The fetch-and-add stays below the mutex at every \(K\) of the sweep from 1 to 100, by a factor of 1.7 at \(K=1\) and 2.1 to 3.1 at \(K=10\) and \(K=100\).</p>
+
+
+<h2 id="barriers">Barriers <a class="timestamp" href="https://www.youtube.com/watch?v=ulprOSZPAu0&amp;t=1853s">W2L6 30:53</a></h2>
+<p>The lecture introduces the barrier with a level crossing on a railway line. Vehicles arrive at the closed gate at different times and wait; when the gate opens, all of them proceed together. The gate is a synchronization method for all the arriving vehicles. For threads the lecture states: all threads must wait together at some point; the program is divided into phases by a barrier; all threads of a phase reach the barrier before any of them goes further; so the program phases before and after the barrier cannot be concurrent. It names three uses: enforcing dependencies, maintaining consistency across shared data, and implementing checkpointing, in which the state of a parallel program is saved so that, after a hardware failure, the program restarts from the last checkpoint and not from the beginning.</p>
+<p><strong>A definition that a proof can use.</strong> Consider a barrier used by \(p\) threads, repeatedly. Let \(B_k(i)\) be the event in which thread \(i\) arrives at the barrier for the \(k\)-th time, and \(D_k(i)\) the event in which it leaves it for the \(k\)-th time. The barrier property is: for all \(k\) and all threads \(i\) and \(j\), \(B_k(j)\) happens before \(D_k(i)\). Every thread arrives in round \(k\) before any thread leaves in round \(k\). The property gives the lecture's three uses at once. Suppose thread \(j\) writes a value before its \(k\)-th arrival and thread \(i\) reads it after its \(k\)-th departure. Program order and the barrier property chain the write to the read by happens-before, so the read sees the write and no data race exists (a dependency, and consistency of shared data). The OpenMP 5.2 specification states the same for the <code>barrier</code> construct: all threads of the team must enter the barrier region and complete the explicit tasks bound to it "before any of the threads continue execution beyond the barrier" (§15.3.1, p. 301). A restriction of the construct gives the rule that makes barriers dangerous: each barrier region must be encountered by all threads of the team or by none (p. 302). The POSIX function <code>pthread_barrier_wait</code> blocks the caller until the required number of threads have called it, returns the constant <code>PTHREAD_BARRIER_SERIAL_THREAD</code> to one unspecified thread and zero to the others, and resets the barrier for reuse (POSIX Issue 7, <code>pthread_barrier_wait</code>); it also synchronizes memory (§4.12).</p>
+<p><strong>Implementing a barrier.</strong> The simplest barrier keeps a counter of the threads that have not arrived. Each arriving thread decrements it atomically and then waits until it is released, and the last one to arrive releases the others. If the same variables are used again for the next barrier, a fast thread can reach the next barrier while a slow thread has not yet left the previous one, and the counter can be disturbed. Mellor-Crummey and Scott (1991, §3.1, pp. 33–34) describe this flaw of the obvious formulation, which needs two spinning episodes, and the sense-reversing barrier that removes one of them (their Figure 8, p. 34). Each thread keeps a private Boolean <code>local_sense</code>. A thread flips its <code>local_sense</code> on arrival. It then atomically decrements <code>count</code>. If the result was 1, the thread is the last: it resets <code>count</code> to \(p\) and then writes its <code>local_sense</code> to the shared <code>sense</code>. Any other thread spins until <code>sense</code> equals its <code>local_sense</code>.</p>
+<p>The correctness argument is short. In round \(k\), every thread flips to the same value \(s_k\), and the shared <code>sense</code> holds \(s_{k-1}\) until the last arrival writes \(s_k\). So no thread of round \(k\) leaves before the last arrival. The last arrival resets <code>count</code> before it writes <code>sense</code>. A released thread that at once enters round \(k+1\) flips to \(s_{k+1}=s_{k-1}\) and decrements a count that is already reset. It also cannot leave early, because <code>sense</code> equals \(s_k\), not \(s_{k+1}\), until the last arrival of round \(k+1\) writes it. The listing implements this barrier with C11 atomics, next to <code>pthread_barrier_wait</code>. A waiting thread yields the processor after 2000 spins, so that the barrier still progresses when there are more threads than free processors. The program has three modes. The default mode is the check: \(p\) threads run 20 000 phases of two steps. In step 1 thread \(i\) writes the round number \(r\) to its own slot, then all threads reach a barrier; in step 2 each thread reads all \(p\) slots and counts the slots that do not hold \(r\); then all reach a second barrier. The second barrier is needed. Without it a fast thread could write \(r+1\) to its slot while a slow thread still reads round \(r\); the reading and the later writing of one slot are another conflict that the barrier must order. The output of the default mode is exact: the number of wrong reads for each barrier. The other two modes are used in the sessions below.</p>
+<pre><code class="language-c" data-file="barrier.c" data-build="gcc -O2 -pthread barrier.c -o barrier" data-run="./barrier check 4 20000" data-check="exact">#define _GNU_SOURCE
+#include &lt;pthread.h&gt;
+#include &lt;sched.h&gt;
+#include &lt;stdalign.h&gt;
+#include &lt;stdatomic.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;time.h&gt;
+
+#define MAXT 16
+
+static int nthreads, use_pthread, use_barrier = 1;
+static long phases;
+static pthread_barrier_t pb;
+
+/* Centralized sense-reversing barrier (Mellor-Crummey and Scott 1991, Figure 8). */
+static alignas(64) _Atomic int count;
+static alignas(64) _Atomic int sense;
+
+static void barrier_wait(int *local_sense)
+{
+    if (use_pthread) { pthread_barrier_wait(&amp;pb); return; }
+    *local_sense = !*local_sense;                         /* each thread toggles its own sense */
+    if (atomic_fetch_sub(&amp;count, 1) == 1) {               /* the last thread to arrive */
+        atomic_store_explicit(&amp;count, nthreads, memory_order_relaxed);
+        atomic_store(&amp;sense, *local_sense);               /* releases every waiting thread */
+    } else {
+        for (int spins = 0; atomic_load(&amp;sense) != *local_sense; spins++)
+            if (spins &gt; 2000) sched_yield();
+    }
+}
+
+static alignas(64) _Atomic long slot[MAXT * 8];           /* slot of thread i: slot[i * 8] */
+static alignas(64) _Atomic long violations;
+
+static void *worker(void *arg)
+{
+    int id = (int)(long)arg, local_sense = 0;
+    long bad = 0;
+    for (long r = 1; r &lt;= phases; r++) {
+        atomic_store_explicit(&amp;slot[id * 8], r, memory_order_relaxed);   /* phase 1: write own slot */
+        if (use_barrier) barrier_wait(&amp;local_sense);
+        for (int k = 0; k &lt; nthreads; k++)                               /* phase 2: read all slots */
+            if (atomic_load_explicit(&amp;slot[k * 8], memory_order_relaxed) != r) bad++;
+        if (use_barrier) barrier_wait(&amp;local_sense);                     /* nobody writes round r+1 early */
+    }
+    atomic_fetch_add(&amp;violations, bad);
+    return NULL;
+}
+
+static double run(void)
+{
+    pthread_t t[MAXT];
+    struct timespec a, b;
+    atomic_store(&amp;count, nthreads); atomic_store(&amp;sense, 0); atomic_store(&amp;violations, 0);
+    memset((void *)slot, 0, sizeof slot);
+    pthread_barrier_init(&amp;pb, NULL, nthreads);
+    clock_gettime(CLOCK_MONOTONIC, &amp;a);
+    for (long k = 0; k &lt; nthreads; k++) pthread_create(&amp;t[k], NULL, worker, (void *)k);
+    for (int k = 0; k &lt; nthreads; k++) pthread_join(t[k], NULL);
+    clock_gettime(CLOCK_MONOTONIC, &amp;b);
+    pthread_barrier_destroy(&amp;pb);
+    return (b.tv_sec - a.tv_sec) + 1e-9 * (b.tv_nsec - a.tv_nsec);
+}
+
+int main(int argc, char **argv)
+{
+    const char *mode = argc &gt; 1 ? argv[1] : "check";
+    nthreads = argc &gt; 2 ? atoi(argv[2]) : 4;
+    phases = argc &gt; 3 ? atol(argv[3]) : 20000;
+    if (!strcmp(mode, "check")) {                    /* exact output: no timings */
+        for (use_pthread = 1; use_pthread &gt;= 0; use_pthread--) {
+            run();
+            printf("%-26s %d threads, %ld phases, wrong reads: %ld\n",
+                   use_pthread ? "pthread_barrier_wait" : "sense-reversing barrier",
+                   nthreads, phases, (long)atomic_load(&amp;violations));
+        }
+    } else if (!strcmp(mode, "nobarrier")) {         /* negative control */
+        use_barrier = 0;
+        double dt = run();
+        printf("no barrier: %d threads, %ld phases, wrong reads: %ld (%.0f ms)\n",
+               nthreads, phases, (long)atomic_load(&amp;violations), dt * 1e3);
+    } else {                                         /* time per phase, two barriers each */
+        for (use_pthread = 1; use_pthread &gt;= 0; use_pthread--) {
+            double dt = run();
+            printf("%-26s %d threads: %7.0f ns per barrier\n",
+                   use_pthread ? "pthread_barrier_wait" : "sense-reversing barrier",
+                   nthreads, dt / (2.0 * phases) * 1e9);
+        }
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">pthread_barrier_wait       4 threads, 20000 phases, wrong reads: 0
+sense-reversing barrier    4 threads, 20000 phases, wrong reads: 0</code></pre>
+<p>Both barriers give 0 wrong reads in \(4\times4\times20\,000=320\,000\) reads. The check is a test and not a proof, and the argument above is the proof for the sense-reversing barrier.</p>
+<p>The two other modes are a negative control and a timing. The control removes both barriers. The timing runs 100 000 phases and prints the time per barrier, with two barriers per phase.</p>
+<pre><code class="language-bash">$ gcc -O2 -pthread barrier.c -o barrier
+$ ./barrier nobarrier 4 20000
+no barrier: 4 threads, 20000 phases, wrong reads: 239994 (1 ms)
+$ for p in 2 4 8; do ./barrier bench $p 100000; done
+pthread_barrier_wait       2 threads:   26049 ns per barrier
+sense-reversing barrier    2 threads:     207 ns per barrier
+pthread_barrier_wait       4 threads:   59788 ns per barrier
+sense-reversing barrier    4 threads:     271 ns per barrier
+pthread_barrier_wait       8 threads:  110962 ns per barrier
+sense-reversing barrier    8 threads:     770 ns per barrier
+</code></pre>
+<p>Without barriers, 239 994 of 320 000 reads were wrong, 75.0 %: a thread usually finds only its own slot up to date. The timing differs by two orders of magnitude. The sense-reversing barrier took 207, 271 and 770 ns per barrier for 2, 4 and 8 threads. <code>pthread_barrier_wait</code> took 26.0, 59.8 and 111.0 µs, which is 126, 221 and 144 times as long. Earlier sessions with the same program gave 17.3 to 26.0 µs, 47.8 to 59.8 µs and 100.5 to 113.0 µs for the pthread barrier, and 98 to 207 ns, 234 to 317 ns and 486 to 893 ns for the sense-reversing barrier. A cost of tens of microseconds per barrier is of the order of the time to wake a sleeping thread through the kernel. The program does not measure that time, and this chapter did not inspect the implementation of the C library's barrier. The comparison is not a verdict for spinning. The sense-reversing barrier keeps every waiting thread's processor at full load while it waits, and its cost per barrier at 12 threads on 12 logical processors, or at more threads than processors, was not measured. A barrier is worth its cost when the work of a phase is large against it. If a phase takes \(t_i\) on thread \(i\), the phase lasts \(\max_i t_i + t_{\text{barrier}}\), and the efficiency of the phase is
+</p>
+\[
+E_{\text{phase}}=\frac{\sum_{i=1}^{p} t_i}{p\,\bigl(\max_i t_i+t_{\text{barrier}}\bigr)}, \tag{8.5}
+\]
+<p>so the barrier costs the load imbalance \(\max_i t_i-\overline{t}\) and its own time. For example, with \(p=4\), equal phases of 100 µs and the measured barriers, the efficiency is at most \(100/(100+59.8)=63\ \%\) with the pthread barrier and \(100/(100+0.27)=99.7\ \%\) with the sense-reversing barrier; the phase length is assumed, not measured.</p>
+<p><strong>Barriers in the book's problem.</strong> In the Jacobi iteration of the book each sweep computes <code>unew</code> from the values of <code>u</code> that the previous sweep wrote, including the cells at the borders between the blocks of different threads. A barrier between two sweeps enforces this dependency. The implicit barrier at the end of an OpenMP parallel region (OpenMP 5.2, p. 224) does so for programs that start a new region for each sweep. Chapters 12 and 16 develop the forms of this dependency for threads and for message passing.</p>
+<p><strong>Checkpointing.</strong> The lecture's third use needs a qualification. A barrier gives a point at which no thread is in the middle of a phase, so the shared state at that point is consistent and can be saved. This works for threads of one process. For processes that exchange messages, a state is consistent if it does not record a message as received that is not recorded as sent, and a barrier makes the state consistent only if no message is in flight across it. Chandy and Lamport (1985) present an algorithm by which a process in a distributed system determines a global state "during a computation", and name checkpointing as a use (abstract). Their algorithm is "to be superimposed on the underlying computation: it must run concurrently with, but not alter, this underlying computation" (§1, p. 64). A barrier is therefore a sufficient way to reach a consistent state, not a necessary one, and it costs the idle time of (8.5).</p>
+
+
+<h2 id="deadlock">When synchronization fails: deadlock</h2>
+<p>The lecture's summary presents the synchronization methods as the remedy for the side effects of concurrency. The lecture's material ends with the remedies; it does not treat how the remedy itself can fail. A set of threads is <em>deadlocked</em> when each thread of the set waits for an event that only another thread of the set can cause, so that none of them ever proceeds. For locks the event is the release of a lock that another thread of the set holds. Four conditions must hold together for such a deadlock to arise: the resource is held exclusively (<em>mutual exclusion</em>); a thread holds one resource while it waits for another (<em>hold and wait</em>); a resource cannot be taken away from its holder (<em>no preemption</em>); and the threads form a cycle in which each waits for a resource held by the next (<em>circular wait</em>). The conditions are named after Coffman, Elphick and Shoshani (1971, <em>ACM Computing Surveys</em> 3(2), pp. 67–78). The article could not be opened for this chapter, and the attribution rests on its bibliographic record and on the Wikipedia article on deadlock, which states that the four conditions are known as the Coffman conditions from their first description in that article. Removing one condition prevents the deadlock. A lock cannot do without the first, and the other three are the ones a program can change.</p>
+<p><strong>A deadlock on demand.</strong> A deadlock hangs the program, which makes it a poor demonstration. The program below makes the deadlock observable and its output deterministic. Two mutexes <code>m0</code> and <code>m1</code> protect two resources. In the first experiment, thread \(i\) locks <code>m[i]</code> first and then wants <code>m[1-i]</code>, the opposite order for the two threads. A barrier makes both threads hold their first lock before either asks for its second. The second request uses <code>pthread_mutex_timedlock</code> with a limit of 200 ms, so that a thread that cannot get its second lock gives up and reports it. A second barrier keeps both threads from releasing anything until both have tried, so both attempts fail in every run. In the second experiment both threads lock <code>m0</code> first and then <code>m1</code>. The last lines test a single thread that locks an error-checking mutex twice. For a mutex of the normal type the specification says that relocking by the owner deadlocks (POSIX Issue 7, table of <code>pthread_mutex_lock</code>); the error-checking type fails with <code>[EDEADLK]</code>, which the ERRORS section of the same page defines as "the mutex type is <code>PTHREAD_MUTEX_ERRORCHECK</code> and the current thread already owns the mutex". The program prints the result.</p>
+<pre><code class="language-c" data-file="deadlock.c" data-build="gcc -O2 -pthread deadlock.c -o deadlock" data-run="./deadlock" data-check="exact">#define _GNU_SOURCE
+#include &lt;errno.h&gt;
+#include &lt;pthread.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;time.h&gt;
+
+static pthread_mutex_t m[2] = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER};
+static pthread_barrier_t both_hold_first, both_tried;
+static int got_second[2], ordered;
+
+static void *worker(void *arg)
+{
+    int i = (int)(long)arg;
+    int first = ordered ? 0 : i;               /* ordered: every thread locks m0 before m1 */
+    int second = ordered ? 1 : 1 - i;          /* unordered: thread i locks m[i], then m[1-i] */
+    pthread_mutex_lock(&amp;m[first]);
+    if (!ordered) pthread_barrier_wait(&amp;both_hold_first);   /* each thread now holds its first lock */
+    struct timespec limit;
+    clock_gettime(CLOCK_REALTIME, &amp;limit);
+    limit.tv_nsec += 200 * 1000 * 1000;                     /* wait at most 200 ms */
+    if (limit.tv_nsec &gt;= 1000000000) { limit.tv_sec++; limit.tv_nsec -= 1000000000; }
+    got_second[i] = pthread_mutex_timedlock(&amp;m[second], &amp;limit) == 0;
+    if (!ordered) pthread_barrier_wait(&amp;both_tried);        /* nobody unlocks before both have tried */
+    if (got_second[i]) pthread_mutex_unlock(&amp;m[second]);
+    pthread_mutex_unlock(&amp;m[first]);
+    return NULL;
+}
+
+int main(void)
+{
+    for (ordered = 0; ordered &lt; 2; ordered++) {
+        pthread_t t[2];
+        pthread_barrier_init(&amp;both_hold_first, NULL, 2);
+        pthread_barrier_init(&amp;both_tried, NULL, 2);
+        for (long k = 0; k &lt; 2; k++) pthread_create(&amp;t[k], NULL, worker, (void *)k);
+        for (int k = 0; k &lt; 2; k++) pthread_join(t[k], NULL);
+        printf("%s lock order:\n", ordered ? "common" : "opposite");
+        for (int k = 0; k &lt; 2; k++)
+            printf("  thread %d holds m%d and %s m%d\n", k, ordered ? 0 : k,
+                   got_second[k] ? "acquired" : "timed out on", ordered ? 1 : 1 - k);
+        pthread_barrier_destroy(&amp;both_hold_first);
+        pthread_barrier_destroy(&amp;both_tried);
+    }
+
+    pthread_mutexattr_t attr;                  /* one thread that locks the same mutex twice */
+    pthread_mutex_t self;
+    pthread_mutexattr_init(&amp;attr);
+    pthread_mutexattr_settype(&amp;attr, PTHREAD_MUTEX_ERRORCHECK);
+    pthread_mutex_init(&amp;self, &amp;attr);
+    pthread_mutex_lock(&amp;self);
+    int err = pthread_mutex_lock(&amp;self);
+    printf("second lock of an error-checking mutex by its owner: %s\n",
+           err == EDEADLK ? "EDEADLK" : "other");
+    return 0;
+}
+</code></pre>
+<pre><code class="output">opposite lock order:
+  thread 0 holds m0 and timed out on m1
+  thread 1 holds m1 and timed out on m0
+common lock order:
+  thread 0 holds m0 and acquired m1
+  thread 1 holds m0 and acquired m1
+second lock of an error-checking mutex by its owner: EDEADLK</code></pre>
+<p>With opposite lock orders, both threads hold their first lock and time out on the second: all four conditions hold, and the cycle is thread 0 waiting for <code>m1</code> held by thread 1 and thread 1 waiting for <code>m0</code> held by thread 0. With a common order both threads succeed. The error-checking mutex reports <code>EDEADLK</code> where the normal mutex would hang.</p>
+<p><strong>Why a common lock order works.</strong> Number the locks and require every thread to acquire locks in increasing order. Suppose a cycle of waiting threads \(T_1,\dots,T_k\) existed, where \(T_i\) waits for a lock \(L_i\) that \(T_{i+1}\) holds (indices mod \(k\)). Thread \(T_{i+1}\) acquired \(L_i\) before it requested \(L_{i+1}\), so the order requires \(L_i\lt L_{i+1}\). Around the cycle this gives \(L_1\lt L_2\lt\dots\lt L_k\lt L_1\), which is impossible. A common order removes circular wait. The price is that every code path must know the global order, including paths that reach a second lock through a call. A barrier can deadlock in a different way: if one thread of a team never reaches a barrier that all the others wait at, the others wait forever, which is why OpenMP states that every barrier region must be encountered by all threads of a team or by none (OpenMP 5.2, p. 302). Two MPI processes that each start a blocking send of a large message before they post a receive can form the same cycle; chapter 14 treats point-to-point messages.</p>
+
+
+<h2 id="frameworks">The primitives in OpenMP, MPI and CUDA <a class="timestamp" href="https://www.youtube.com/watch?v=ulprOSZPAu0&amp;t=2098s">W2L6 34:58</a></h2>
+<p>The lecture ends with a summary. Concurrency is an essential aspect of parallel programming; it introduces side effects that can lead to incorrect results; and the lecture states that "higher performance can never be at the cost of accuracy", so the side effects must be mitigated. Synchronization methods overcome race conditions, locks implement critical sections, atomics implement mutual exclusion, and barriers keep threads synchronous. The last bullet says that parallel programming frameworks such as OpenMP, MPI and CUDA provide primitives based on these basic techniques. The summary slide writes "critical conditions" where the lecture means critical sections.</p>
+<p><strong>"Accuracy" needs a definition.</strong> A parallel program that adds floating-point terms in a different order than the serial program does not give the same bits (chapter 11 found a difference of 2 units in the last place between two distributions of one loop). The program <code>cas_pi.c</code> gives the same digits within \(10^{-9}\) for two orders of addition. The statement is therefore true with a definition: a parallel result is acceptable when it equals the serial result within a stated tolerance that accounts for rounding, and unacceptable when the difference comes from a lost update or a race. The tolerance is a decision of the programmer and the lecture does not give one.</p>
+<p><strong>Where the primitives are.</strong> Table 8.3 maps the chapter's primitives to the constructs that the C library and OpenMP offer. The OpenMP column cites the specification, version 5.2.</p>
+<div class="table-wrap"><table>
+<caption>Table 8.3. The chapter's primitives and their counterparts. Page numbers are printed page numbers of the OpenMP 5.2 specification.</caption>
+<thead><tr><th scope="col">Primitive</th><th scope="col">pthreads and C11</th><th scope="col">OpenMP 5.2</th></tr></thead>
+<tbody>
+<tr><td>Mutual exclusion of a region</td><td><code>pthread_mutex_lock</code>, <code>pthread_mutex_unlock</code></td><td><code>critical</code>: the region "is executed as if only a single thread at a time among all threads in the contention group executes the region" (§15.2, p. 300); all unnamed <code>critical</code> constructs share one name, so they exclude each other</td></tr>
+<tr><td>Atomic update of one location</td><td><code>atomic_fetch_add</code>, <code>atomic_compare_exchange_strong</code>, <code>atomic_flag_test_and_set</code></td><td><code>atomic</code>: "enforce exclusive access with respect to other atomic regions that access the same storage location"; the memory order is relaxed unless a clause says otherwise (§15.8.4, pp. 311–312)</td></tr>
+<tr><td>Barrier</td><td><code>pthread_barrier_wait</code></td><td><code>barrier</code>: no thread continues before all threads of the team have entered (§15.3.1, p. 301); an implicit barrier ends a parallel region (p. 224)</td></tr>
+<tr><td>Private contributions combined once</td><td>a private variable and one atomic add or one critical section, as in <code>counter.c</code> and <code>cas_pi.c</code></td><td>the <code>reduction</code> clause (chapter 12); Tian and Shih name it as the example of the "hold approach"</td></tr>
+</tbody></table></div>
+<p>The listing runs the three OpenMP forms on the lost-update program with four threads and 200 000 increments each. The <code>atomic</code> directive protects one <code>+=</code> on a shared variable, the <code>critical</code> directive protects the same statement with a lock, and the <code>reduction(+ : reduced_sum)</code> clause on the parallel region gives each thread a private copy of <code>reduced_sum</code> that the runtime combines at the end of the region. A <code>single</code> construct records the team size. The output is exact: all three totals must be 800 000.</p>
+<pre><code class="language-c" data-file="omp_counter.c" data-build="gcc -O2 -fopenmp omp_counter.c -o omp_counter" data-run="./omp_counter" data-check="exact">#include &lt;omp.h&gt;
+#include &lt;stdio.h&gt;
+
+#define N 200000L
+
+int main(void)
+{
+    long atomic_sum = 0, critical_sum = 0, reduced_sum = 0;
+    int team = 0;
+
+    #pragma omp parallel num_threads(4) reduction(+ : reduced_sum)
+    {
+        #pragma omp single
+        team = omp_get_num_threads();
+        for (long i = 0; i &lt; N; i++) {
+            #pragma omp atomic
+            atomic_sum += 1;                  /* one atomic read-modify-write of a shared variable */
+            #pragma omp critical
+            critical_sum += 1;                /* one lock-protected update of a shared variable */
+            reduced_sum += 1;                 /* private copy, combined once at the end of the region */
+        }
+    }
+    printf("team of %d threads, %ld increments each\n", team, N);
+    printf("atomic    %ld\ncritical  %ld\nreduction %ld\n", atomic_sum, critical_sum, reduced_sum);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">team of 4 threads, 200000 increments each
+atomic    800000
+critical  800000
+reduction 800000</code></pre>
+<p>All three forms give 800 000. The listing does not time them. The reduction does no synchronization inside the loop, so it corresponds to the strategy of the last row of the lead's measurement, and the two others to the fetch-and-add and the mutex rows. Chapter 12 measures them and treats the OpenMP constructs in depth.</p>
+<p><strong>MPI and CUDA.</strong> MPI processes have separate address spaces, so they have no shared variable to race on. They synchronize by sending and receiving messages and by collective operations, and the cycle of the previous section can reappear with blocking sends (chapters 14 to 16). A CUDA thread block synchronizes its threads with a barrier and updates shared counters with atomic functions, and thousands of threads running one update make the serialization bound (8.3) a limit that program designs avoid by combining partial results first (chapters 19 to 22). This chapter did not open the MPI or CUDA documentation, and these two statements are pointers to those chapters and not results.</p>
+
+
+<h2 id="limits">What the model establishes and what it does not</h2>
+<p>Table 8.4 lists the statements of the lecture that this chapter tested, with the status that the tests gave them.</p>
+<div class="table-wrap"><table>
+<caption>Table 8.4. Statements of the lecture and their status in this chapter.</caption>
+<thead><tr><th scope="col">Statement of the lecture</th><th scope="col">Status</th><th scope="col">Evidence in this chapter</th></tr></thead>
+<tbody>
+<tr><td>Concurrency is the execution of several tasks on one core by time slicing; several cores run threads in parallel.</td><td>Refined</td><td>One model of schedules covers both; two events are concurrent when neither happens before the other (sections on the model and on concurrency).</td></tr>
+<tr><td>A race occurs when two threads access the same variable at the same time.</td><td>Refined</td><td>Simultaneity is not needed: schedule B of Table 8.1 has no overlap. The conditions are a conflict and no order (N1570 §5.1.2.4 ¶4, ¶25).</td></tr>
+<tr><td>Races make the result indeterminate and inconsistent.</td><td>Confirmed and quantified</td><td>Theorem 8.1; <code>counter.c</code> kept 1 740 739 of 4 000 000 updates; six runs gave 0.90 to 1.87 million; the C standard says undefined behavior.</td></tr>
+<tr><td>One schedule of the two-thread example gives 2, another gives 1.</td><td>Confirmed</td><td>2 of 6 schedules are correct (<code>interleave.py</code>).</td></tr>
+<tr><td>Synchronization may lower performance, and the results stay consistent.</td><td>Results correct if the locks are used correctly; the loss can be large</td><td>Mutex run 6.4 times the serial time at \(p=4\), 203.7 ms against 31.6 ms; batch size 1000 gives 22 times less. A wrong lock order deadlocks (<code>deadlock.c</code>).</td></tr>
+<tr><td>Minimize synchronization by restructuring the code or the algorithm.</td><td>Confirmed, with a bound</td><td>Mutex time 198.3 ms at \(K=1\) and 8.9 ms at \(K=1000\), within 6 % of bound (8.4).</td></tr>
+<tr><td>The figure's panels are CPU 1 and CPU 2; the variable <code>x</code> must be in the shared cache.</td><td>Corrected</td><td>The panels are two update policies for one pair of threads (Tian and Shih, 2012); a shared variable lives in memory and its cache lines are kept coherent.</td></tr>
+<tr><td>Contention-only threads cause no issue.</td><td>True for correctness</td><td>They still compete for cache capacity (Tian and Shih, 2012).</td></tr>
+<tr><td>A critical section must not be interrupted by any other thread.</td><td>Refined</td><td>Exclusion, not non-preemption: the holder may be descheduled; others may not enter a critical section for the same resource (section on exclusion).</td></tr>
+<tr><td>Threads that only read need no protection.</td><td>Confirmed</td><td>Two reads do not conflict; POSIX §4.12 allows simultaneous reads.</td></tr>
+<tr><td>A mutex is a 0/1 variable, set to 0 to acquire.</td><td>Refined</td><td>The test and the set must be one indivisible step: check-then-set fails in 6 steps (<code>lock_model.py</code>). A POSIX mutex has an owner; Drepper's design has three states.</td></tr>
+<tr><td>Atomics are instructions that execute without interruption.</td><td>Refined</td><td>Indivisible with respect to the other threads' operations on the location; N1570 §7.17.7.4.</td></tr>
+<tr><td>The test-and-set and compare-and-swap locks of the slides.</td><td>Slide code correct</td><td>The loops spin <code>while (test_and_set(&amp;lock))</code> and while the compare-and-swap result is not 0; <code>locks.c</code> prints 400 000 of 400 000 for both.</td></tr>
+<tr><td>The hardware ensures that no other thread accesses the location until the atomic operation is complete.</td><td>Confirmed; it gives an order, not a fair order</td><td>One order per object (N1570 §5.1.2.4 ¶7); a spin loop records no arrival order and has no bounded waiting; queue locks are software (Mellor-Crummey and Scott, 1991).</td></tr>
+<tr><td>Atomics need cooperation from the hardware.</td><td>Confirmed, and the reason includes ordering</td><td>Peterson's algorithm fails under TSO: store-buffering test 10.1 % of rounds, Peterson 2.0 % of entries overlapped; a fence or a locked instruction removes both.</td></tr>
+<tr><td>The phases before and after a barrier cannot be concurrent.</td><td>Confirmed</td><td>Barrier property; <code>barrier.c</code>: 0 wrong reads with a barrier, 239 994 of 320 000 without.</td></tr>
+<tr><td>A barrier is useful for checkpointing.</td><td>Sufficient, not necessary</td><td>Chandy and Lamport (1985) record a global state without stopping the computation.</td></tr>
+<tr><td>Higher performance can never be at the cost of accuracy.</td><td>True with a definition of accuracy</td><td>Parallel sums differ in rounding; the two orders of <code>cas_pi.c</code> agree within \(10^{-9}\); a lost update is an error, a rounding difference is not.</td></tr>
+<tr><td>OpenMP, MPI and CUDA provide primitives based on these techniques.</td><td>Confirmed for OpenMP</td><td><code>critical</code>, <code>atomic</code>, <code>barrier</code> and <code>reduction</code> (Table 8.3, <code>omp_counter.c</code>); MPI and CUDA not opened.</td></tr>
+</tbody></table></div>
+<p>The model of schedules, conflicts and synchronization establishes four things. A program with a shared counter and no synchronization is correct for exactly those schedules in which the increments do not overlap, and almost no schedule has that property (Theorem 8.1 and Corollary 8.2). A lock gives mutual exclusion if its acquisition is an atomic read-modify-write, by the argument on the order of operations on the lock variable, and it must also order memory, by release and acquire. The cost of a lock has a floor, bound (8.3), and a batch of \(K\) updates divides it by \(K\), bound (8.4), which the sweep confirmed from \(K=1000\) on. A barrier has a precise property that separates phases and makes the data of one phase visible in the next.</p>
+<p>The model leaves out most of what concurrent programming needs. It assumes sequential consistency except in the section on Peterson's algorithm, and that section tests one algorithm for two threads on one processor model. It says nothing about weaker memory models such as those of ARM or POWER processors, which this machine cannot test. It proves exclusion for the spinlocks and not progress or fairness: a thread can lose every race for a test-and-set lock, the spinlock collapses at 12 threads on this machine for a reason that this chapter did not test, and priority inversion and lock convoys are not treated. It does not treat reader–writer locks, condition variables, counting semaphores, lock-free data structures (which need an argument against the ABA problem), transactional memory or the synchronization of GPU threads. Chapters 12 and 13 treat the OpenMP forms and memory model, chapters 14 to 16 message passing, and chapters 19 to 22 GPU threads.</p>
+<p>The quantitative results have their own limits. Bounds (8.3) and (8.4) are necessary conditions, and the measured times are 7.5 to 7.7 times the bound at \(K=1\) and 1.05 to 1.06 times at \(K\ge1000\); the time per shared update is not constant (section on mutex locks), and the model has no term for the cost of handing a lock over. Three explanations were offered and not tested: the cause of the higher cost per update at \(K=10\) and 100 (sleeping and waking through the kernel, or cache-line transfers), the collapse of the test-and-set spinlock from 8 threads on (descheduling of the lock holder), and the dependence of the plateau at 8 and 12 threads on the processor's layout. All timings come from one machine, one compiler and one session, with other jobs present and with no control of thread placement; each timing is the minimum of 3 repetitions, and the totals of the racing strategies vary from run to run. The Peterson and store-buffering results hold for this processor family under WSL 2 and say nothing about the memory model of other processors.</p>
+
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> Let the time of a batched run be modelled as \(T_p\approx T_{\text{work}}+(pn/K)\,c_{\text{eff}}\), where \(T_{\text{work}}=nw\) is the private work time of one thread, \(pn/K\) is the number of shared updates in all, and \(c_{\text{eff}}\) is the extra time per shared update. Derive the smallest batch size \(K^{*}\) at which the shared updates add at most a fraction \(\varepsilon\) to \(T_{\text{work}}\). Evaluate it for \(p=4\) and \(p=12\) with \(\varepsilon=0.05\), \(w=8.4\) ns and \(c_{\text{eff}}=100\) ns (the mutex values of the batch-size sweep at \(K=10\) and \(K=100\)), and compare the prediction for \(p=4\), \(K=1000\) with the measured 8.9 ms.</p>
+<details><summary>Solution</summary>
+<p>The overhead fraction is \(\bigl[(pn/K)c_{\text{eff}}\bigr]/(nw)=pc_{\text{eff}}/(Kw)\). Requiring \(pc_{\text{eff}}/(Kw)\le\varepsilon\) gives \(K^{*}=\lceil pc_{\text{eff}}/(\varepsilon w)\rceil\). For \(p=4\): \(4\times100/(0.05\times8.4)=952.4\), so \(K^{*}=953\). For \(p=12\): \(12\times100/(0.05\times8.4)=2857.1\), so \(K^{*}=2858\); the batch must grow in proportion to \(p\), because the number of shared updates per unit of work grows with the number of threads. For \(p=4\) and \(K=1000\), the model gives \(T_4\approx 10^{6}\times8.4\ \mathrm{ns}+4000\times100\ \mathrm{ns}=8.4+0.4=8.8\) ms, an overhead of 4.8 %. The measured mutex time is 8.9 ms, 6 % above the 8.4 ms of the private count. The model is 0.1 ms (1.1 %) below the measured time, and it is a fit, not a derivation: \(c_{\text{eff}}\) is the measured quantity, 97.5 and 121.8 ns at \(K=100\) and 10, and the sweep cannot resolve it at \(K=1000\), where the extra time of 0.5 ms is of the size of the variation between samples (\(\pm0.3\) ms in the session).</p>
+</details>
+<p><strong>Exercise 2 (compute).</strong> (a) For \(p=3\) threads with \(n=2\) increments each, compute the number of schedules, the number of schedules with the correct result, and the share of correct schedules. (b) For \(p=2\) and \(n=5\), compute the same three numbers, and compare the share with the approximation \(\sqrt2\,4^{-n}\). (c) Write a schedule for \(p=2\), \(n=3\) whose final value is 2.</p>
+<details><summary>Solution</summary>
+<p>(a) The number of schedules is \((2pn)!/((2n)!)^p=12!/(4!)^3=479\,001\,600/13\,824=34\,650\), the value in the listing. The correct schedules number \((pn)!/(n!)^p=6!/(2!)^3=720/8=90\). The share is \(90/34\,650=0.26\ \%\). (b) The number of schedules is \(\binom{20}{10}=184\,756\) and the number of correct ones is \(\binom{10}{5}=252\), a share of \(0.136\ \%\). The approximation gives \(\sqrt2/1024=0.138\ \%\), 1.2 % above the exact share. (c) Write \(L\) and \(S\) for the load and the store of one increment. Thread 1 does \(L\) (reads 0). Thread 2 does two complete increments, so \(x=2\). Thread 1 does \(S\), so \(x=1\). Thread 2 does \(L\), the load of its third increment, and reads 1. Thread 1 does its two remaining increments completely, so \(x=1+2=3\). Thread 2 does \(S\) and stores \(1+1=2\). The final value is 2. This is the construction of the section on the lost update for \(n=3\).</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> A student claims: "If every access to the shared variable is atomic, the program has no race condition." Use the program of this chapter to show that the statement is false, and say what is true about such a program.</p>
+<details><summary>Solution</summary>
+<p>The row <code>load then store (atomic)</code> of <code>counter.c</code> declares the counter <code>_Atomic</code> and performs the update as an atomic load followed by an atomic store. Every access is atomic. Take two threads with one increment each, and the schedule in which both load 0 before either stores: both store 1, and the final value is 1, not 2 (schedule B of Table 8.1). The program therefore has a race condition: the result depends on the schedule. The sample run kept 1 956 317 of 4 000 000 updates. What is true is the weaker statement of the C standard: if all conflicting accesses are atomic, the program has no data race (N1570 §5.1.2.4 ¶25: a data race needs two conflicting actions "at least one of which is not atomic"), so its behavior is defined, but its result can still depend on the schedule. The atomicity of a load and of a store separately does not make the pair indivisible. A single atomic read-modify-write, such as <code>atomic_fetch_add</code>, does, and the row <code>atomic fetch-and-add</code> keeps all updates.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> A reader proposes to place the fence in Peterson's algorithm between the two stores, after <code>flag[i] = 1</code> and before <code>turn = j</code>, in place of the position after <code>turn = j</code>. The exhaustive search of the TSO model, run on this variant, finds a violation of mutual exclusion in 16 steps: thread 0 stores <code>flag0</code>, the buffer reaches memory, the fence runs, thread 0 stores <code>turn = 1</code> (buffered), loads <code>flag1</code> and reads 0, and enters; thread 1 stores <code>flag1</code>, flushes, fences, stores <code>turn = 0</code>, which reaches memory, and then thread 0's buffered <code>turn = 1</code> reaches memory; thread 1 loads <code>flag0</code>, reads 1, loads <code>turn</code>, reads 1, and enters. Identify the sentence of the proof of mutual exclusion that fails, and explain why a fence in the other position keeps it true.</p>
+<details><summary>Solution</summary>
+<p>The failing sentence is "After \(w_1\), <code>turn</code> is 0 until some thread writes it again, and neither thread writes it again before the critical section". It treats a write as taking effect when it is issued. In the trace, thread 0 issues <code>turn = 1</code> (step 4) before thread 1 issues <code>turn = 0</code> (step 10), but the write of thread 0 reaches memory later (step 12) and overwrites the other. So \(w_0\) is the last write to reach memory, and thread 1's test reads <code>turn == 1</code> and lets it pass. The decisive load by thread 0, of <code>flag1</code> at step 5, ran while thread 0's own store of <code>turn</code> was still in its buffer; the fence at step 3 had emptied the buffer of the earlier store only. A fence placed after <code>turn = j</code> forces both stores of the thread to reach memory before it loads the other flag. Then, for any thread that reads the other flag, its two writes are visible to the other thread before it reads; that restores the sentence of the proof. The search confirms this position for one entry per thread: safe in all 274 states.</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> Choose a synchronization strategy for each of three programs: (a) and (b) on 12 threads, (c) with four worker threads, and justify the choice with numbers of this chapter. (a) The midpoint-rule loop for \(\pi\) with \(10^{9}\) iterations of about 1 ns each, which sums into one <code>double</code>. (b) A histogram of 256 bins of 8 bytes, updated by \(10^{8}\) samples, each sample costing about 20 ns to generate. (c) Four worker threads that take jobs of about 1 ms each from one shared queue.</p>
+<details><summary>Solution</summary>
+<p>(a) Choose private partial sums and one combining step per thread. An atomic add per iteration costs 31 ns at \(p=12\) in the thread sweep (374.9 ms for \(12\times10^{6}\) updates), so \(10^{9}\) updates would take at least 31 s, against about \(10^{9}\times1\ \mathrm{ns}/12=0.08\) s of work. With \(w=1\) ns and \(c=31\) ns, bound (8.3) gives \(S_p\le(w+c)/c=1.03\): twelve threads would run at the speed of one. With private sums, there are 12 shared updates in all, and \(K=n=8.3\times10^{7}\). The result differs from the serial one in rounding only, within the tolerance of \(\pi\) at \(10^{-9}\) that <code>cas_pi.c</code> checks. (b) Choose one private histogram per thread and merge them at the end. The private copies take \(12\times256\times8=24\,576\) bytes, and the merge is \(12\times256=3072\) additions. An atomic add per sample would put 256 words on 32 cache lines (8 words per 64-byte line) and let neighbouring bins share lines; the cost per update would be of the order of the 31 ns measured for one shared word, against 20 ns of work per sample, so the atomic version could not use the twelve threads well. That last statement is an estimate and was not measured. (c) Choose a mutex around the queue. The bound (8.3) needs \(w\ge(p-1)c\) for the lock not to limit the time. Here \(w\approx1\) ms and \(c\) is below 0.15 µs (the mutex cost 47 to 122 ns per update in the sweeps), so \(w\) is more than \(2\times10^{3}\) times larger than \(3c\) (1 ms against at most 0.45 µs); the lock is idle almost all the time, and the simplest correct primitive costs nothing measurable.</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement).</strong> Add two spinlocks to <code>counter.c</code>: a test-and-test-and-set lock, which spins on an ordinary atomic load of the lock word and attempts the exchange only when the load shows the lock free, and the same lock with the x86 <code>pause</code> hint in the spin loop. Predict, before running, how each compares with the plain test-and-set lock at \(p=4\), 8 and 12. Then run it and compare.</p>
+<details><summary>Solution</summary>
+<p>The change is one new <code>case</code> in <code>flush</code>, with the lock word <code>_Atomic int lock_word</code>:</p>
+<pre><code class="language-c">case TTAS:                                    /* add TTAS_PAUSE to the enum for the second variant */
+    for (;;) {
+        while (atomic_load_explicit(&amp;lock_word, memory_order_relaxed))
+            __builtin_ia32_pause();               /* omit this line for the plain variant */
+        if (!atomic_exchange_explicit(&amp;lock_word, 1, memory_order_acquire)) break;
+    }
+    plain_count = plain_count + v;
+    atomic_store_explicit(&amp;lock_word, 0, memory_order_release);
+    break;
+</code></pre>
+<p>The prediction from the usual argument is that spinning on a load lets all waiting threads share the line in the cache and reduces the traffic of failed exchanges, so the test-and-test-and-set lock should beat the test-and-set lock at 8 and 12 threads, with <code>pause</code> adding a further gain. The run, one session with other jobs present, gave these times for \(10^{6}\) iterations per thread: at \(p=4\), mutex 192.9 ms, test-and-set 265.1, test-and-test-and-set 390.7, with <code>pause</code> 345.8; at \(p=8\), 605.0, 955.8, 882.7 and 875.7; at \(p=12\), 826.1, 2067.1, 1785.8 and 1540.8. The prediction held at \(p=8\) and 12 for the plain test-and-test-and-set lock, by 8 % and 14 %, and failed at \(p=4\), where it was 47 % slower. The <code>pause</code> hint was faster than the plain variant by 11 % at \(p=4\), 0.8 % at 8 and 14 % at 12; against test-and-set at 12 threads it was 25 % faster. The three spinlocks of this exercise were slower than the mutex at 12 threads, by a factor of 1.9 to 2.5. So the textbook improvement of the spinlock is small and uneven on this machine, and the mutex remains the better choice at 12 threads. The session does not show why. One run per configuration cannot give the spread, and a repeated measurement is the first step of a fuller answer.</p>
+</details>
+
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li>Recording: <a href="https://www.youtube.com/watch?v=ulprOSZPAu0">W2L6, Concurrency and Synchronization in Parallel Programming: Techniques and Frameworks</a> (slides: concurrency and interleaving; data race and its two-schedule example; synchronization with lock and key; overhead and the shared-cache figure; shared variable and threads; critical section and lock; mutex; atomics with test-and-set and compare-and-swap; barriers; summary), NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay, 2025. The slides credit "William Stallings, OS Design Principles, 7th Ed." for the interleaving figure and Silberschatz, <em>Operating System Concepts</em> (9th edition) for the atomic-instruction code; neither book was opened.</li>
+<li>ISO/IEC 9899:2011 committee draft <a href="https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf">N1570</a> (12 April 2011). Printed page = PDF page minus 18. §5.1.2.4 ¶4, p. 17: conflicting evaluations; ¶7, p. 18: modification order; ¶11, p. 18: release and acquire synchronize; ¶16 and ¶18, p. 19: happens before; ¶13 NOTE 6, p. 18: all operations on a mutex occur in one total order; ¶25, p. 20: definition of a data race and its undefined behavior. §7.17.3 ¶3–4, p. 275: release and acquire operations. §7.17.7.4, pp. 283–284: compare-and-exchange, weak form may fail spuriously. §7.17.7.5, pp. 284–285: atomic fetch-and-add. §7.17.8.1, p. 285: <code>atomic_flag_test_and_set</code>.</li>
+<li>The Open Group, <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap04.html">POSIX Base Definitions, Issue 7 (2018 edition), §4.12 Memory Synchronization</a>: the list of functions that synchronize memory, and simultaneous reads; <a href="https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutex_lock.html"><code>pthread_mutex_lock</code></a>: ownership, the relock and unlock table, <code>EDEADLK</code>; <a href="https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_barrier_wait.html"><code>pthread_barrier_wait</code></a>: blocking until the required number of threads arrive, <code>PTHREAD_BARRIER_SERIAL_THREAD</code>.</li>
+<li>OpenMP Architecture Review Board, <a href="https://www.openmp.org/wp-content/uploads/OpenMP-API-Specification-5-2.pdf">OpenMP Application Programming Interface, Version 5.2 (November 2021)</a>. Printed page = PDF page minus 20. §15.2, pp. 299–300: <code>critical</code>; §15.3.1, pp. 301–302: <code>barrier</code> and its restrictions; §15.8.4, pp. 311–312: <code>atomic</code>, with the note on the <code>weak</code> clause in §15.8.3, p. 311; p. 224: implicit barrier at the end of a parallel region.</li>
+<li>L. Lamport, <a href="https://lamport.azurewebsites.net/pubs/multi.pdf">"How to make a multiprocessor computer that correctly executes multiprocess programs"</a>, IEEE Transactions on Computers C-28(9) (1979) 690–691. The definition of sequential consistency and a two-process mutual-exclusion protocol that fails when a memory module reorders requests.</li>
+<li>E. W. Dijkstra, <a href="https://www.cs.utexas.edu/~EWD/ewd01xx/EWD123.PDF">"Cooperating sequential processes"</a>, EWD123 (1965), a scanned typescript. §2.1, typescript pp. 11–18: the mutual-exclusion problem, its conditions, the rejected trial solutions and Dekker's solution. Pages after 18 were not read.</li>
+<li>G. L. Peterson, "Myths about the mutual exclusion problem", Information Processing Letters 12(3) (1981) 115–116, <a href="https://doi.org/10.1016/0020-0190(81)90106-X">doi:10.1016/0020-0190(81)90106-X</a>. Bibliographic record only; the paper is closed and was not read. The algorithm in this chapter is the textbook form.</li>
+<li>P. Sewell, S. Sarkar, S. Owens, F. Zappa Nardelli, M. O. Myreen, <a href="https://www.cl.cam.ac.uk/~pes20/weakmemory/cacm.pdf">"x86-TSO: a rigorous and usable programmer's model for x86 multiprocessors"</a>, Communications of the ACM 53(7) (2010) 89–97. §1: the store-buffering (SB) test; §3: locked instructions and <code>XCHG</code>; §3.1: the abstract machine with FIFO store buffers, <code>MFENCE</code> and the rules used by <code>lock_model.py</code>.</li>
+<li>U. Drepper, <a href="https://akkadia.org/drepper/futex.pdf">"Futexes are tricky"</a>, version 1.6, 5 November 2011. §§ "Mutex, Take 2" and "Take 3", pp. 6–8: a mutex with three states and its compare-and-swap, exchange and futex calls.</li>
+<li>J. M. Mellor-Crummey, M. L. Scott, <a href="https://www.cs.rochester.edu/u/scott/papers/1991_TOCS_synch.pdf">"Algorithms for scalable synchronization on shared-memory multiprocessors"</a>, ACM Transactions on Computer Systems 9(1) (1991) 21–65. Abstract; §2.4, p. 29: the MCS lock guarantees FIFO ordering with compare-and-swap; Figure 5 and p. 30: the MCS queue lock and its swap-only variant; §3.1 and Figure 8, pp. 33–34: the sense-reversing centralized barrier. Page numbers follow from the position in the PDF.</li>
+<li>K. M. Chandy, L. Lamport, <a href="https://lamport.azurewebsites.net/pubs/chandy.pdf">"Distributed snapshots: determining global states of distributed systems"</a>, ACM Transactions on Computer Systems 3(1) (1985) 63–75. Abstract: a global state determined during a computation, usable for checkpointing; §1: the algorithm runs concurrently with the computation and does not alter it.</li>
+<li>T. Tian, C.-P. Shih, "Software techniques for shared-cache multi-core systems", Intel Developer Zone, 8 March 2012, read from the <a href="http://web.archive.org/web/20190722103002/https://software.intel.com/en-us/articles/software-techniques-for-shared-cache-multi-core-systems/">Internet Archive copy of 22 July 2019</a> (the Intel address returned an access error to a script). The shared-L2 dual-core system, the "hold approach" with the OpenMP reduction example, contention-only threads and false sharing.</li>
+<li>E. G. Coffman, M. J. Elphick, A. Shoshani, "System deadlocks", ACM Computing Surveys 3(2) (1971) 67–78, <a href="https://doi.org/10.1145/356586.356588">doi:10.1145/356586.356588</a>. Bibliographic record only; the article could not be opened (access blocked). The attribution of the four conditions to it is taken from the Wikipedia article <a href="https://en.wikipedia.org/wiki/Deadlock_(computer_science)">Deadlock (computer science)</a>, opened 2026-10-26, which names them the Coffman conditions.</li>
+<li>Intel, <a href="https://www.intel.com/content/www/us/en/products/sku/132222/intel-core-i512450h-processor-12m-cache-up-to-4-40-ghz/specifications.html">Intel Core i5-12450H processor specifications (ARK)</a>, retrieved 2026-10-26, as in chapter 11: 4 performance cores with 2 threads each and 4 efficient cores with 1 thread each, 12 threads.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-07-hierarchical-memory-and-scalable-architectures.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-09-parallel-computing-numerical-models-and-cost.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

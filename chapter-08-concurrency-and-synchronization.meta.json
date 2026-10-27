@@ -1,0 +1,372 @@
+{
+  "chapter": 8,
+  "title": "Concurrency and synchronization: races, locks, atomic instructions and barriers",
+  "status": "revised after review round 2",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "ulprOSZPAu0",
+      "label": "W2L6",
+      "playlist_index": 14,
+      "duration_seconds": 2307
+    }
+  ],
+  "frames_viewed": {
+    "ulprOSZPAu0": [
+      "f0001",
+      "f0005",
+      "f0007",
+      "f0010",
+      "f0012",
+      "f0015",
+      "f0017",
+      "f0019",
+      "f0023",
+      "f0028",
+      "f0030",
+      "f0032",
+      "f0034",
+      "f0036",
+      "f0038",
+      "f0041",
+      "f0045",
+      "f0047",
+      "f0049",
+      "f0052",
+      "f0054",
+      "f0056",
+      "f0058",
+      "f0060",
+      "f0061",
+      "f0062",
+      "f0064",
+      "f0067",
+      "f0070",
+      "f0072",
+      "f0074"
+    ]
+  },
+  "source_uncertainties": [
+    "Peterson (1981) could not be opened (closed access). The algorithm is the textbook form; lock_model.py tests that form. Proofs of progress and bounded waiting are not given.",
+    "Coffman, Elphick and Shoshani (1971) could not be opened (access blocked). The attribution of the four conditions rests on the bibliographic record (Crossref) and on the Wikipedia article Deadlock (computer science), opened 2026-10-26.",
+    "Dijkstra EWD123 is a scanned typescript without a text layer; typescript pages 10 to 18 were read as page images. Later pages (semaphores) were not read.",
+    "Stallings (Operating Systems) and Silberschatz (Operating System Concepts, 9th ed.) are credited on the slides and were not opened; the slide code of test_and_set and compare_and_swap was read from frames f0052 to f0060; f0061 and f0062 (atomics, semaphore title) were also viewed. A statement about threads waiting in a queue appears only in the speech and not on a slide, so the chapter does not discuss it as a lecture claim.",
+    "The Intel article of Tian and Shih returned HTTP 403 to a script; it was read from the Internet Archive snapshot of 2019-07-22. The figure on the slide (f0030, f0032) is the figure the article calls Figure 3.",
+    "The chapter does not attribute the verbal explanation of the test-and-set and compare-and-swap loops to the lecturer: the machine transcript of that passage does not match the slide code, and machine transcription may have misheard it. The chapter follows the slide code.",
+    "N1570 is a committee draft, not the published standard; printed page = PDF page - 18. OpenMP 5.2 printed page = PDF page - 20; MCS page numbers (30, 33-34) and the Chandy-Lamport page (64) are derived from the position in the PDF. POSIX pages are the online Issue 7 (2018) pages.",
+    "MPI and CUDA documentation were not opened; the statements about them in the section on frameworks are pointers to other chapters.",
+    "Intel ARK was not re-opened for this chapter; the hybrid-core facts are taken from the citation in chapter 11.",
+    "Explanations given as hypotheses and not tested: (a) the higher cost per shared update of the mutex at batch sizes 10 and 100 than at 1 (sleeping and waking through the kernel, or cache-line transfers; strace -c was not run); (b) the collapse of the test-and-set spinlock from 8 threads on (descheduling of the lock holder); (c) the plateau of lock throughput at 8 and 12 threads (processor layout); (d) why four racing threads are no faster than one thread; (e) why an uncontended atomic RMW adds no measurable time in the loop (overlap with the multiply chain).",
+    "All timings come from one machine (hybrid i5-12450H, WSL 2), one compiler (gcc 13.3) and one session, with other jobs present and no control of thread placement; each timing is the minimum of 3 repetitions in one run. Ranges quoted as earlier runs (six totals of the racing counter, store-buffering rates of 7.4 to 14.1 %, Peterson overlaps of 1.7 to 2.4 % of entries, barrier ranges) come from earlier sessions of the same or earlier versions of the programs and are not reproduced by a listing. The test-and-test-and-set measurements of exercise 6 are one run of a modified counter.c that is not a listing.",
+    "An earlier draft of the store-buffering harness used a run-time memory order and observed no violation; gcc compiles a non-constant memory order as seq_cst (xchg). The listings use a constant order through macros.",
+    "ThreadSanitizer needed 'setarch x86_64 -R' under the WSL 2 kernel (it aborted with 'unexpected memory mapping' otherwise). The tsan_demo.c fragment is not a code_lab listing because the tool exits with a nonzero code on a reported race.",
+    "Timestamps are section anchors from local speech-recognition segment times and locate topic changes to within a few seconds."
+  ],
+  "lecture_corrections": [
+    "Concurrency defined as several tasks on one core by time slicing: refined to the schedule model (two events are concurrent when neither happens before the other).",
+    "A race occurs when two threads access a variable at the same time: refined; a conflict without order suffices, and the slide's second schedule has no overlap.",
+    "Shared-cache figure: the handwritten annotation reads panels (A) and (B) as CPU 1 and CPU 2 and the slide puts the variable in the shared cache; in the source article they are two update policies for one pair of threads, and a shared variable lives in memory (frames f0030, f0032, f0034).",
+    "Critical section 'should not be interrupted by any other thread' (slide f0041): refined to exclusion, not non-preemption.",
+    "Mutex as a 0/1 variable set to 0 to acquire (slide f0049): needs the test and the change as one indivisible step; check-then-set fails in 6 steps in the model.",
+    "Atomics as instructions that execute without any interruption (slide f0052): refined to indivisibility with respect to other threads.",
+    "Barrier for checkpointing (slide f0067): sufficient, not necessary (Chandy and Lamport 1985).",
+    "'Higher performance can never be at the cost of accuracy' (slide f0072): true with a definition of accuracy that allows rounding differences."
+  ],
+  "sections": [
+    {
+      "section": "The objects of the chapter and the running case",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "The shared counter updated by threads (slides).",
+      "research_extension": "C11 N1570 5.1.2.4 (conflict, happens before, data race); Lamport 1979 (sequential consistency); Intel ARK (machine).",
+      "teaching_construction": "Formal model of events, schedules, conflicts, data race versus race condition; symbols; machine statement.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "Concurrency, interleaving and overlap",
+      "video_id": "ulprOSZPAu0",
+      "start": 68.0,
+      "end": 279.0,
+      "lecture_material": "Time slicing, interleaving on one processor, interleaving and overlap on several; Stallings figure.",
+      "research_extension": "Chapter 11 definitions of concurrent and parallel.",
+      "teaching_construction": "Schedule count (8.1); one-core experiment.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "The lost update: a data race and a race condition",
+      "video_id": "ulprOSZPAu0",
+      "start": 279.0,
+      "end": 579.0,
+      "lecture_material": "Race definition; indeterminate and inconsistent results; two-schedule example.",
+      "research_extension": "C11 5.1.2.4 p4, p25; ThreadSanitizer run.",
+      "teaching_construction": "Theorem 8.1 and Corollary 8.2; exhaustive search (interleave.py); counter.c; batch-size sweep.",
+      "evidence_class": "theorem"
+    },
+    {
+      "section": "Mutual exclusion and the critical section",
+      "video_id": "ulprOSZPAu0",
+      "start": 579.0,
+      "end": 1370.0,
+      "lecture_material": "Lock and key; overhead of waiting; shared-cache figure; contention-only and data-sharing threads; critical section and lock.",
+      "research_extension": "Dijkstra EWD123 2.1 (requirements, rejected trials); POSIX 4.12; N1570 NOTE 6; Tian and Shih 2012.",
+      "teaching_construction": "Four requirements; serialization bound (8.3); batching bound (8.4).",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Mutex locks",
+      "video_id": "ulprOSZPAu0",
+      "start": 1370.0,
+      "end": 1509.0,
+      "lecture_material": "Mutex, pthread example, internal binary variable.",
+      "research_extension": "POSIX pthread_mutex_lock table; Drepper futex mutex.",
+      "teaching_construction": "Thread sweep and batch-size sweep measurements; test of the bounds.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Locks from loads and stores: Peterson's algorithm and the store buffer",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Atomics need hardware cooperation (remark).",
+      "research_extension": "Peterson 1981 (record only); Sewell et al. 2010 (x86-TSO); Lamport 1979; EWD123.",
+      "teaching_construction": "Proof under sequential consistency; explicit-state search over SC and TSO (lock_model.py); hardware tests sb.c and peterson.c; assembly of the fence.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "Atomic instructions",
+      "video_id": "ulprOSZPAu0",
+      "start": 1509.0,
+      "end": 1853.0,
+      "lecture_material": "Test-and-set, compare-and-swap, locks from them, hardware cooperation, queue.",
+      "research_extension": "N1570 7.17; Sewell et al. 3; MCS 1991; OpenMP 5.2 weak clause note.",
+      "teaching_construction": "Exclusion proof of the test-and-set lock; locks.c; cas_pi.c; assembly session; cost analysis.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Barriers",
+      "video_id": "ulprOSZPAu0",
+      "start": 1853.0,
+      "end": 2098.0,
+      "lecture_material": "Level-crossing analogy; phases; dependencies, consistency, checkpointing.",
+      "research_extension": "OpenMP 5.2 15.3.1; POSIX pthread_barrier_wait; MCS 1991 3.1 Fig. 8; Chandy and Lamport 1985.",
+      "teaching_construction": "Barrier property; sense-reversing barrier argument; barrier.c; efficiency formula (8.5).",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "When synchronization fails: deadlock",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Not covered by the recording.",
+      "research_extension": "Coffman et al. 1971 (record only); POSIX relock table and EDEADLK; OpenMP barrier restriction.",
+      "teaching_construction": "Deterministic deadlock demonstration; lock-order proof.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "The primitives in OpenMP, MPI and CUDA",
+      "video_id": "ulprOSZPAu0",
+      "start": 2098.0,
+      "end": 2307.0,
+      "lecture_material": "Summary; frameworks provide primitives.",
+      "research_extension": "OpenMP 5.2 15.2, 15.3.1, 15.8.4.",
+      "teaching_construction": "Table 8.3; omp_counter.c.",
+      "evidence_class": "product specification"
+    }
+  ],
+  "references": [
+    {
+      "title": "ISO/IEC 9899:2011 committee draft N1570",
+      "url": "https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf",
+      "supports": "5.1.2.4 p4 p.17 conflict; p7 p.18 modification order; p11 p.18 release/acquire (synchronizes with); p16 and p18 p.19 happens before; p13 NOTE 6 p.18 mutex order; p25 p.20 data race; 7.17.3 p.275; 7.17.7.4 pp.283-284; 7.17.7.5 pp.284-285; 7.17.8.1 p.285",
+      "page_checked": "read the cited paragraphs (printed page = PDF page - 18)"
+    },
+    {
+      "title": "POSIX Base Definitions Issue 7 (2018), 4.12",
+      "url": "https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap04.html",
+      "supports": "list of memory-synchronizing functions; simultaneous reads allowed",
+      "page_checked": "4.12"
+    },
+    {
+      "title": "POSIX pthread_mutex_lock",
+      "url": "https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutex_lock.html",
+      "supports": "ownership; relock and unlock table; EDEADLK for error-checking relock",
+      "page_checked": "DESCRIPTION and ERRORS"
+    },
+    {
+      "title": "POSIX pthread_barrier_wait",
+      "url": "https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_barrier_wait.html",
+      "supports": "blocks until the required threads arrive; PTHREAD_BARRIER_SERIAL_THREAD; reset",
+      "page_checked": "DESCRIPTION"
+    },
+    {
+      "title": "OpenMP API 5.2 (November 2021)",
+      "url": "https://www.openmp.org/wp-content/uploads/OpenMP-API-Specification-5-2.pdf",
+      "supports": "critical pp.299-300; barrier pp.301-302; atomic pp.311-312; weak clause note 15.8.3 p.311; implicit barrier of a parallel region p.224",
+      "page_checked": "read the cited pages (printed page = PDF page - 20)"
+    },
+    {
+      "title": "Lamport, How to make a multiprocessor computer that correctly executes multiprocess programs (1979)",
+      "url": "https://lamport.azurewebsites.net/pubs/multi.pdf",
+      "supports": "definition of sequential consistency; two-process mutual exclusion protocol failing under reordering",
+      "page_checked": "pp. 690-691, full"
+    },
+    {
+      "title": "Dijkstra, Cooperating sequential processes, EWD123",
+      "url": "https://www.cs.utexas.edu/~EWD/ewd01xx/EWD123.PDF",
+      "supports": "mutual-exclusion problem and conditions; rejected trials; Dekker solution",
+      "page_checked": "typescript pp. 10-18 (scan, read as page images)"
+    },
+    {
+      "title": "Peterson, Myths about the mutual exclusion problem (1981)",
+      "url": "https://doi.org/10.1016/0020-0190(81)90106-X",
+      "supports": "bibliographic record only",
+      "page_checked": "not opened"
+    },
+    {
+      "title": "Sewell et al., x86-TSO (CACM 53(7), 2010)",
+      "url": "https://www.cl.cam.ac.uk/~pes20/weakmemory/cacm.pdf",
+      "supports": "SB test; store buffers, MFENCE, locked instructions, XCHG implicitly locked",
+      "page_checked": "sections 1, 3, 3.1 (author's final version)"
+    },
+    {
+      "title": "Drepper, Futexes are tricky (v1.6, 2011)",
+      "url": "https://akkadia.org/drepper/futex.pdf",
+      "supports": "three-state futex mutex with cmpxchg, xchg and futex calls",
+      "page_checked": "pp. 6-8"
+    },
+    {
+      "title": "Mellor-Crummey and Scott, Algorithms for scalable synchronization (TOCS 9(1), 1991)",
+      "url": "https://www.cs.rochester.edu/u/scott/papers/1991_TOCS_synch.pdf",
+      "supports": "abstract; 2.4 p.29 the MCS lock guarantees FIFO with compare-and-swap; Fig. 5 and p.30 swap-only variant very nearly FIFO in practice; centralized and sense-reversing barrier 3.1, Fig. 8",
+      "page_checked": "pp. 29, 30, 33-34 (derived from PDF position)"
+    },
+    {
+      "title": "Chandy and Lamport, Distributed snapshots (TOCS 3(1), 1985)",
+      "url": "https://lamport.azurewebsites.net/pubs/chandy.pdf",
+      "supports": "global state during a computation, checkpointing use; the algorithm does not alter the computation",
+      "page_checked": "abstract and 1 (p. 64)"
+    },
+    {
+      "title": "Tian and Shih, Software techniques for shared-cache multi-core systems (Intel, 2012)",
+      "url": "http://web.archive.org/web/20190722103002/https://software.intel.com/en-us/articles/software-techniques-for-shared-cache-multi-core-systems/",
+      "supports": "hold approach with OpenMP reduction; contention-only threads; false sharing",
+      "page_checked": "whole article, archived copy of 2019-07-22"
+    },
+    {
+      "title": "Coffman, Elphick, Shoshani, System deadlocks (1971)",
+      "url": "https://doi.org/10.1145/356586.356588",
+      "supports": "four deadlock conditions (attribution only)",
+      "page_checked": "not opened; attribution confirmed from Wikipedia Deadlock (computer science), opened 2026-10-26"
+    },
+    {
+      "title": "Intel Core i5-12450H specifications (ARK)",
+      "url": "https://www.intel.com/content/www/us/en/products/sku/132222/intel-core-i512450h-processor-12m-cache-up-to-4-40-ghz/specifications.html",
+      "supports": "4 P-cores x 2 threads, 4 E-cores x 1 thread, 12 threads",
+      "page_checked": "taken from chapter 11's citation (retrieved 2026-10-26); not re-opened"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "p",
+      "first_section": "model",
+      "definition": "number of threads"
+    },
+    {
+      "symbol": "n",
+      "first_section": "model",
+      "definition": "iterations (increments) per thread"
+    },
+    {
+      "symbol": "x",
+      "first_section": "model",
+      "definition": "the shared counter"
+    },
+    {
+      "symbol": "w",
+      "first_section": "model",
+      "definition": "private work per iteration, outside any critical section"
+    },
+    {
+      "symbol": "c",
+      "first_section": "exclusion",
+      "definition": "time of one critical section including lock acquire and release"
+    },
+    {
+      "symbol": "K",
+      "first_section": "model",
+      "definition": "batch size: iterations between shared updates"
+    },
+    {
+      "symbol": "\\varphi",
+      "first_section": "exclusion",
+      "definition": "critical fraction c/(w+c)"
+    },
+    {
+      "symbol": "T_1, T_p, S_p",
+      "first_section": "model",
+      "definition": "wall-clock times on one and on p threads; speedup T_1/T_p"
+    },
+    {
+      "symbol": "c_eff",
+      "first_section": "exercises",
+      "definition": "measured extra time per shared update, (T - T_work)/(pn/K)"
+    },
+    {
+      "symbol": "B_k(i), D_k(i)",
+      "first_section": "barriers",
+      "definition": "arrival and departure events of thread i in round k"
+    },
+    {
+      "symbol": "t_i, t_barrier, E_phase",
+      "first_section": "barriers",
+      "definition": "phase time of thread i; barrier time; efficiency of a phase"
+    }
+  ],
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT WITH FIXES",
+      "report": "ch08-r1.md",
+      "fixed": [
+        "B1",
+        "B2",
+        "M1",
+        "M2",
+        "m1",
+        "m2",
+        "m3",
+        "m4",
+        "m5",
+        "m6",
+        "m7",
+        "m8",
+        "m9",
+        "m10",
+        "m11",
+        "m14",
+        "m13 (partly)",
+        "m12 (stated, not changed)"
+      ],
+      "not_fixed": [
+        "m13: one-core and ThreadSanitizer sessions kept (they support claims of the race section); only repeated per-update costs were removed"
+      ]
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "report": "ch08-r2.md",
+      "fixed": [
+        "n1",
+        "n2"
+      ],
+      "not_fixed": []
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python code_lab.py --chapter 08",
+    "listings": 10,
+    "all_passed": true
+  }
+}
