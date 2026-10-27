@@ -61,7 +61,8 @@ named `Ubuntu`). They need gcc with OpenMP support; the Python programs of
 chapters 1, 4 and 9 also need NumPy. Browser checks require Python Playwright
 and an installed supported browser.
 
-All measurements in the chapters come from one laptop: an Intel Core i5-12450H
+All runs and timings made for these chapters come from one laptop (the lecture
+screens analysed in the text come from the lecturer's machines): an Intel Core i5-12450H
 (4 performance cores with 2 hardware threads each and 4 efficiency cores, 12
 logical CPUs), an NVIDIA GeForce RTX 3050 Laptop GPU, WSL 2 Ubuntu 24.04 and
 gcc 13.3. Timings, bandwidths and speedups differ on other machines. Listings
