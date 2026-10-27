@@ -1,0 +1,1290 @@
+{
+  "course": "High Performance Scientific Computing",
+  "provider": "NPTEL, IIT Bombay",
+  "instructor": "Prof. Shivasubramanian Gopalakrishnan and course team",
+  "term": "January 2025",
+  "slug": ".",
+  "playlist": "PLOzRYVm0a65fSrgx3kroerFJtFjGGIcXm",
+  "format": "HTML",
+  "publication": "GitHub Pages",
+  "status": "partial edition: chapters 1-11 of 31 written; final independent review pending for chapters 3, 9, 10, 11",
+  "scope_note": "75 recordings (playlist items 2-76) are grouped into 31 chapters. Week 12 revision lectures (items 71-74) supply practice material. The 2-minute course trailer (item 1) is out of scope.",
+  "final_review_pending_chapters": [
+    3,
+    9,
+    10,
+    11
+  ],
+  "edition_note": "This reading edition is partial. Chapters 1-11 cover the first 20 recordings (Week 0 to Week 4, Lecture 1) and have recorded independent reviews; chapters 12-31 are not yet written. Final independent sign-offs remain pending for chapters 3, 9, 10 and 11: their last review findings were repaired and checked by the lead, but no later independent zero-blocking verdict is recorded.",
+  "chapters": [
+    {
+      "order": 1,
+      "title": "What high performance scientific computing is for",
+      "recordings": [
+        2
+      ],
+      "chapter_status": "reviewed and locally validated"
+    },
+    {
+      "order": 2,
+      "title": "Operating systems and the Linux kernel",
+      "recordings": [
+        3,
+        4
+      ],
+      "chapter_status": "reviewed and locally validated"
+    },
+    {
+      "order": 3,
+      "title": "The Linux file system: names, inodes, permission bits and ownership",
+      "recordings": [
+        5,
+        6
+      ],
+      "chapter_status": "reviewed and locally validated"
+    },
+    {
+      "order": 4,
+      "title": "Processes, text processing, memory and networking from the command line",
+      "recordings": [
+        7,
+        8
+      ],
+      "chapter_status": "reviewed and locally validated"
+    },
+    {
+      "order": 5,
+      "title": "Shell scripting: processes, input, and control flow",
+      "recordings": [
+        9,
+        10
+      ],
+      "chapter_status": "reviewed and locally validated"
+    },
+    {
+      "order": 6,
+      "title": "The components of an HPC system and the architecture of a compute node",
+      "recordings": [
+        11,
+        12
+      ],
+      "chapter_status": "reviewed and locally validated"
+    },
+    {
+      "order": 7,
+      "title": "Hierarchical memory and scalable architectures",
+      "recordings": [
+        13
+      ],
+      "chapter_status": "reviewed and locally validated"
+    },
+    {
+      "order": 8,
+      "title": "Concurrency and synchronization: races, locks, atomic instructions and barriers",
+      "recordings": [
+        14
+      ],
+      "chapter_status": "reviewed and locally validated"
+    },
+    {
+      "order": 9,
+      "title": "Why parallel computing: numerical models and their cost",
+      "recordings": [
+        15,
+        16
+      ],
+      "chapter_status": "reviewed and locally validated"
+    },
+    {
+      "order": 10,
+      "title": "Memory bottlenecks, the organization of large HPC systems and the Grace Hopper superchip",
+      "recordings": [
+        17,
+        18,
+        19
+      ],
+      "chapter_status": "reviewed and locally validated"
+    },
+    {
+      "order": 11,
+      "title": "OpenMP I: shared-memory threads and the distribution of work",
+      "recordings": [
+        20,
+        21
+      ],
+      "chapter_status": "reviewed and locally validated"
+    },
+    {
+      "order": 12,
+      "title": "OpenMP II: synchronization, parallel loops, and data-sharing attributes",
+      "recordings": [
+        22,
+        23
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 13,
+      "title": "OpenMP III: memory model, tasks, and parallelizing example codes",
+      "recordings": [
+        24,
+        25,
+        26
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 14,
+      "title": "MPI I: processes and point-to-point messages",
+      "recordings": [
+        27,
+        28
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 15,
+      "title": "MPI II: collective communication",
+      "recordings": [
+        29,
+        33,
+        34
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 16,
+      "title": "Domain decomposition, an MPI solver, and performance analysis",
+      "recordings": [
+        30,
+        31,
+        32
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 17,
+      "title": "GPU computing: motivation, software stack, NVIDIA and Intel architectures",
+      "recordings": [
+        35,
+        36,
+        37
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 18,
+      "title": "GPU throughput arithmetic: FLOPS, bandwidth, SIMD and SIMT",
+      "recordings": [
+        38,
+        39
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 19,
+      "title": "The thread hierarchy: grids, blocks, warps, and warp scheduling",
+      "recordings": [
+        40,
+        41,
+        42,
+        43
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 20,
+      "title": "CUDA programming: tools, kernels, and launch configuration",
+      "recordings": [
+        44,
+        45
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 21,
+      "title": "GPU memory types and memory management",
+      "recordings": [
+        46,
+        47
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 22,
+      "title": "Thread divergence and memory layouts",
+      "recordings": [
+        48,
+        49
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 23,
+      "title": "CUDA compilation and execution",
+      "recordings": [
+        50,
+        51
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 24,
+      "title": "OpenACC I: directives, parallel loops, and data management",
+      "recordings": [
+        52,
+        53,
+        54
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 25,
+      "title": "OpenACC II: loop optimization, asynchrony, and multiple devices",
+      "recordings": [
+        55,
+        56,
+        57
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 26,
+      "title": "Multi-device programs: profiling-driven OpenACC, MPI with CUDA, MPI with OpenACC",
+      "recordings": [
+        58,
+        59,
+        60
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 27,
+      "title": "Profiling and debugging serial codes: gprof, Valgrind, GDB",
+      "recordings": [
+        61,
+        62,
+        63
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 28,
+      "title": "Performance analysis and debugging of MPI programs",
+      "recordings": [
+        64,
+        65
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 29,
+      "title": "Numerical methods and scientific libraries",
+      "recordings": [
+        66,
+        67
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 30,
+      "title": "Batch schedulers and scientific visualization",
+      "recordings": [
+        68,
+        69
+      ],
+      "chapter_status": "pending"
+    },
+    {
+      "order": 31,
+      "title": "Heterogeneous computing, processor trends, and the road ahead (with revision)",
+      "recordings": [
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76
+      ],
+      "chapter_status": "pending"
+    }
+  ],
+  "lectures": [
+    {
+      "id": "yX0KfCorP6s",
+      "title": "Week 0: Lec 0: Introduction to High Performance Scientific Computing",
+      "label": "W0L0",
+      "lecture_number": "W0L0",
+      "playlist_index": 2,
+      "kind": "lecture",
+      "duration": 1621,
+      "url": "https://www.youtube.com/watch?v=yX0KfCorP6s",
+      "chapter_order": 1,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "lmlLdGMrdGU",
+      "title": "Week 1: Lecture 1: Introduction to Operating System.",
+      "label": "W1L1",
+      "lecture_number": "W1L1",
+      "playlist_index": 3,
+      "kind": "lecture",
+      "duration": 1273,
+      "url": "https://www.youtube.com/watch?v=lmlLdGMrdGU",
+      "chapter_order": 2,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "JYTA5BWHmb0",
+      "title": "Week 1: Lecture 2: Linux Kernel Explained",
+      "label": "W1L2",
+      "lecture_number": "W1L2",
+      "playlist_index": 4,
+      "kind": "lecture",
+      "duration": 1432,
+      "url": "https://www.youtube.com/watch?v=JYTA5BWHmb0",
+      "chapter_order": 2,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "t8tAOMqb3qc",
+      "title": "Week 1: Lecture 3: Mastering Linux Directory and File Management",
+      "label": "W1L3",
+      "lecture_number": "W1L3",
+      "playlist_index": 5,
+      "kind": "lecture",
+      "duration": 1942,
+      "url": "https://www.youtube.com/watch?v=t8tAOMqb3qc",
+      "chapter_order": 3,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "bc4gkkRVn4Q",
+      "title": "Week 1:  Lecture 4: Understanding File Permissions and Ownership in Linux",
+      "label": "W1L4",
+      "lecture_number": "W1L4",
+      "playlist_index": 6,
+      "kind": "lecture",
+      "duration": 2823,
+      "url": "https://www.youtube.com/watch?v=bc4gkkRVn4Q",
+      "chapter_order": 3,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "S4XYOjSoAQE",
+      "title": "Week 1: Lecture 5: Mastering Linux Text Processing and File Management",
+      "label": "W1L5",
+      "lecture_number": "W1L5",
+      "playlist_index": 7,
+      "kind": "lecture",
+      "duration": 2303,
+      "url": "https://www.youtube.com/watch?v=S4XYOjSoAQE",
+      "chapter_order": 4,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "TNlzx44rR88",
+      "title": "Week 1: Lecture 6: Linux Memory and Networking Commands",
+      "label": "W1L6",
+      "lecture_number": "W1L6",
+      "playlist_index": 8,
+      "kind": "lecture",
+      "duration": 718,
+      "url": "https://www.youtube.com/watch?v=TNlzx44rR88",
+      "chapter_order": 4,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "DRDzYNVw7K4",
+      "title": "Week 2: Lecture 1: Understanding Shell Scripting: Parent-Child Processes and User Input Handling",
+      "label": "W2L1",
+      "lecture_number": "W2L1",
+      "playlist_index": 9,
+      "kind": "lecture",
+      "duration": 2092,
+      "url": "https://www.youtube.com/watch?v=DRDzYNVw7K4",
+      "chapter_order": 5,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "h5Labe97yWM",
+      "title": "Week 2: Lecture 2: Shell Scripting Tutorial for Beginners",
+      "label": "W2L2",
+      "lecture_number": "W2L2",
+      "playlist_index": 10,
+      "kind": "lecture",
+      "duration": 2622,
+      "url": "https://www.youtube.com/watch?v=h5Labe97yWM",
+      "chapter_order": 5,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "G8zq1xqe_jI",
+      "title": "Week 2: Lecture 3: Introduction to High-Performance Computing (HPC) and Its Key Components",
+      "label": "W2L3",
+      "lecture_number": "W2L3",
+      "playlist_index": 11,
+      "kind": "lecture",
+      "duration": 2062,
+      "url": "https://www.youtube.com/watch?v=G8zq1xqe_jI",
+      "chapter_order": 6,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "xWBICsJyDZo",
+      "title": "Week 2: Lecture 4: Exploring Computing Platform Architecture and CPU Optimization Techniques",
+      "label": "W2L4",
+      "lecture_number": "W2L4",
+      "playlist_index": 12,
+      "kind": "lecture",
+      "duration": 2094,
+      "url": "https://www.youtube.com/watch?v=xWBICsJyDZo",
+      "chapter_order": 6,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "iBMlMcT2Q_4",
+      "title": "Week 2: Lecture 5: Hierarchical Memory Systems and Scalable Architectures in Large-Scale Computing",
+      "label": "W2L5",
+      "lecture_number": "W2L5",
+      "playlist_index": 13,
+      "kind": "lecture",
+      "duration": 2222,
+      "url": "https://www.youtube.com/watch?v=iBMlMcT2Q_4",
+      "chapter_order": 7,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "ulprOSZPAu0",
+      "title": "Week 2: Lecture 6: Concurrency and Synchronization in Parallel Programming:Techniques and Frameworks",
+      "label": "W2L6",
+      "lecture_number": "W2L6",
+      "playlist_index": 14,
+      "kind": "lecture",
+      "duration": 2307,
+      "url": "https://www.youtube.com/watch?v=ulprOSZPAu0",
+      "chapter_order": 8,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "PXmMDWzebGE",
+      "title": "Week 3: Lecture 1: Need for Parallel Computing",
+      "label": "W3L1",
+      "lecture_number": "W3L1",
+      "playlist_index": 15,
+      "kind": "lecture",
+      "duration": 1194,
+      "url": "https://www.youtube.com/watch?v=PXmMDWzebGE",
+      "chapter_order": 9,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "z75dO5juDq8",
+      "title": "Week 3: Lecture 2: Role of Numerical Models in Solving complex problems on Computers",
+      "label": "W3L2",
+      "lecture_number": "W3L2",
+      "playlist_index": 16,
+      "kind": "lecture",
+      "duration": 1637,
+      "url": "https://www.youtube.com/watch?v=z75dO5juDq8",
+      "chapter_order": 9,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "Dg69YlKdUNo",
+      "title": "Week 3: Lecture 3: Common Challenges with Memory in Computer Architecture",
+      "label": "W3L3",
+      "lecture_number": "W3L3",
+      "playlist_index": 17,
+      "kind": "lecture",
+      "duration": 1570,
+      "url": "https://www.youtube.com/watch?v=Dg69YlKdUNo",
+      "chapter_order": 10,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "iE47tWwhBKs",
+      "title": "Week 3: Lecture 4: Organization of hardware in Large HPC systems",
+      "label": "W3L4",
+      "lecture_number": "W3L4",
+      "playlist_index": 18,
+      "kind": "lecture",
+      "duration": 1587,
+      "url": "https://www.youtube.com/watch?v=iE47tWwhBKs",
+      "chapter_order": 10,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "tCj4YXGsEXE",
+      "title": "Week 3: Lecture 5: Architecture of Nvidia's Grace Hopper Superchip",
+      "label": "W3L5",
+      "lecture_number": "W3L5",
+      "playlist_index": 19,
+      "kind": "lecture",
+      "duration": 1559,
+      "url": "https://www.youtube.com/watch?v=tCj4YXGsEXE",
+      "chapter_order": 10,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "DVQhXs8_o-A",
+      "title": "Week 3: Lecture 6: Introduction to Shared Memory Programming using OpenMP",
+      "label": "W3L6",
+      "lecture_number": "W3L6",
+      "playlist_index": 20,
+      "kind": "lecture",
+      "duration": 1656,
+      "url": "https://www.youtube.com/watch?v=DVQhXs8_o-A",
+      "chapter_order": 11,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "Cz8KRZBbgpI",
+      "title": "Week 4: Lecture 1: Distribution of work using multiple OpenMP Threads",
+      "label": "W4L1",
+      "lecture_number": "W4L1",
+      "playlist_index": 21,
+      "kind": "lecture",
+      "duration": 1525,
+      "url": "https://www.youtube.com/watch?v=Cz8KRZBbgpI",
+      "chapter_order": 11,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "794Q2Vg6i_k",
+      "title": "Week 4: Lecture 2: Synchronization and Parallel Loops in OpenMP",
+      "label": "W4L2",
+      "lecture_number": "W4L2",
+      "playlist_index": 22,
+      "kind": "lecture",
+      "duration": 1407,
+      "url": "https://www.youtube.com/watch?v=794Q2Vg6i_k",
+      "chapter_order": 12,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "jLHvSnw68Pw",
+      "title": "Week 4: Lecture 3: Storage attributes of different variables in OpenMP",
+      "label": "W4L3",
+      "lecture_number": "W4L3",
+      "playlist_index": 23,
+      "kind": "lecture",
+      "duration": 1365,
+      "url": "https://www.youtube.com/watch?v=jLHvSnw68Pw",
+      "chapter_order": 12,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "Ognjz7DdsPk",
+      "title": "Week 4: Lecture 4: OpenMP Memory Model, Irregular Parallelism, and Tasks",
+      "label": "W4L4",
+      "lecture_number": "W4L4",
+      "playlist_index": 24,
+      "kind": "lecture",
+      "duration": 1675,
+      "url": "https://www.youtube.com/watch?v=Ognjz7DdsPk",
+      "chapter_order": 13,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "vCgmyD4gh5M",
+      "title": "Week 4: Lecture 5: Parallelization of example codes using OpenMP - Part 1",
+      "label": "W4L5",
+      "lecture_number": "W4L5",
+      "playlist_index": 25,
+      "kind": "lecture",
+      "duration": 1650,
+      "url": "https://www.youtube.com/watch?v=vCgmyD4gh5M",
+      "chapter_order": 13,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "pGqmaj4pLvM",
+      "title": "Week 4: Lecture 6: Parallelization of example codes using OpenMP - Part 2",
+      "label": "W4L6",
+      "lecture_number": "W4L6",
+      "playlist_index": 26,
+      "kind": "lecture",
+      "duration": 1672,
+      "url": "https://www.youtube.com/watch?v=pGqmaj4pLvM",
+      "chapter_order": 13,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "ekz3AGb4ebY",
+      "title": "Week 5: Lecture 1: Introduction to Message Passing Interface (MPI)",
+      "label": "W5L1",
+      "lecture_number": "W5L1",
+      "playlist_index": 27,
+      "kind": "lecture",
+      "duration": 1562,
+      "url": "https://www.youtube.com/watch?v=ekz3AGb4ebY",
+      "chapter_order": 14,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "ZT5BqjCqcNk",
+      "title": "Week 5: Lecture 2: Sending and Receiving the messages using MPI",
+      "label": "W5L2",
+      "lecture_number": "W5L2",
+      "playlist_index": 28,
+      "kind": "lecture",
+      "duration": 1328,
+      "url": "https://www.youtube.com/watch?v=ZT5BqjCqcNk",
+      "chapter_order": 14,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "pKlPIwdGSbE",
+      "title": "Week 5: Lecture 3: Collective Communication in MPI",
+      "label": "W5L3",
+      "lecture_number": "W5L3",
+      "playlist_index": 29,
+      "kind": "lecture",
+      "duration": 1581,
+      "url": "https://www.youtube.com/watch?v=pKlPIwdGSbE",
+      "chapter_order": 15,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "kKmAqFDJNc0",
+      "title": "Week 5: Lecture 4: Domain Decomposition",
+      "label": "W5L4",
+      "lecture_number": "W5L4",
+      "playlist_index": 30,
+      "kind": "lecture",
+      "duration": 1666,
+      "url": "https://www.youtube.com/watch?v=kKmAqFDJNc0",
+      "chapter_order": 16,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "FSUT2kW66cA",
+      "title": "Week 5: Lecture 5: Parallelization of example code using MPI",
+      "label": "W5L5",
+      "lecture_number": "W5L5",
+      "playlist_index": 31,
+      "kind": "lecture",
+      "duration": 1608,
+      "url": "https://www.youtube.com/watch?v=FSUT2kW66cA",
+      "chapter_order": 16,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "l6HVISG9f_M",
+      "title": "Week 5: Lecture 6: Performance Analysis Frameworks for Parallel Programming",
+      "label": "W5L6",
+      "lecture_number": "W5L6",
+      "playlist_index": 32,
+      "kind": "lecture",
+      "duration": 1637,
+      "url": "https://www.youtube.com/watch?v=l6HVISG9f_M",
+      "chapter_order": 16,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "6bXLTaJjg_U",
+      "title": "Week 6: Lecture 1: Examples of Collective Communication in MPI: Part 1",
+      "label": "W6L1",
+      "lecture_number": "W6L1",
+      "playlist_index": 33,
+      "kind": "lecture",
+      "duration": 1229,
+      "url": "https://www.youtube.com/watch?v=6bXLTaJjg_U",
+      "chapter_order": 15,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "gG3oMdoBZbM",
+      "title": "Week 6: Lecture 2: Examples of Collective Communication in MPI: Part 2",
+      "label": "W6L2",
+      "lecture_number": "W6L2",
+      "playlist_index": 34,
+      "kind": "lecture",
+      "duration": 1188,
+      "url": "https://www.youtube.com/watch?v=gG3oMdoBZbM",
+      "chapter_order": 15,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "FTXikoQr46U",
+      "title": "Week 6: Lecture 3: Introduction to GPU Computing",
+      "label": "W6L3",
+      "lecture_number": "W6L3",
+      "playlist_index": 35,
+      "kind": "lecture",
+      "duration": 1891,
+      "url": "https://www.youtube.com/watch?v=FTXikoQr46U",
+      "chapter_order": 17,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "xa3qPx9pz5E",
+      "title": "Week 6: Lecture 4: A Dive into Software Stack and Nvidia Architecture",
+      "label": "W6L4",
+      "lecture_number": "W6L4",
+      "playlist_index": 36,
+      "kind": "lecture",
+      "duration": 1513,
+      "url": "https://www.youtube.com/watch?v=xa3qPx9pz5E",
+      "chapter_order": 17,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "dUnxcaeidYg",
+      "title": "Week 6: Lecture 5: Comparative Analysis of NVIDIA and Intel GPU Architectures",
+      "label": "W6L5",
+      "lecture_number": "W6L5",
+      "playlist_index": 37,
+      "kind": "lecture",
+      "duration": 1987,
+      "url": "https://www.youtube.com/watch?v=dUnxcaeidYg",
+      "chapter_order": 17,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "xjd58BMpLpw",
+      "title": "Week 6: Lecture 6: Understanding FLOPS and Memory Bandwidth Calculations for NVIDIA GPUs",
+      "label": "W6L6",
+      "lecture_number": "W6L6",
+      "playlist_index": 38,
+      "kind": "lecture",
+      "duration": 1299,
+      "url": "https://www.youtube.com/watch?v=xjd58BMpLpw",
+      "chapter_order": 18,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "rS1_t2xKA5Y",
+      "title": "Week 7: Lecture 1: SIMD vs. SIMT: Thread Mapping, Scheduling, and Pipelining in NVIDIA GPUs",
+      "label": "W7L1",
+      "lecture_number": "W7L1",
+      "playlist_index": 39,
+      "kind": "lecture",
+      "duration": 1667,
+      "url": "https://www.youtube.com/watch?v=rS1_t2xKA5Y",
+      "chapter_order": 18,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "BY_4cdGuFsg",
+      "title": "Week 7: Lecture 2: Understanding 1D, 2D, and 3D Grid Arrangements Part 1",
+      "label": "W7L2",
+      "lecture_number": "W7L2",
+      "playlist_index": 40,
+      "kind": "lecture",
+      "duration": 1780,
+      "url": "https://www.youtube.com/watch?v=BY_4cdGuFsg",
+      "chapter_order": 19,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "e-6zAbvZ5BI",
+      "title": "Week 7: Lecture 3: Understanding 1D, 2D, and 3D Grid Arrangements Part 2",
+      "label": "W7L3",
+      "lecture_number": "W7L3",
+      "playlist_index": 41,
+      "kind": "lecture",
+      "duration": 1682,
+      "url": "https://www.youtube.com/watch?v=e-6zAbvZ5BI",
+      "chapter_order": 19,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "HT20KQf0BQY",
+      "title": "Week 7: Lecture 4: Thread Block Mapping and Warp Scheduling in GPU",
+      "label": "W7L4",
+      "lecture_number": "W7L4",
+      "playlist_index": 42,
+      "kind": "lecture",
+      "duration": 1884,
+      "url": "https://www.youtube.com/watch?v=HT20KQf0BQY",
+      "chapter_order": 19,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "cNV8UdrEPQo",
+      "title": "Week 7: Lecture 5: Exploring Warp Scheduling and Latency Management in NVIDIA GPUs",
+      "label": "W7L5",
+      "lecture_number": "W7L5",
+      "playlist_index": 43,
+      "kind": "lecture",
+      "duration": 1927,
+      "url": "https://www.youtube.com/watch?v=cNV8UdrEPQo",
+      "chapter_order": 19,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "vKUl3M0e9pU",
+      "title": "Week 8: Lecture 1: An Introduction to GPU Programming: Tools, Techniques, and CUDA Part - 1",
+      "label": "W8L1",
+      "lecture_number": "W8L1",
+      "playlist_index": 44,
+      "kind": "lecture",
+      "duration": 1958,
+      "url": "https://www.youtube.com/watch?v=vKUl3M0e9pU",
+      "chapter_order": 20,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "OmkTAFlVllg",
+      "title": "Week 8: Lecture 2: An Introduction to GPU Programming: Tools, Techniques, and CUDA Part - 2",
+      "label": "W8L2",
+      "lecture_number": "W8L2",
+      "playlist_index": 45,
+      "kind": "lecture",
+      "duration": 1572,
+      "url": "https://www.youtube.com/watch?v=OmkTAFlVllg",
+      "chapter_order": 20,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "eihu-w4-Q8s",
+      "title": "Week 8: Lecture 3: Understanding NVIDIA GPU Memory Types and Efficient Memory Management Part 1",
+      "label": "W8L3",
+      "lecture_number": "W8L3",
+      "playlist_index": 46,
+      "kind": "lecture",
+      "duration": 1932,
+      "url": "https://www.youtube.com/watch?v=eihu-w4-Q8s",
+      "chapter_order": 21,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "cBHs2gEzN7s",
+      "title": "Week 8: Lecture 4: Understanding NVIDIA GPU Memory Types and Efficient Memory Management Part 2",
+      "label": "W8L4",
+      "lecture_number": "W8L4",
+      "playlist_index": 47,
+      "kind": "lecture",
+      "duration": 1254,
+      "url": "https://www.youtube.com/watch?v=cBHs2gEzN7s",
+      "chapter_order": 21,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "to-o44bgGcg",
+      "title": "Week 8: Lecture 5: Understanding Third Divergence in Parallel Computing and Its Impact on GPU Perf..",
+      "label": "W8L5",
+      "lecture_number": "W8L5",
+      "playlist_index": 48,
+      "kind": "lecture",
+      "duration": 2528,
+      "url": "https://www.youtube.com/watch?v=to-o44bgGcg",
+      "chapter_order": 22,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "o0KYMgx2pic",
+      "title": "Week 8: Lecture 6: Memory Layouts and Their Role in Optimizing Computing Performance",
+      "label": "W8L6",
+      "lecture_number": "W8L6",
+      "playlist_index": 49,
+      "kind": "lecture",
+      "duration": 2058,
+      "url": "https://www.youtube.com/watch?v=o0KYMgx2pic",
+      "chapter_order": 22,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "Xi-yMwssHPc",
+      "title": "Week 9: Lecture 1: CUDA Program Compilation and Execution: A Step-by-Step Guide Part 1",
+      "label": "W9L1",
+      "lecture_number": "W9L1",
+      "playlist_index": 50,
+      "kind": "lecture",
+      "duration": 1570,
+      "url": "https://www.youtube.com/watch?v=Xi-yMwssHPc",
+      "chapter_order": 23,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "jM3Q6tftc6A",
+      "title": "Week 9: Lecture 2: CUDA Program Compilation and Execution: A Step-by-Step Guide Part 2",
+      "label": "W9L2",
+      "lecture_number": "W9L2",
+      "playlist_index": 51,
+      "kind": "lecture",
+      "duration": 1524,
+      "url": "https://www.youtube.com/watch?v=jM3Q6tftc6A",
+      "chapter_order": 23,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "FLVS59RKXa4",
+      "title": "Week 9: Lecture 3: Introduction to OpenACC",
+      "label": "W9L3",
+      "lecture_number": "W9L3",
+      "playlist_index": 52,
+      "kind": "lecture",
+      "duration": 1060,
+      "url": "https://www.youtube.com/watch?v=FLVS59RKXa4",
+      "chapter_order": 24,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "6oYc7s5BI2I",
+      "title": "Week 9: Lecture 4: Parallelization of loops using OpenACC",
+      "label": "W9L4",
+      "lecture_number": "W9L4",
+      "playlist_index": 53,
+      "kind": "lecture",
+      "duration": 1347,
+      "url": "https://www.youtube.com/watch?v=6oYc7s5BI2I",
+      "chapter_order": 24,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "6HE4SYGG7K4",
+      "title": "Week 9: Lecture 5: OpenACC Data Management",
+      "label": "W9L5",
+      "lecture_number": "W9L5",
+      "playlist_index": 54,
+      "kind": "lecture",
+      "duration": 1255,
+      "url": "https://www.youtube.com/watch?v=6HE4SYGG7K4",
+      "chapter_order": 24,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "dw3t1H34E-A",
+      "title": "Week 9: Lecture 6: OpenACC Loop Optimizations",
+      "label": "W9L6",
+      "lecture_number": "W9L6",
+      "playlist_index": 55,
+      "kind": "lecture",
+      "duration": 1472,
+      "url": "https://www.youtube.com/watch?v=dw3t1H34E-A",
+      "chapter_order": 25,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "sybbWNJunRA",
+      "title": "Week 9: Lecture 7: Implementing Asynchronous behavior in OpenACC",
+      "label": "W9L7",
+      "lecture_number": "W9L7",
+      "playlist_index": 56,
+      "kind": "lecture",
+      "duration": 1157,
+      "url": "https://www.youtube.com/watch?v=sybbWNJunRA",
+      "chapter_order": 25,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "yIPHreoMz1s",
+      "title": "Week 9: Lecture 8: Programming for multiple-device architecture using OpenACC",
+      "label": "W9L8",
+      "lecture_number": "W9L8",
+      "playlist_index": 57,
+      "kind": "lecture",
+      "duration": 928,
+      "url": "https://www.youtube.com/watch?v=yIPHreoMz1s",
+      "chapter_order": 25,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "qgQuj0ZbdFc",
+      "title": "Week 10: Lecture 1: Profiling and Parallelizing the serial code using OpenACC",
+      "label": "W10L1",
+      "lecture_number": "W10L1",
+      "playlist_index": 58,
+      "kind": "lecture",
+      "duration": 1376,
+      "url": "https://www.youtube.com/watch?v=qgQuj0ZbdFc",
+      "chapter_order": 26,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "fWt2N3mhbfU",
+      "title": "Week 10: Lecture 2: Programming for multiple-device architecture using MPI and CUDA",
+      "label": "W10L2",
+      "lecture_number": "W10L2",
+      "playlist_index": 59,
+      "kind": "lecture",
+      "duration": 1493,
+      "url": "https://www.youtube.com/watch?v=fWt2N3mhbfU",
+      "chapter_order": 26,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "3ga9YmuxB5o",
+      "title": "Week 10: Lecture 3: Programming for multiple-device architecture using MPI and OpenACC",
+      "label": "W10L3",
+      "lecture_number": "W10L3",
+      "playlist_index": 60,
+      "kind": "lecture",
+      "duration": 929,
+      "url": "https://www.youtube.com/watch?v=3ga9YmuxB5o",
+      "chapter_order": 26,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "U3HNXAuVyQo",
+      "title": "Week 10: Lecture 4: Profiling Serial codes using GNU gprof",
+      "label": "W10L4",
+      "lecture_number": "W10L4",
+      "playlist_index": 61,
+      "kind": "lecture",
+      "duration": 1615,
+      "url": "https://www.youtube.com/watch?v=U3HNXAuVyQo",
+      "chapter_order": 27,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "EFT7lXzkRHo",
+      "title": "Week 10: Lecture 5: Profiling and Debugging of the codes using Valgrind",
+      "label": "W10L5",
+      "lecture_number": "W10L5",
+      "playlist_index": 62,
+      "kind": "lecture",
+      "duration": 1637,
+      "url": "https://www.youtube.com/watch?v=EFT7lXzkRHo",
+      "chapter_order": 27,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "dICh15lNwPw",
+      "title": "Week 10: Lecture 6: Code Debugging using GDB",
+      "label": "W10L6",
+      "lecture_number": "W10L6",
+      "playlist_index": 63,
+      "kind": "lecture",
+      "duration": 886,
+      "url": "https://www.youtube.com/watch?v=dICh15lNwPw",
+      "chapter_order": 27,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "-C-S0rAA_OI",
+      "title": "Week 11: Lecture 1: Performance Analysis of MPI codes",
+      "label": "W11L1",
+      "lecture_number": "W11L1",
+      "playlist_index": 64,
+      "kind": "lecture",
+      "duration": 1740,
+      "url": "https://www.youtube.com/watch?v=-C-S0rAA_OI",
+      "chapter_order": 28,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "5ghvxhl9yF0",
+      "title": "Week 11: Lecture 2: Parallel Debugging of MPI Programs using Open Source Tools",
+      "label": "W11L2",
+      "lecture_number": "W11L2",
+      "playlist_index": 65,
+      "kind": "lecture",
+      "duration": 1325,
+      "url": "https://www.youtube.com/watch?v=5ghvxhl9yF0",
+      "chapter_order": 28,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "3CwrG8SVgLE",
+      "title": "Week 11: Lecture 3: Role of Numerical Methods in High Performance Scientific Computing",
+      "label": "W11L3",
+      "lecture_number": "W11L3",
+      "playlist_index": 66,
+      "kind": "lecture",
+      "duration": 1754,
+      "url": "https://www.youtube.com/watch?v=3CwrG8SVgLE",
+      "chapter_order": 29,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "bwQu-uSKGGw",
+      "title": "Week 11: Lecture 4: Libraries used in High Performance Scientific Computing",
+      "label": "W11L4",
+      "lecture_number": "W11L4",
+      "playlist_index": 67,
+      "kind": "lecture",
+      "duration": 1868,
+      "url": "https://www.youtube.com/watch?v=bwQu-uSKGGw",
+      "chapter_order": 29,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "TwuO7a5KvS8",
+      "title": "Week 11: Lecture 5: Introduction to HPC Schedulers using SLURM and PBS",
+      "label": "W11L5",
+      "lecture_number": "W11L5",
+      "playlist_index": 68,
+      "kind": "lecture",
+      "duration": 984,
+      "url": "https://www.youtube.com/watch?v=TwuO7a5KvS8",
+      "chapter_order": 30,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "VBnF4ZQaQtY",
+      "title": "Week 11: Lecture 6: Scientific Visualization",
+      "label": "W11L6",
+      "lecture_number": "W11L6",
+      "playlist_index": 69,
+      "kind": "lecture",
+      "duration": 1243,
+      "url": "https://www.youtube.com/watch?v=VBnF4ZQaQtY",
+      "chapter_order": 30,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "e9ffZ3g-PrM",
+      "title": "Week 12: Lecture 1: Revision and challenges in the future",
+      "label": "W12L1",
+      "lecture_number": "W12L1",
+      "playlist_index": 70,
+      "kind": "lecture",
+      "duration": 1320,
+      "url": "https://www.youtube.com/watch?v=e9ffZ3g-PrM",
+      "chapter_order": 31,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "cEq5bYr_s0E",
+      "title": "Week 12: Lecture 2: OpenMP Revision",
+      "label": "W12L2",
+      "lecture_number": "W12L2",
+      "playlist_index": 71,
+      "kind": "revision",
+      "duration": 1060,
+      "url": "https://www.youtube.com/watch?v=cEq5bYr_s0E",
+      "chapter_order": 31,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "jvO9OqBYyw4",
+      "title": "Week 12: Lecture 3: CUDA Revision",
+      "label": "W12L3",
+      "lecture_number": "W12L3",
+      "playlist_index": 72,
+      "kind": "revision",
+      "duration": 830,
+      "url": "https://www.youtube.com/watch?v=jvO9OqBYyw4",
+      "chapter_order": 31,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "vQ9tqILbvhw",
+      "title": "Week 12: Lecture 4: MPI Revision",
+      "label": "W12L4",
+      "lecture_number": "W12L4",
+      "playlist_index": 73,
+      "kind": "revision",
+      "duration": 814,
+      "url": "https://www.youtube.com/watch?v=vQ9tqILbvhw",
+      "chapter_order": 31,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "nvcyuGafryY",
+      "title": "Week 12: Lecture 5: OpenACC Revision",
+      "label": "W12L5",
+      "lecture_number": "W12L5",
+      "playlist_index": 74,
+      "kind": "revision",
+      "duration": 714,
+      "url": "https://www.youtube.com/watch?v=nvcyuGafryY",
+      "chapter_order": 31,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "yzMssCnXffE",
+      "title": "Week 12: Lecture 6: Heterogeneous Computing",
+      "label": "W12L6",
+      "lecture_number": "W12L6",
+      "playlist_index": 75,
+      "kind": "lecture",
+      "duration": 1090,
+      "url": "https://www.youtube.com/watch?v=yzMssCnXffE",
+      "chapter_order": 31,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    },
+    {
+      "id": "NQux0OuWpWg",
+      "title": "Week 12: Lecture 7: Trends in Microprocessor Architectures",
+      "label": "W12L7",
+      "lecture_number": "W12L7",
+      "playlist_index": 76,
+      "kind": "lecture",
+      "duration": 1104,
+      "url": "https://www.youtube.com/watch?v=NQux0OuWpWg",
+      "chapter_order": 31,
+      "transcript_status": "local machine transcription (faster-whisper small.en)",
+      "frames_status": "one frame per 30 s, private"
+    }
+  ]
+}
