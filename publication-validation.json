@@ -1,0 +1,322 @@
+{
+  "checked_at_utc": "2026-10-27T14:08:54.460926+00:00",
+  "status": "passed",
+  "tested_commit": "f0599fadc4ff5c4a3a45cc364a93005f7ae11cd6",
+  "live_url": "https://az9713.github.io/nptel-high-performance-scientific-computing-notes/",
+  "scope": "Actual served-file byte agreement and focused live reader controls; does not close scientific-review gaps",
+  "public_files_checked": 50,
+  "all_served_bytes_match_git": true,
+  "mismatched_files": [],
+  "browser": [
+    {
+      "file": "index.html",
+      "viewport": 1280,
+      "status": "passed",
+      "overflow": false,
+      "controls": true,
+      "mathErrors": 0,
+      "mathNodes": 0
+    },
+    {
+      "file": "index.html",
+      "viewport": 390,
+      "status": "passed",
+      "overflow": false,
+      "controls": true,
+      "mathErrors": 0,
+      "mathNodes": 0
+    },
+    {
+      "file": "chapter-09-parallel-computing-numerical-models-and-cost.html",
+      "viewport": 1280,
+      "status": "passed",
+      "overflow": false,
+      "controls": true,
+      "mathErrors": 0,
+      "mathNodes": 844
+    },
+    {
+      "file": "chapter-09-parallel-computing-numerical-models-and-cost.html",
+      "viewport": 390,
+      "status": "passed",
+      "overflow": false,
+      "controls": true,
+      "mathErrors": 0,
+      "mathNodes": 844
+    },
+    {
+      "file": "code-lab.html",
+      "viewport": 1280,
+      "status": "passed",
+      "overflow": false,
+      "controls": true,
+      "mathErrors": 0,
+      "mathNodes": 0
+    },
+    {
+      "file": "code-lab.html",
+      "viewport": 390,
+      "status": "passed",
+      "overflow": false,
+      "controls": true,
+      "mathErrors": 0,
+      "mathNodes": 0
+    }
+  ],
+  "readme_preview": {
+    "image_loaded": true,
+    "links_to_live_book": true
+  },
+  "served_files": [
+    {
+      "file": "README.md",
+      "bytes_match_git": true,
+      "sha256": "c9da63fc1cbb4071ef298f1f3a055ca675c73299b94e123751fb2f0cd24cc7b0"
+    },
+    {
+      "file": "WORKFLOW.md",
+      "bytes_match_git": true,
+      "sha256": "ff25c6f7d5f55b6ac0228c8901ec3c3508666b98ad8c03294a9b4deef415d710"
+    },
+    {
+      "file": "assets/book.css",
+      "bytes_match_git": true,
+      "sha256": "2d973e5c67896771e55fbc1ff1ddfd07a7969dd5602e2881cf5371d9a230e55e"
+    },
+    {
+      "file": "assets/book.js",
+      "bytes_match_git": true,
+      "sha256": "e31d522b88712b15eddb3323de2c325a4e1ff1bf77bf0cde74f021809d2bae4f"
+    },
+    {
+      "file": "assets/mathjax-LICENSE",
+      "bytes_match_git": true,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "file": "assets/mathjax-tex-svg.js",
+      "bytes_match_git": true,
+      "sha256": "d4295dc33744836935c1399feece5159577b34c5c8ffb9f1c6324cd82e03a882"
+    },
+    {
+      "file": "assets/preview-mobile.png",
+      "bytes_match_git": true,
+      "sha256": "1512f38aa9e30c534f89ead21ffb3b4a8fb159da9085841ad8aaf1d09f89ff18"
+    },
+    {
+      "file": "assets/preview.png",
+      "bytes_match_git": true,
+      "sha256": "a10915d963aac19a21466bdf60b1305f396f24551cbafda6b95a1254cc4902a2"
+    },
+    {
+      "file": "assets/site-preview.png",
+      "bytes_match_git": true,
+      "sha256": "dc7eecb7a3c507442fa2f3a29a673bbe88da723162b65dc32b996439c207ee24"
+    },
+    {
+      "file": "book-overview.html",
+      "bytes_match_git": true,
+      "sha256": "d988ea3ee4d91ad7df0e75f62472701c6c50670d339d3c7a631122f69d8d99f0"
+    },
+    {
+      "file": "chapter-01-what-hpsc-is-for.html",
+      "bytes_match_git": true,
+      "sha256": "dc62b7c3486fca56e950f64cca0f04ab4e59966b23c8135ef5bb21676a4b3349"
+    },
+    {
+      "file": "chapter-01-what-hpsc-is-for.meta.json",
+      "bytes_match_git": true,
+      "sha256": "9a550a4e817deb91d97affcd957547a5002f76d25ec857d7199ebd5a3eaa42ae"
+    },
+    {
+      "file": "chapter-02-operating-systems-and-linux-kernel.html",
+      "bytes_match_git": true,
+      "sha256": "5086ea5d9da35d9209cad7513ef8908125e96b959ed20b88e7984ff434421c5f"
+    },
+    {
+      "file": "chapter-02-operating-systems-and-linux-kernel.meta.json",
+      "bytes_match_git": true,
+      "sha256": "93dabe83a911828af2a47d5d04dca4acd50f8b3bb205593ecf6a1a9cd39a6c30"
+    },
+    {
+      "file": "chapter-03-linux-file-system-permissions-ownership.html",
+      "bytes_match_git": true,
+      "sha256": "6216528c3df0353a34b1047f7421903435a9c89b12447e74b0d8260c0ecf04d4"
+    },
+    {
+      "file": "chapter-03-linux-file-system-permissions-ownership.meta.json",
+      "bytes_match_git": true,
+      "sha256": "a7d59a10cfb11f3fd25f4dfdfbd160b3f904254ec1735ecf9f9023505245a7c2"
+    },
+    {
+      "file": "chapter-04-processes-text-memory-and-networking.html",
+      "bytes_match_git": true,
+      "sha256": "22852f0186268e8cbf812ff5b4f07de7c4e9d3ede0227aa72af15703cd9c7f6b"
+    },
+    {
+      "file": "chapter-04-processes-text-memory-and-networking.meta.json",
+      "bytes_match_git": true,
+      "sha256": "0b0db3aaf0a0c7bf3019610ee37de6ed16f1b2314d0a1e1ff4bff83a4024e816"
+    },
+    {
+      "file": "chapter-05-shell-scripting-processes-and-control-flow.html",
+      "bytes_match_git": true,
+      "sha256": "18eaa4adce015b624eb801045a1d0b16365aa7c3a258622f8f00cd1b113f5d90"
+    },
+    {
+      "file": "chapter-05-shell-scripting-processes-and-control-flow.meta.json",
+      "bytes_match_git": true,
+      "sha256": "14ccd05b59d3edd6d4bd53ed2021ddf1018a7ddc3ac0fd517e928bd793f5d7cc"
+    },
+    {
+      "file": "chapter-06-hpc-components-and-node-architecture.html",
+      "bytes_match_git": true,
+      "sha256": "7fe1d0fc813be172f10ca054d6af4583abf67d378a8e5247766c222a0f1d8a2c"
+    },
+    {
+      "file": "chapter-06-hpc-components-and-node-architecture.meta.json",
+      "bytes_match_git": true,
+      "sha256": "e284cff90e9a0368608529c2427ae91fb7209a90d854cc20ae1b7c2e9ba33086"
+    },
+    {
+      "file": "chapter-07-hierarchical-memory-and-scalable-architectures.html",
+      "bytes_match_git": true,
+      "sha256": "cb7092eb94b7f6571071185c080f584fec0a917ade8a4059282f4da8e57c93f2"
+    },
+    {
+      "file": "chapter-07-hierarchical-memory-and-scalable-architectures.meta.json",
+      "bytes_match_git": true,
+      "sha256": "85b4194ed61177c54b4483891375b89b6b214f8a53d1e3ae103e3254006d8302"
+    },
+    {
+      "file": "chapter-08-concurrency-and-synchronization.html",
+      "bytes_match_git": true,
+      "sha256": "5e8616b97e78996b7aa9700621aaf28bfa72c2d267e406fd15239d72ce521b12"
+    },
+    {
+      "file": "chapter-08-concurrency-and-synchronization.meta.json",
+      "bytes_match_git": true,
+      "sha256": "eb8633430c77c67e110d30dad92dd39f26f290f6ce4ee18ef28b21d415947dbe"
+    },
+    {
+      "file": "chapter-09-parallel-computing-numerical-models-and-cost.html",
+      "bytes_match_git": true,
+      "sha256": "9bcfd3184cece0baaf0fe8eca9ff38196c2c312eb1efe744ce186906d6ec1ccf"
+    },
+    {
+      "file": "chapter-09-parallel-computing-numerical-models-and-cost.meta.json",
+      "bytes_match_git": true,
+      "sha256": "7da4b47205a94de0d0c2c914558549cdeab616a92420ea7f3487a734826a5db4"
+    },
+    {
+      "file": "chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.html",
+      "bytes_match_git": true,
+      "sha256": "aa7de45a5aeea2de8ee161b2b80bae0997a0f17b1974eba2a27914baddbf291c"
+    },
+    {
+      "file": "chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.meta.json",
+      "bytes_match_git": true,
+      "sha256": "936e106c0757cf82b1079203f39bc6a26b7922247c30196cb3f67d5ecdef6973"
+    },
+    {
+      "file": "chapter-11-openmp-threads-and-work-distribution.html",
+      "bytes_match_git": true,
+      "sha256": "fe17f080e81ff91d46f1a8b6c153cf8cdfa7ae943bba67d740c07fe41e82ba68"
+    },
+    {
+      "file": "chapter-11-openmp-threads-and-work-distribution.meta.json",
+      "bytes_match_git": true,
+      "sha256": "96def1b5dbf207091c1f410dcd967559bf9c4cc8942dbb2e501b69a1c78aaa5d"
+    },
+    {
+      "file": "chapter-code-validation.json",
+      "bytes_match_git": true,
+      "sha256": "f0864ce01f28ed110bbfb95a24d8a319c012ba5222950f370a3bdc7bfc1861b4"
+    },
+    {
+      "file": "code-lab.html",
+      "bytes_match_git": true,
+      "sha256": "0a79e1b800d6bd430d0866732ccea32acc1406215b4a3e0fb245b697ec40f116"
+    },
+    {
+      "file": "code_lab.py",
+      "bytes_match_git": true,
+      "sha256": "f02e1519d9898f5f85e0c7729f9d9f11bf57a3999dc1d05571c21967ae929e94"
+    },
+    {
+      "file": "completion.json",
+      "bytes_match_git": true,
+      "sha256": "3210147f1d6ad2f12c346fa27533ac2bca6cf0a864653d0f8e0285dbf1c76974"
+    },
+    {
+      "file": "editorial-review-summary.json",
+      "bytes_match_git": true,
+      "sha256": "32587f4e3f601ecd64cda754ea8a2da45e3a46fc91ffcfcb476d626b747acf71"
+    },
+    {
+      "file": "index.html",
+      "bytes_match_git": true,
+      "sha256": "9bb4fee9ab6811b8804e31f4a34044d328f2cde72420407e885da9c5be7dd42c"
+    },
+    {
+      "file": "package-validation.json",
+      "bytes_match_git": true,
+      "sha256": "b67475a9c6dddeddf12ddaab12a97af908e14a633a9ff496bd93d86f1296f324"
+    },
+    {
+      "file": "reader-validation.json",
+      "bytes_match_git": true,
+      "sha256": "eca6b29b2320349359cf0ae6394e663b50e50ef1368cd3ac1819a56a3d6d0efb"
+    },
+    {
+      "file": "references.html",
+      "bytes_match_git": true,
+      "sha256": "62959c48e35277b164478bbc6150eceab5f4cef3b371ff5d45ad03cc08decee6"
+    },
+    {
+      "file": "source-free-validation.json",
+      "bytes_match_git": true,
+      "sha256": "ac22167a54eb945d0a9107b3c2fc861ce8034009b798e741933a5bddc9a5d3c1"
+    },
+    {
+      "file": "source-manifest.json",
+      "bytes_match_git": true,
+      "sha256": "ccc79f591db8d7a8be44dd00f32f9d57d1e4bc4d7ef112acefe2633cba016197"
+    },
+    {
+      "file": "source-map.html",
+      "bytes_match_git": true,
+      "sha256": "35fd213144d6dc9a95e3ea87d2f82572c76cf2dde53788df4ae12fe66e1c46de"
+    },
+    {
+      "file": "source-map.json",
+      "bytes_match_git": true,
+      "sha256": "e4dc9881e7a18ed23de69e00068b9ae0ff798586e095de9e671551c65d817260"
+    },
+    {
+      "file": "source-validation-summary.json",
+      "bytes_match_git": true,
+      "sha256": "a52b17b74b0584dfead2f37223ac1ceb297606d863847c3aa5010a079a86bf98"
+    },
+    {
+      "file": "tools/build_book.py",
+      "bytes_match_git": true,
+      "sha256": "8c91e41514b7e3b622fdba047ab907b2e724fe334d9aa2f12d974b351d0ce530"
+    },
+    {
+      "file": "tools/check_chapter_code.py",
+      "bytes_match_git": true,
+      "sha256": "f94367f4891a02a27689749d7fc091c785cbf7a8cf2e32735f9c39da465728d9"
+    },
+    {
+      "file": "tools/check_package.py",
+      "bytes_match_git": true,
+      "sha256": "5fb582a232e27f1605fdf42790440c287d15e7cb966c393629d0b6c1cea9099d"
+    },
+    {
+      "file": "tools/validate_books.py",
+      "bytes_match_git": true,
+      "sha256": "6fa78a8d51ae65a4b70f35dd41953b534d8357317a011bf395d61b8dfdabfcea"
+    }
+  ]
+}
