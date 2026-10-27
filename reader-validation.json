@@ -1,0 +1,300 @@
+{
+  "course": "High Performance Scientific Computing",
+  "checked_at_utc": "2026-10-27T13:59:16.524567+00:00",
+  "scope": "Reader mechanics only; does not certify chapter or course completion",
+  "static": {
+    "status": "passed",
+    "html_files": 16,
+    "local_links_checked": 194,
+    "timestamps_checked": 137,
+    "chapter_pages_with_dollar_math": 0,
+    "failures": [],
+    "warnings": []
+  },
+  "browser": {
+    "status": "passed",
+    "findings": [
+      {
+        "mathErrors": 0,
+        "mathNodes": 685,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-01-what-hpsc-is-for.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 685,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-01-what-hpsc-is-for.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 177,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-02-operating-systems-and-linux-kernel.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 177,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-02-operating-systems-and-linux-kernel.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 109,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-03-linux-file-system-permissions-ownership.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 109,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-03-linux-file-system-permissions-ownership.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 468,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-04-processes-text-memory-and-networking.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 468,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-04-processes-text-memory-and-networking.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 234,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-05-shell-scripting-processes-and-control-flow.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 234,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-05-shell-scripting-processes-and-control-flow.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 328,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-06-hpc-components-and-node-architecture.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 328,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-06-hpc-components-and-node-architecture.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 571,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-07-hierarchical-memory-and-scalable-architectures.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 571,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-07-hierarchical-memory-and-scalable-architectures.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 381,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-08-concurrency-and-synchronization.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 381,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-08-concurrency-and-synchronization.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 844,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-09-parallel-computing-numerical-models-and-cost.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 844,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-09-parallel-computing-numerical-models-and-cost.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 395,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 395,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 644,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-11-openmp-threads-and-work-distribution.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 644,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-11-openmp-threads-and-work-distribution.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 0,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "code-lab.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 0,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "code-lab.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 0,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "index.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 0,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "index.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 0,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "references.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 0,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "references.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 1,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "source-map.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 1,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "source-map.html",
+        "viewport": 390
+      }
+    ],
+    "failures": [],
+    "clipboard": "Fallback branch checked with captured text; manual OS clipboard verification not performed",
+    "network": "HTTP and HTTPS requests blocked during browser checks"
+  },
+  "pedagogy": {
+    "status": "not performed",
+    "reason": "Requires chapter editorial review"
+  },
+  "python_execution": {
+    "status": "not performed",
+    "reason": "Run declared lab/snippet checks separately"
+  }
+}

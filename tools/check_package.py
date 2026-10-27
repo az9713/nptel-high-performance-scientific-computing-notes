@@ -30,7 +30,7 @@ def main():
             failures.append(f'{path.name}: baseline chapter-body mismatch')
         if not path.with_suffix('.meta.json').is_file():
             failures.append(f'{path.name}: missing source sidecar')
-        listings += len(re.findall(r'<code[^>]*data-file="', body))
+        listings += len(re.findall(r'<code[^>]*data-file="', body))
         solutions += len(re.findall(r'<summary\b[^>]*>\s*(?:Solution|Worked solution)', body, re.I))
     required = ('README.md', 'WORKFLOW.md', 'index.html', 'source-map.html', 'references.html',
                 'code-lab.html', 'code_lab.py', 'source-validation-summary.json',
@@ -40,7 +40,7 @@ def main():
             failures.append(f'Missing public file: {name}')
     for name in ('README.md', 'WORKFLOW.md'):
         for target in re.findall(r'\]\(([^)]+)\)', read(ROOT / name)):
-            if '://' not in target and target != 'package-validation.json' and not (ROOT / target.split('#')[0]).exists():
+            if '://' not in target and target not in ('package-validation.json', 'publication-validation.json') and not (ROOT / target.split('#')[0]).exists():
                 failures.append(f'{name}: broken relative link {target}')
     pending = editorial.get('final_independent_signoff_pending_chapters', [])
     if any(c['order'] not in pending + unwritten and c.get('chapter_status') != 'reviewed and locally validated'

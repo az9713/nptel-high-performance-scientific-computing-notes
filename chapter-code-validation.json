@@ -1,0 +1,1439 @@
+{
+  "checked_at_utc": "2026-10-27T13:58:56.089154+00:00",
+  "status": "passed",
+  "scope": "Actual isolated build and execution of each runnable listing; exact printed-output comparison where data-check=\"exact\", successful exit only where data-check=\"returncode\"; not a scientific review",
+  "machine": "WSL Ubuntu 24.04, gcc 13.3 (OpenMP, OpenACC nvptx offload), Open MPI, CUDA 13.3, NVIDIA GeForce RTX 3050 Laptop GPU (sm_86), 12 logical CPUs",
+  "host": "Windows-11-10.0.26300-SP0",
+  "chapters": {
+    "chapter-01-what-hpsc-is-for.html": {
+      "status": "passed",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "poisson_check.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "c9a3f89d7ef3caee57a04a6ae22cbc4ca27b53132fe7da5ce785011304c8f13c",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "flopcount.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "746995895b1f86cab5473fe3c8660074df1a35e04e967de052b259f2487c9474",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "matmul_bench.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "cbcf7552aa6029d4a52efbd0ccbc8c8dac11d212ee147727d56a638d15fa831e",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "solve_bench.py",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "c10250d063c9fd3865071cbddb3ddd15af9659090c579e489be654488589a2f2",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "iterations.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "80f8779600465a92422fbe2dfee6f91d8b2e6a92f090ee0df64c9a64005c0bb8",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "budget.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "d4718eb75fde03befcf00d7f83e1a034a543070598fb1f1e65c206f22ef95f47",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 7,
+          "file": "growth.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "5334c1325cc95dc83d3e03072369427e6dc27330bf2f42cfae8c841572057301",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 8,
+          "file": "frontier.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "8b3a349ea05dd99d7f307fb1d7506f183d06728d2e325026dc7c36611b2d7dbb",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 9,
+          "file": "cg_spectrum.py",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "f4382e42d00ab795cb2a70ec6c780d2a2b3f13c5d4eb1af1e03e0c026f86c677",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-02-operating-systems-and-linux-kernel.html": {
+      "status": "passed",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "privileged.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "d4c6119177032e8a37826ec3c44bdb178a4e4e4bab9e57de5f0b1f37b230277a",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "launch.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "8f7edf5b627bba1ac4d7c08e1e2b4e5b144cfa3dd7ad4e1308671a6f14e4e4e5",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "launch_cost.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "f711ceada865651b53848b53dc190dea1f1fd88b25f86736f54d9eb9caf31999",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "syscall_cost.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "4cea606b9af1e607114f15e10d40b4d1aaf5b23ecd6a1e787813420f6c70f379",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "chunks.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "f4486e88f5891dd0b20ea5e56be90b952a7ef30a9a9776d04e12dd6ea1b7b166",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "sched_sim.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "3712a13456671ecc18c07f9bd6749d4bc1829a911fb497030e82d84ab977df94",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 7,
+          "file": "fairshare.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "f0c72fc18f47779dc3a1d236a74c3c2e63dd78bd3c70ec548834d56bffb1b00e",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 8,
+          "file": "ctxswitch.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "6f801ba85f8c1eb90f68fd9eee1c2c498de5744671ab2a3155fd3ac3fb55b15e",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 9,
+          "file": "pagetable.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "5af431a503c404a9403e46b4b92e8639ff2d8697131301684e94ea71c102fec1",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 10,
+          "file": "ptes.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "7c78bb8b99de128e42b849ac5048bc4e2422371fa5b259c183873a709d1e48af",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 11,
+          "file": "pagefault.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "27ccbd55cc9ddae9c4bd5f143d4e57a7bf87558abe9bf4b335f8d454c34b77c2",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 12,
+          "file": "fdtypes.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "c697e85cfeeb3c481d4bc2e586f89e872fb7cb6987d639ca7715690f02663c02",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 13,
+          "file": "forkcost.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "aa3520eeee0da9fb578bc9c5b52853713770f63528deb6a5572869aad65d41b6",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-03-linux-file-system-permissions-ownership.html": {
+      "status": "passed",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "free_used.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "292ff8ff4c67308ea2bac8c565d3ec0efc82f0fccc64a68cff0ea182156792e1",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "nav_session.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "f8a8a378af2ebbda82e62b39640552552fcb3fc0f7834b86911d10833f3a65ed",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "names_inodes.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "9a5642ce4e70ad789b314e87b690bdd6932868e1a8d981a3bf6cf5601f158afd",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "files_session.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "6fcb131e07b5a091b8d80e1b4901928c4c377e9e957dbdf93c12cc1d514d88ab",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "redirect_session.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "71f258001c5848c2c8ce6343540735fa7e8e5f6ad53280c68706806102758697",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "owner_class.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "487aeacb89f0e2376a00569976ed34772eef20ba300928ed139b03b7cf43f488",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 7,
+          "file": "mode_decode.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "6228e4e62cf9ae94e9d1518a0252dc135f5539731b25bd863f32736e21005cf1",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 8,
+          "file": "access_predicate.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "11054556104583ab3270d62b4cea20e3f61f50d716fd883353415bd4db33ee29",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 9,
+          "file": "chmod_session.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "da156cc2ae520a992cf6d01dbe9a99fa1daf639d73deeea692212e4256c85004",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 10,
+          "file": "chmod_model.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "b380fd9d50294ee8a5c02a573f9424354088c8c8df856ae73f99bca35cb21204",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 11,
+          "file": "umask_check.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "c48aab65eb1d9de3cc890d74071fb3356c128a721074d787f46e0331e70e9734",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 12,
+          "file": "group_session.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "a3034cdc27b45083b956127c62cbbc6e836b122b24ad148aaf1ba81772c134fd",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 13,
+          "file": "shared_dir_model.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "510d78ae07ae2fb27abc84d6dd3fe35011eea18e2f28ebc5c415abffb8553487",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 14,
+          "file": "modestr.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "792dd7ab7ac630e6879ec35feec1d9bd751cb28ddba6bcd484f3430cae4eafcf",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-04-processes-text-memory-and-networking.html": {
+      "status": "passed",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "jacobi_log.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "aa19470b1bf36ab291d8bcdcc546f659526c2561ed743a2a2e2f059a4138aef3",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "machine.sh",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "229a160bd8832e6f26e9f18dbb8a3656daee9ac0e2e47f32398e9d663c4d43be",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "jobs_demo.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "038c514e2c1e32bdadecadf5f559a350dd729d8814ebf1554b0ed7162ef15775",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "states.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "5b524c0644ce82a8d195fbd3f725e248622a4bf06adfed3fdf4d3d6ebd946c2f",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "regex_derivative.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "cbd5d2cd2c4c6d8a0f82081108252c82f86b004b92d09bc551c728cdf7556e3d",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "blowup.py",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "2973ccad0fcebc7c90458f85388b0c35e48f657a84838a24cc9dd4976f820517",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 7,
+          "file": "lecture_files.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "aa763a65535b3be17058fc8ee5ea5716d268a2b6638f4e5607b28728735e991c",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 8,
+          "file": "pipes.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "921fda9d7e20bd2a6f2240f748eb87240a3d576a9b6b70914b26f4cca6f0dd78",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 9,
+          "file": "logsummary.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "b701ef45cdecb3a9042280f3219165a1cfa4dac7ad50cb92e4cf6cc54edc52b1",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 10,
+          "file": "rate_check.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "e0e12aeab71b5f10c067baef94483b9f74a184981b56f4771e70ed377e22a021",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 11,
+          "file": "modal_check.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "a662806c3529c7575774e81a88a68d859161358e607165bd8297d5947a412b29",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 12,
+          "file": "end_prediction.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "1b1e38c666637b600619e1fa3b98639e473a7f4f14e65d1aec8d93ac84da0e1e",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 13,
+          "file": "modal_big.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "8b1ef5b5c49b43ef8ef7b8f462fc06a5ac87154e4e5635c1e14c33cc6f9b6c8c",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 14,
+          "file": "memory_model.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "0ff83b1e970bf1cbaedb8f346228ff4d12920185b06320ad805796d5fc7d25ef",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 15,
+          "file": "meminfo_check.py",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "237b6cccbfe9de808e3be63a1910458808c567e6c172c2039481720e3101d6ae",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 16,
+          "file": "loopback.sh",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "8a4a7a36a4da8091155d040a1b9d70b9a3e98fe314eed8ad764ad0c8cd5c95bb",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 17,
+          "file": "ssh_tools.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "b93f7544966be1c1b26cd3927ef6f6e9b14b9b38d40981fdc75e9adee536ab64",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-05-shell-scripting-processes-and-control-flow.html": {
+      "status": "passed",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "exec_modes.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "6662056a8cac7e64f6b54cccf5bb9fb7890d1946dee9a2b635a333166757abe1",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "interp_line.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "2fdaceb6e20fbfdb5a14d694196132ea89e2f4b5aa3558721811da2125e25dc2",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "arith.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "8de3f535926b30761cb5a685842bd78980235cfc5effcd99761ade90cdfc9527",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "env_demo.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "e7a6556d4885d660470da659561845cc508d96d3c08e6f5c7e07cd27a9a779a2",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "path_demo.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "dd36a609ba767292c9b1dc480e690cabe7f3e9b25f7064d85dfdaec4742d8323",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "status_demo.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "2f94a3f6b12ea4ad6cee5d95e832334fc5b7160c76ccadc3532f4b9b6b849e60",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 7,
+          "file": "read_demo.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "247389eb7bff633fe2370c3553b89225a9df7f49fd2b6d1131144eda9764728b",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 8,
+          "file": "loops_demo.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "12cb1717fd307868568bf698550e04c2c957aa728b9ac64b31905c2aa01dc28c",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 9,
+          "file": "functions_demo.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "216a2e2457e15adfe83000bb7c81bcd3a603a0dbe550925e4422fb1acc8f5e3b",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 10,
+          "file": "fork_cost.sh",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "aec42466ab714b8dfe7da4527ae58693c9d326c9aca14027b223328a1a307878",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 11,
+          "file": "monitor.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "813e7c3a9245befdaabc988bf505e11da4bfddde7f61cef031f13bf8464de362",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 12,
+          "file": "sweep.sh",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "596cc9007d166fa536189fd162c5538db9cb6b51e649680ac69d60111ee1f984",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-06-hpc-components-and-node-architecture.html": {
+      "status": "passed",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "top500_arith.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "4eab7912766c94d6d8e1ce2dd364d33f8020fe6e3977002f15ff14556e1299d1",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "stripe.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "5f987c5e1d8707d51e11b80280f8cc91a29898133ac90b150395ef00ba132b67",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "workspan.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "0c9ebb24e9cc5e527122b66d47eff60e977a33c9534dddad97b7b9cefaa34773",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "fma_scalar.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "f4168cc28ee27c647b17c9ba3763bb792d1019489c71f4e551dfdf46df925616",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "fma_vector.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "34b38b260d5d371bda36d4badeeea5957b60ec24514a8961b212539f7d180823",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "variants.py",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "54c34712ba6f9764dadd703f5fa731c0e780804be28d7d3190ebeb54e30fce66",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 7,
+          "file": "node_scaling.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "7fe483b4b5f46d37ff8cbe41b86cc2955b55201d9d09f92553c94a8b7637fb2d",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 8,
+          "file": "pingpong.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "e03564f4b24cef6cb9ebc52ef6ed8a19d0adc469d9f643999a87c927f8d19fa1",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-07-hierarchical-memory-and-scalable-architectures.html": {
+      "status": "passed",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "interleave.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "64d68515169726f437fd7b8ca78c662bc5150a46f74be67ef5e9978ff3d0ea26",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "reuse.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "7cc43bc10885623403c84df684e02611bda2ef4becc5645dfeef35aad4f0e2a6",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "chase.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "06008e8e9cdf8f0ee5d4d5ea30a28482261f419393e48c17560dec1ebca536ca",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "stride.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "0e1f754435caa5e38d60eb78aed2f221d8594325de5b24e0ab7883b75c4fa203",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "cachesim.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "3053a7747041eadbc5fbab1ed171591c4ff038eee1a4eed062da20e0e34ac90c",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "sumcg.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "71434ea8099648ae2258fe6196274d6e41f32b55b4c11bafe118cb0f202a08cd",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 7,
+          "file": "rowcol.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "244389d2411bb2c6d67570ea2ad89afe1eb7755d31487ffc07282cfb59899218",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 8,
+          "file": "coherence.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "f1293c5a242a110f9496c37e5eeb78c2d3c1777042d527eac9187c11c9c4e88f",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 9,
+          "file": "topology.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "352019f4d6468549aa95661056b5d9445fb9bf42939d4f1f58a62e379f4038f8",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-08-concurrency-and-synchronization.html": {
+      "status": "passed",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "interleave.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "9a2c2d2f0f5fadbcdf14fb9395a578e902feef25a1039b1bc9b550478c004cbe",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "counter.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "b31904fcaee7c36290bd007572f6c9b50c2e3e91319bf66662cacc9bd6156c6b",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "lock_model.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "3965d1c418eac4d69a672569660979239cbe3ec8d2f6686cd19309b6b7879292",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "sb.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "121615a8d0dc94bce58efe0b0fd396e945e707e339750279f69b143740ce26ad",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "peterson.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "dd959adf619b5f93ebd83d99ad4735a5a16b9d7c3013dd5a8955782fa125591b",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "locks.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "393aac3c813ed3a4490e551a66fbad6c55f94d5d5ff590fe5dfea679f55cb059",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 7,
+          "file": "cas_pi.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "c518117fdea75ba7598b4f7bf07ef6dd540f9535c37aec3fdab18e6b227d80a9",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 8,
+          "file": "barrier.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "8554ce910daeed9ffa3e6398eb2c278bb23395afa934349edfea379e725043af",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 9,
+          "file": "deadlock.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "84671d471f51f234e3d34afd54cec4d99f181f6528906285b5aec7d69b53fcc6",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 10,
+          "file": "omp_counter.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "e21f3c4e0e187e53cbee64aff15165a7756d2b2442c5b599c45f3321111862ce",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-09-parallel-computing-numerical-models-and-cost.html": {
+      "status": "passed",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "moore_fit.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "e1125f1efd27bb3c7ff312a9e969f1765c1fa2acb93d5179f8fe6ede107cf78a",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "bag_of_integers.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "2d8f0a50729560cbbb7dfcf5571c28c4094f22b98e1634d975826ac7d2064f80",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "error_balance.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "2855c0f94119f29d88a5555fff0a9977a879bda9f4c6ad50fa2950305ad495e5",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "order_check.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "db36cc2e74ee2adfe0c37ce912d83f6a34cff14ad0df6437b50d79988bfda233",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "canonical_check.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "6408910ac7c1db04aac49c5c0f355dac865a37f252147764aad955cddfb364b2",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "jacobi.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "514b575777be849df4c7f3afed56a2fecf41676d01f05830ccef59c2812ff262",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 7,
+          "file": "jacobi_error.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "de715393744b01c2591de9776ad215a33b8f1c184000414a9ad973942e30d3d2",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 8,
+          "file": "jacobi_time.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "4164e3f23482d4c85d3729a8fb0b1b663ae5d1431a1d4ff4adc41e5a0691bff2",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 9,
+          "file": "cost_model.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "dbf7697a379249b2357e502ec4bf03630e59604d79a8f1b508f126972337812a",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 10,
+          "file": "band_solve.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "8e033307eddf207fd6e7bdfbc272211ac73b355f60803782913f2d4ee46556d7",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 11,
+          "file": "autopar.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "a4dced47e435b7bccd73a3fccabac7b9a0ebf89ccd0666ae27b077fae141371d",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 12,
+          "file": "gauss_seidel.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "58b7a01b819911a45a2227da57561f9cd7b8172fc71ff5171e2d73184ab28bf7",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.html": {
+      "status": "passed",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "hierarchy.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "d1051cc66370d4fddb967cac44b881b50841996ae79e056acd6c6b5cd6f3d925",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "faults.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "8ca4d82e308da329c792e13c3773af469caf56b712a1c5f86bd19404a8e1fe77",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "amat.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "d6329bd2ccdd70ea7a8eb9c5873296073062bc706a600ab69fd17f9ee7cba264",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "stream_mini.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "85bd94a315068e61b91e6c20ab2eecd9343e65488a95201138da6b17a2c37e2f",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "fill_mini.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "d9fef9957db47a2e7fddd308936a03df117c2389fa792c450aa510398c1e323f",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "peak_fma.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "6787eccce25cb1ff691182847f237a48220f1c8009d37d77d427afd89915f4f4",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 7,
+          "file": "jacobi_bench.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "59903d8f3d432a50a9a3f42b90f377ba38d117f1776b3a90dd21615670c93b54",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 8,
+          "file": "roofline.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "10bbaeb3198bf5d208a83c672b8527a047ce6bec4dfd492546fe4115a01e434f",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 9,
+          "file": "jacobi_check.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "8be566124ce30096470823897b9960bb8337ba7263b1d359911afcdc5c1ddb46",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 10,
+          "file": "systems.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "a735b171136d485058fdaf8e2b90a265721a378810baff3f0508b518794af751",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-11-openmp-threads-and-work-distribution.html": {
+      "status": "passed",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "hello.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "ab91a3564edaff3cb6ddcf78d36896f534bb3d1b38eb61140766a083365d0ed6",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "interleavings.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "21a2d102f189075607040fd7c556f54bd27a6383d9b8f920bf63273b8c16355e",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "team.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "d22d989afef0341a7550d4c472525893a1d2fb2f47f08348deeea74ad8bb89da",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "race.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "15d070543f142f156e9fe6c7f9b7e3d84dca1b6fb270f7c6a05c20ee5bb55a89",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "pi_error.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "e04be42c949d83f4225a05cf0004130fcb5940c63ccfd94f9d547d354be9c4ad",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "pi_spmd.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "83d968e4ce08a231efeabeaa7a17b05fe5f1adb795199c17faf7a160fe91eb7d",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 7,
+          "file": "triangle.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "5eb0771448d31b72758a1d4cd59000e1124bbc6bb83b8ea48c77b73400286502",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 8,
+          "file": "amdahl.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "b0ce51f47dc1f83d864df6e00040f37be2d067c36199feebfb3fbd5cc077af5e",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 9,
+          "file": "fork_cost.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "bd700c9d34685bcfdee0f2d629a26e0018c8272c5a9d2a35f5667f7a588f97df",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 10,
+          "file": "falseshare.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "28bb55ac091d8b0e0f396bf9988a8f3fe54df3d5fdb7c5237d03dd8039582b33",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 11,
+          "file": "pi_scaling.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "8fe5e82afb6e2115d06f0e38644f30f83737a5b57479080c03ba732a0eda12f3",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    }
+  }
+}
