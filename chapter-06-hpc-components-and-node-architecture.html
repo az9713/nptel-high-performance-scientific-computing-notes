@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="25df0acdbdc801ac0b727fe2da9ae10425bc089ff468948ce29fc5d0b905eeeb"><title>The components of an HPC system and the architecture of a compute node · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>The components of an HPC system and the architecture of a compute node</h1>
+<p class="lead">A job needs \(10^{15}\) floating-point operations, one petaflop of work. Written as a plain loop and compiled without vectorization, it runs at about 9 Gflop/s on one core of the machine used in this chapter, and the job takes about 30 hours. The same loop compiled for the instructions that the core has (vector registers and fused multiply-add) runs at about 59 Gflop/s on the same core, and the job takes 4.7 hours, a factor of 6.2 less. The node has 8 cores and 12 hardware threads; the highest rate measured on all of them with a register-resident multiply-add kernel is 284 Gflop/s (196 to 284 Gflop/s in eight runs), which would take the job 0.98 hours. The machine that the lecture presents as the largest, Frontier, reached 1.206 Eflop/s on the Linpack benchmark in June 2024, which is \(10^{15}\) operations in 0.83 ms. This chapter defines the parts of such a system (login nodes, compute nodes, interconnect, parallel file system, scheduler), derives the peak rate of one node from the structure of its cores, and measures how far ordinary code stays below that peak and which hardware features it leaves unused.</p>
+<p class="source-note">Grounded in two recordings of the NPTEL course <em>High Performance Scientific Computing</em> (Prof. Shivasubramanian Gopalakrishnan, IIT Bombay): <a href="https://www.youtube.com/watch?v=G8zq1xqe_jI">W2L3, Introduction to High-Performance Computing (HPC) and Its Key Components</a>, and <a href="https://www.youtube.com/watch?v=xWBICsJyDZo">W2L4, Exploring Computing Platform Architecture and CPU Optimization Techniques</a>. <strong>Lecture material:</strong> the history of supercomputing and the units of speed; the TOP500 list and the Linpack benchmark; computation as a third mode of science; the definitions of high performance computing and of a supercomputer; parallel against distributed computing; applications; the components of a cluster and its software stack; the rack, the node and its motherboard; the reasons for parallel computing and the desirable attributes of a parallel algorithm; the frameworks OpenMP, MPI and OpenACC; the basic computing model (statement, instruction, opcode, operand, arithmetic logic unit, instruction set architecture); Flynn's taxonomy; programs and processes; single-tasking, multiprogramming, multitasking and the context switch; threads; symmetric and asymmetric multiprocessing; Intel Hyper-Threading. <strong>Research extensions:</strong> TOP500 list pages and the TOP500 description of the Linpack rules (dated); the HPL reference implementation page; the Slurm overview and multi-core support pages; the Lustre manual (bandwidth rule and striping); the OpenHPC site; the US Army Ordnance monograph on ENIAC (1961); Flynn (1966, 1972, abstracts); Intel's Optimization Reference Manual (Golden Cove execution units and latencies, hybrid cores); the uops.info measurement database (FMA latency and throughput on P-cores and E-cores, third-party data); the Intel M80C286 data sheet; Marr and colleagues (2002) on Hyper-Threading; the Linux <code>pthreads(7)</code> manual page; Little (1961) and Brent (1974), abstracts only. <strong>Original teaching constructions:</strong> the peak-rate model and its two terms (issue width and dependence latency); the experiments that measure them (register-resident multiply-add kernels, five builds of one loop, a thread-scaling run, a context-switch ping-pong); the work–span programs and the proof of the greedy bound; the striping model; the multiprogramming utilization model; the shared-core model of Hyper-Threading; the claims table and the six exercises.</p>
+
+<h2 id="model">The objects of the chapter and the running case</h2>
+<p>The chapter studies one question at two scales: how fast can a machine compute, and what in its structure sets that limit. The objects are defined here, bottom up, and each is used with this meaning throughout.</p>
+<p><strong>Processors.</strong> A <em>floating-point operation</em> (flop) is one addition, subtraction or multiplication of two double-precision numbers (64-bit floating-point numbers). A <em>fused multiply-add</em> (FMA) computes \(a\cdot b+c\) as one instruction and counts as 2 flops. A <em>core</em> is a unit that fetches and executes the instructions of one instruction stream. A core runs at a <em>clock frequency</em> \(f\) in cycles per second; one <em>cycle</em> is \(1/f\) seconds. A <em>hardware thread</em> (a <em>logical processor</em>) is a set of architectural state (registers, program counter) in a core that holds one instruction stream; the operating system schedules software threads onto logical processors, and a core has one or two of them on the machines of this chapter. A <em>socket</em> holds one processor chip, which has one or more cores; a <em>node</em> is one computer with one or more sockets, memory, input and output devices, and a network connection. A <em>cluster</em> is a set of nodes joined by a network and used together.</p>
+<p><strong>The rate of one core.</strong> A <em>vector register</em> holds \(\ell\) doubles (\(\ell=4\) for a 256-bit register), and a <em>vector instruction</em> applies one operation to all \(\ell\) lanes. Let \(X\) be the <em>throughput</em> of FMA instructions, the largest number of FMA instructions that the core can start per cycle, and \(L\) their <em>latency</em>, the number of cycles from the moment the operands are ready to the moment the result is ready. The peak rate of a core is</p>
+\[
+\phi = 2\,X\,\ell\ \text{flop per cycle},\qquad P_{\text{core}}=f\,\phi . \tag{6.1}
+\]
+<p>A node of \(c\) identical cores has \(P_{\text{node}}=c\,f\,\phi\), and a cluster of \(n_{\text{node}}\) such nodes has \(P_{\text{peak}}=n_{\text{node}}\,c\,f\,\phi\). This theoretical peak, \(R_{\text{peak}}\) in the vocabulary of the TOP500 list, is a product of hardware parameters. It is not a property of any program. The rate that a program reaches is a different quantity, and the ratio of the two is the efficiency of the program on that machine. The quantity \(R_{\max}\) is the rate that one named program, the Linpack benchmark, reached (next section).</p>
+<p><strong>The machine of this chapter.</strong> Every measurement comes from one laptop: an Intel Core i5-12450H under Windows 11, with all programs built and run in a WSL 2 Ubuntu 24.04 guest by gcc 13.3. The processor is a hybrid design with 4 performance cores (P-cores, Golden Cove microarchitecture, 2 hardware threads each) and 4 efficient cores (E-cores, Gracemont microarchitecture): 8 cores and 12 logical processors, which is what Windows reports in the session below. The split of the 12 logical processors into 2 threads on each P-core and 1 on each E-core is this chapter's inference from the count and from Intel's statement that the P-cores can have Hyper-Threading (§2.3.1). The guest shows 6 cores with 2 threads each; that view is synthetic, and Windows decides which physical core executes each guest processor, so no experiment here controls the mapping. Intel's Optimization Reference Manual states that the E-cores support AVX2 and AVX-VNNI but not AVX-512, so the instruction set is the same on both kinds of core and the machine has no AVX-512 (<a href="https://cdrdv2-public.intel.com/930023/355308-051-optimization-reference-manual-changes-doc.pdf">Intel, document 355308-051, October 2026</a>, §2.3.1, p. 2-6). The clock range comes from a third-party database, because Intel's own specification page refused automated access: 2.0 to 4.4 GHz for the P-cores and 1.5 to 3.3 GHz for the E-cores (<a href="https://www.notebookcheck.net/Intel-Core-i5-12450H-Processor-Benchmarks-and-Specs.589270.0.html">Notebookcheck</a>, retrieved 2026-10-26). Windows reports a nominal clock of 2000 MHz, which matches the lower end of the P-core range. The guest has 15 GiB of memory, and other programs run on the machine while a measurement runs, so every time in this chapter is the best of 3 repetitions inside one run, and a sample is one such run.</p>
+<pre><code class="language-bash">$ grep -o -w -e avx2 -e fma -e avx512f -e pcid -e ht /proc/cpuinfo | sort | uniq -c
+     12 avx2
+     12 fma
+     12 ht
+     12 pcid
+$ free -g | head -2
+               total        used        free      shared  buff/cache   available
+Mem:              15           0          14           0           0          14
+$ powershell.exe -NoProfile -Command "Get-CimInstance Win32_Processor | Format-List Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed" | tr -d '\r' | grep -v '^$'
+Name                      : 12th Gen Intel(R) Core(TM) i5-12450H
+NumberOfCores             : 8
+NumberOfLogicalProcessors : 12
+MaxClockSpeed             : 2000
+</code></pre>
+<p>Windows reports 8 cores and 12 logical processors. The guest lists the flags <code>avx2</code>, <code>fma</code>, <code>pcid</code> and <code>ht</code> on all 12 logical processors and no <code>avx512f</code>. The guest's view of 6 cores with 2 threads each, and of its caches, is synthetic.</p>
+<p><strong>The running case</strong> is the arithmetic of one node. Chapter 9 defines the book's Jacobi problem, and chapter 10 asks whether its sweep is limited by flops or by bytes; this chapter asks the earlier question, what the flop limit of one node is, and uses a polynomial loop that stays in the L1 cache so that memory does not enter. The loop computes \(y_i=p(x_i)\) for a polynomial \(p\) of degree 8 by Horner's rule: 8 multiplications and 8 additions, 16 flops per element, with the input and the output arrays together 32 KiB. Its time per element is set by instruction throughput and dependence latency, which are the two quantities of (6.1) and of the section on instructions.</p>
+
+<h2 id="measure">Units, the TOP500 list, and what the lecture means by high performance computing <a class="timestamp" href="https://www.youtube.com/watch?v=G8zq1xqe_jI&amp;t=6s">W2L3 0:06</a></h2>
+<p><strong>History and the speed plot.</strong> The lecture begins with a photograph of ENIAC on a slide titled "ENIAC – Circa 1947". The 1961 monograph of the US Army Ordnance Corps on its electronic computers states that final assembly took place in the fall of 1945, that ENIAC was formally dedicated at the Moore School of the University of Pennsylvania on 15 February 1946, that the Ordnance Department accepted it in July 1946, that its first units arrived at Aberdeen Proving Ground in January 1947 and that it became operational again there by August 1947 (<a href="https://ed-thelen.org/comp-hist/U-S-Ord-61-ch02.html">US Army Ordnance, <em>Electronic Computers within the Ordnance Corps</em>, 1961</a>, chapter II, pages 23 to 24 of the monograph). The sponsor in that account is the Ordnance Department of the Army, and the purpose it names is the preparation of firing tables. The slide's "circa 1947" is therefore consistent with the machine at Aberdeen, which was operating there in 1947, while the dedication was a year earlier. The photograph on the slide shows the plugboards and cables of the units; the monograph describes the plugging of connections that set the sequence of operations.</p>
+<p>The lecture's first plot shows the speed of the fastest computers against the year on a logarithmic axis, from one operation per second in about 1938 to about \(10^{18}\) in 2022, with integer operations per second before about 1958 and floating-point operations per second afterwards. The slide labels the vertical axis "Peak speed (Rmax)" and cites Wikipedia. The label joins two quantities that the TOP500 list keeps apart, and the next paragraphs separate them.</p>
+<p><strong>Units.</strong> The lecture writes the speed of a computer in <em>flops</em>, floating-point operations per second, and lists the prefixes: teraflops \(10^{12}\), petaflops \(10^{15}\), exaflops \(10^{18}\), zettaflops \(10^{21}\), yottaflops \(10^{24}\). The slide spells the unit as FLOPS, flops and flop/s. This book writes flop for an operation and flop/s for a rate, because the lowercase plural flops is ambiguous between the two. A flop is one operation on two 64-bit operands, as defined in the model section; a rate is incomplete without its precision, and the Linpack rules below fix it at 64 bits.</p>
+<p><strong>The Linpack rule.</strong> The lecture names the TOP500 list and its benchmark, High Performance Linpack (HPL). The TOP500 project describes the benchmark as the solution of a dense system of linear equations. It lets the user scale the problem and optimize the software, and it reports four numbers: \(R_{\max}\), the highest rate achieved, at the problem size \(N_{\max}\); \(N_{1/2}\), the problem size at which half of \(R_{\max}\) is reached; and \(R_{\text{peak}}\), the theoretical peak. The rules require LU factorization with partial pivoting and an operation count of \(\tfrac23 n^3+O(n^2)\) double-precision operations for a system of order \(n\). They exclude fast matrix multiplication such as Strassen's method, solving in lower precision and refining iteratively, and emulating floating-point arithmetic in integers (<a href="https://www.top500.org/project/linpack/">TOP500, Linpack project page</a>). The reference implementation, HPL, solves a random dense system in 64-bit arithmetic on distributed-memory computers with a two-dimensional block-cyclic data distribution and requires an MPI library and a BLAS library (<a href="https://www.netlib.org/benchmark/hpl/">netlib, HPL 2.3</a>). Because the operation count is fixed by the rules, the reported rate is the fixed count divided by the measured time, and \(R_{\max}\) is a property of a machine running one program, not a peak.</p>
+<p><strong>The lecture's numbers, checked.</strong> The lecture states that Frontier at the Oak Ridge National Laboratory was the most powerful system, with a Linpack score of 1.206 Eflop/s and 8,699,904 combined CPU and GPU cores. The TOP500 page of Frontier lists exactly these figures for the June 2024 list: \(R_{\max}=1{,}206.00\) Pflop/s, \(R_{\text{peak}}=1{,}714.81\) Pflop/s, 8,699,904 cores and 22,786 kW (<a href="https://www.top500.org/system/180047/">TOP500, Frontier</a>, retrieved 2026-10-26). The listing below computes the consequences of these figures and of the June 2026 entry of the same page, where Frontier has 9,066,176 cores, \(R_{\max}=1{,}353.00\) Pflop/s, \(R_{\text{peak}}=2{,}055.72\) Pflop/s and \(N_{\max}=24{,}837{,}120\). It also computes the doubling times of rank 1 and rank 500 from the June 2008 and June 2026 lists. The program does arithmetic on copied figures and measures nothing, so its output is checked exactly.</p>
+<pre><code class="language-python" data-file="top500_arith.py" data-run="python3 top500_arith.py">"""Arithmetic on figures copied from the TOP500 pages (retrieved 2026-10-26).  No measurement here."""
+from math import log2
+
+# Frontier, June 2024 list (the figures of the lecture): Rmax and Rpeak in PFlop/s, power in kW.
+rmax, rpeak, cores, power_kw = 1206.00, 1714.81, 8_699_904, 22_786.0
+print("Frontier, June 2024 list")
+print(f"  Rmax / Rpeak               = {rmax / rpeak:.3f}")
+print(f"  Rpeak per counted core     = {rpeak * 1e15 / cores / 1e9:.1f} Gflop/s")
+print(f"  Rmax per watt              = {rmax * 1e15 / (power_kw * 1e3) / 1e9:.1f} Gflop/s/W")
+
+# HPL work for the largest problem on the June 2026 list: Nmax, Rmax, and the count 2/3 n^3 (TOP500 rules).
+nmax, rmax26 = 24_837_120, 1353.00
+work = 2 / 3 * nmax**3
+print("Frontier, June 2026 list")
+print(f"  HPL work 2/3 Nmax^3        = {work:.3e} flop")
+print(f"  time at Rmax               = {work / (rmax26 * 1e15):.0f} s = {work / (rmax26 * 1e15) / 3600:.2f} h")
+print(f"  matrix 8 Nmax^2            = {8 * nmax**2:.3e} bytes")
+
+# Rank 1 and rank 500 (Rmax in TFlop/s): the moving target, June 2008 to June 2026.
+r1_2008, r500_2008 = 1026.00, 9.00             # Roadrunner; rank 500
+r1_2026, r500_2026 = 2198.40e3, 2.66e3         # LineShine; rank 500
+years = 18
+print("Rank 1 and rank 500, June 2008 to June 2026")
+for name, a, b in (("rank 1  ", r1_2008, r1_2026), ("rank 500", r500_2008, r500_2026)):
+    print(f"  {name}: x{b / a:,.0f} in {years} years, doubling time {years / log2(b / a):.2f} years")
+print(f"  June 2026: rank 1 / Frontier = {r1_2026 / (rmax26 * 1e3):.2f}")
+print("  rank 500 had 1.02 PFlop/s in June 2019; rank 1 had 1.026 PFlop/s in June 2008: 11 years apart")
+</code></pre>
+<pre><code class="output">Frontier, June 2024 list
+  Rmax / Rpeak               = 0.703
+  Rpeak per counted core     = 197.1 Gflop/s
+  Rmax per watt              = 52.9 Gflop/s/W
+Frontier, June 2026 list
+  HPL work 2/3 Nmax^3        = 1.021e+22 flop
+  time at Rmax               = 7549 s = 2.10 h
+  matrix 8 Nmax^2            = 4.935e+15 bytes
+Rank 1 and rank 500, June 2008 to June 2026
+  rank 1  : x2,143 in 18 years, doubling time 1.63 years
+  rank 500: x296 in 18 years, doubling time 2.19 years
+  June 2026: rank 1 / Frontier = 1.62
+  rank 500 had 1.02 PFlop/s in June 2019; rank 1 had 1.026 PFlop/s in June 2008: 11 years apart</code></pre>
+<p>The efficiency \(R_{\max}/R_{\text{peak}}\) of Frontier in June 2024 is 0.703: the Linpack program, which is the best case for regular arithmetic, reached 70 % of the theoretical peak. The average theoretical peak per counted core is 197 Gflop/s. That is 2.8 times the 70.4 Gflop/s that equation (6.1) gives for one P-core of the laptop at 4.4 GHz (computed in the section on the node), so a "core" in the TOP500 count is not a CPU core of the kind measured in this chapter; the lecture's slide says the count combines CPU and GPU cores, and an average over both kinds cannot be compared with the rate of a CPU core. The energy figure, 52.9 Gflop/s per watt on the Linpack run, is the ratio of \(R_{\max}\) to the power the list reports. The June 2026 problem has \(N_{\max}=24{,}837{,}120\); its operation count \(\tfrac23N_{\max}^3\) is \(1.02\times10^{22}\) flop, which at \(R_{\max}\) takes 7549 s, 2.10 hours, and its matrix of \(8N_{\max}^2=4.9\times10^{15}\) bytes shows that the benchmark is sized by memory capacity. The operation count grows as \(n^3\) and the data as \(n^2\), so the work per byte grows linearly with \(n\); that is why this benchmark approaches the peak rate where a stencil sweep, which does a constant number of operations per byte, does not (chapter 10).</p>
+<p><strong>A moving target.</strong> The lecture defines a supercomputer as a system whose performance is close to the highest rate of the day, so that yesterday's supercomputers stop being supercomputers. The lists give this a number. In June 2008 rank 1 (Roadrunner) had \(R_{\max}=1{,}026\) Tflop/s and rank 2 had 478.2 Tflop/s, so one system was above 1 Pflop/s. Rank 500 had 9.00 Tflop/s in June 2008 and 1.02 Pflop/s in June 2019 (<a href="https://www.top500.org/lists/top500/2008/06/">June 2008</a>, <a href="https://www.top500.org/lists/top500/list/2019/06/?page=5">June 2019, page 5</a>): the level of the unique leader of June 2008 was reached by rank 500 eleven years later. The doubling times over 18 years, from the listing, are 1.63 years for rank 1 and 2.19 years for rank 500. The lecture's statement that Frontier is the most powerful system has a date: Frontier was rank 1 from June 2022 to June 2024 and rank 2 from November 2024 (<a href="https://www.top500.org/system/180047/">TOP500, Frontier</a>); in the June 2026 list, rank 1 is LineShine with 2,198.40 Pflop/s and Frontier is rank 3 with 1,353.00 Pflop/s (<a href="https://www.top500.org/lists/top500/2026/06/">June 2026</a>). The listing gives the ratio of the two \(R_{\max}\) values, 1.62.</p>
+<p><strong>Computation as a third mode of science, and the definition of HPC.</strong> The lecture describes the traditional route of science as theory followed by experiment, with Newton's gravitation and Galileo's remark that mathematics is the alphabet of the universe, and adds computation as the third mode: computational science combines a science, its mathematics and computer science. It defines high performance computing as a set of computing technology derived from standard technology for fast numerical simulation, modeling and large data processing, built on parallel processing, and aimed at "grand challenge" problems that need much mathematical computation. It adds a warning: an arbitrary desktop application does not run fast on a supercomputer, because only applications that expose parallel algorithms do. The section on parallel computing turns that warning into a computable property. The lecture contrasts <em>parallel</em> computing, with processing elements closely coupled, and <em>distributed</em> computing, with isolated ones, and gives 50 machines on a gigabit Ethernet network in a laboratory as an example of the second. The two share the principle that a large problem is divided into small problems that are solved concurrently; the difference is the cost of communication, which chapter 14 models with \(T_{\text{msg}}(m)=\alpha+\beta m\).</p>
+<p>The applications that the lecture lists are weather, climate and air quality; genome sequencing and the design of drugs and vaccines; materials design from electronic structure; astrophysical imaging; crash simulation instead of crashing prototypes; aerodynamic design with computational fluid dynamics; and the structural analysis of buildings with the finite element method. The share of supercomputing capacity given to COVID-19 research is the lecturer's statement; no source was sought.</p>
+
+<h2 id="cluster">The components of a cluster and the path of a job <a class="timestamp" href="https://www.youtube.com/watch?v=G8zq1xqe_jI&amp;t=1080s">W2L3 18:00</a></h2>
+<p>The lecture presents the cluster as the popular architecture of supercomputers and names its parts on one diagram. The parts are of five kinds. <strong>Compute nodes</strong> run the parallel program; the lecture calls the collection of them the source of the compute power. <strong>Accelerated compute nodes</strong> are nodes that also carry accelerators, graphics processing units that the lecture says use the single-instruction-multiple-data (SIMD) principle, defined in the section on Flynn's taxonomy. The <strong>interconnect</strong> joins the nodes: the diagram shows a switch fabric and a "primary interconnect" that the lecture says gives high bandwidth and low latency, with ParamNet and InfiniBand as examples, and a separate gigabit Ethernet (1 GbE) network for administration. The <strong>storage</strong> has three layers in the diagram: a parallel file system of many rotating disks, a "storage acceleration" layer of solid-state drives that the lecture says holds frequently used code and data, and a hierarchical storage manager with a backup server and a tape library for backup and restore. The <strong>access and management</strong> nodes are the login nodes behind a networking gateway with a firewall, through which users reach the cluster from a local or remote network, and the boot servers and management nodes, which boot the compute nodes over the network and let the administrator manage every element.</p>
+<p>The formal model of this chapter is a partition of the nodes of a cluster by role, with one rule of access. Let \(\mathcal N\) be the set of nodes and \(\rho:\mathcal N\to\{\text{login},\text{compute},\text{storage},\text{management}\}\) a role assignment, where a compute node may also carry an accelerator. Users connect only to nodes with \(\rho=\text{login}\); a program runs only on nodes with \(\rho=\text{compute}\) that a scheduler has allocated to it; every node reaches the storage nodes through the interconnect. The lecture describes the path of a job in these terms: the user logs in with credentials on a login node, submits a job, the job runs on free compute nodes, and the job completes. In steps:</p>
+<ol>
+<li>The user connects to a login node through the gateway and obtains a shell. The lecture says that the cluster uses Linux as its operating system and that the login node is where the user gets the prompt.</li>
+<li>The user submits a job description (the resources wanted and the command to run) to the scheduler. The lecture names SLURM.</li>
+<li>The scheduler allocates compute nodes. The Slurm overview states its three functions: it allocates exclusive or non-exclusive access to resources (compute nodes) to users for some time, it provides a framework for starting, executing and monitoring work, normally a parallel job, on the allocated nodes, and it arbitrates contention for resources by managing a queue of pending work (<a href="https://slurm.schedmd.com/overview.html">Slurm Workload Manager, Overview</a>, retrieved 2026-10-26).</li>
+<li>The program reads its input and code from the home area and writes scratch data to the parallel file system; the lecture assigns the home area to NFS and the scratch area to Lustre.</li>
+<li>When the job ends, the nodes return to the pool, and the output remains on the file systems.</li>
+</ol>
+<p>The lecture's software stack, drawn as three bands, has the same structure. The bottom band is the operating system, Linux in a stripped-down form, with CentOS 7.x on the slide and Debian or Fedora named as alternatives. The middle band is "middleware, applications and management": resource management and job scheduling (SLURM), the file systems (NFS, local file systems XFS and EXT4, Lustre), provisioning (OpenHPC with Warewulf) and cluster monitoring (Ganglia, Nagios, XDMoD). The lecture explains the arrows of its slide as a chain: the user submits to SLURM; SLURM uses the provisioning tools to assign free nodes; the provisioning tools use the monitoring tools to learn which nodes are free. The top band is the programming tools: application libraries (MPI implementations, MVAPICH2, Open MPI and Intel MPI, and visualization tools), development tools (Intel Cluster Studio or the GNU compilers) and performance monitoring (HPCC, IMB, IOR, FMGUI). OpenHPC describes itself as a collaborative community effort that aggregates the common ingredients for deploying and managing HPC Linux clusters, and lists provisioning tools, resource management, I/O clients, development tools and scientific libraries (<a href="https://openhpc.community/">OpenHPC</a>, retrieved 2026-10-26). The slide's version numbers (CentOS 7.x) date the stack; a cluster built today uses newer releases of the same roles.</p>
+<p><strong>What a parallel file system does.</strong> The lecture says that a parallel file system lets many processes on the compute nodes operate on one file, each on a part of it. The Lustre manual gives the mechanism. A Lustre file system has metadata servers (MDS) with metadata targets (MDT) that hold the names and the layout of files, object storage servers (OSS) with object storage targets (OST) that hold the file data, and clients, the compute nodes (§1.2.2). A client first asks the MDT for the layout of a file, then reads and writes the objects directly on the OSS nodes, and the manual states that several clients can write to different parts of the same file simultaneously (§1.2.2), which is the lecture's statement. A file can be <em>striped</em>: its data is cut into chunks of <code>stripe_size</code> bytes and stored round-robin in <code>stripe_count</code> objects on different OSTs, a RAID-0 pattern. The default is a stripe count of 1 and a stripe size of 1 MB, and the user can change both per file or per directory (§1.3.1). The manual states the bandwidth rule in §1.3: the network bandwidth is the aggregate bandwidth of the OSS nodes to the targets; the disk bandwidth is the sum of the bandwidths of the storage targets up to the limit of the network bandwidth; and the aggregate bandwidth is the minimum of the two (<a href="https://doc.lustre.org/lustre_manual.xhtml">Lustre Software Release 2.x Operations Manual</a>, retrieved 2026-10-26). Let \(k\) be the stripe count, \(b_{\text{ost}}\) the bandwidth of one target and \(B_{\text{link}}\) the bandwidth of the link between a client and the servers. For one file written by one client, the rule gives</p>
+\[
+B(k)=\min\bigl(k\,b_{\text{ost}},\;B_{\text{link}}\bigr). \tag{6.2}
+\]
+<p>The manual states the rule for a file system; the form (6.2) for one file is this chapter's reading of it, and it assumes that the client's data are spread evenly over the objects. The program below does two things. It computes, for a file of 1000 MiB plus 123 bytes, how many bytes each object receives under round-robin striping with 1 MiB chunks, and checks that the shares add up to the file size. Then it evaluates (6.2) with assumed values, 2 GB/s per target and 12 GB/s for the link; these are model parameters, not measurements of any system. The output is deterministic and is checked exactly.</p>
+<pre><code class="language-python" data-file="stripe.py" data-run="python3 stripe.py">"""Round-robin striping of one file over objects, and the bandwidth rule of a parallel file system.
+The bandwidths are assumed model values, not measurements."""
+MiB = 2**20
+
+
+def bytes_per_object(file_bytes, stripe_size, stripe_count):
+    """Chunk j of the file (bytes j*stripe_size onward) is stored in object j mod stripe_count."""
+    got = [0] * stripe_count
+    for j in range((file_bytes + stripe_size - 1) // stripe_size):
+        got[j % stripe_count] += min(stripe_size, file_bytes - j * stripe_size)
+    return got
+
+
+def write_seconds(file_bytes, stripe_count, ost_gbps, link_gbps):
+    """Each object is written at ost_gbps, in parallel; the client link caps the total at link_gbps."""
+    slowest_object = max(bytes_per_object(file_bytes, MiB, stripe_count)) / (ost_gbps * 1e9)
+    link_limit = file_bytes / (link_gbps * 1e9)
+    return max(slowest_object, link_limit)
+
+
+size = 1000 * MiB + 123                    # a file whose size is not a multiple of the stripe size
+for k in (1, 3, 8):
+    got = bytes_per_object(size, MiB, k)
+    assert sum(got) == size
+    print(f"stripe_count {k}: first object {got[0]} B, last object {got[-1]} B, "
+          f"largest share {max(got) / size:.3f} of the file")
+
+ost, link = 2.0, 12.0                      # assumed: 2 GB/s per object storage target, 12 GB/s client link
+print("stripe_count  seconds  delivered GB/s  min(k*ost, link)")
+for k in (1, 2, 4, 6, 8, 16):
+    t = write_seconds(size, k, ost, link)
+    print(f"{k:12d} {t:8.3f} {size / t / 1e9:15.2f} {min(k * ost, link):12.1f}")
+</code></pre>
+<pre><code class="output">stripe_count 1: first object 1048576123 B, last object 1048576123 B, largest share 1.000 of the file
+stripe_count 3: first object 350224384 B, last object 349175808 B, largest share 0.334 of the file
+stripe_count 8: first object 131072123 B, last object 131072000 B, largest share 0.125 of the file
+stripe_count  seconds  delivered GB/s  min(k*ost, link)
+           1    0.524            2.00          2.0
+           2    0.262            4.00          4.0
+           4    0.131            8.00          8.0
+           6    0.088           11.98         12.0
+           8    0.087           12.00         12.0
+          16    0.087           12.00         12.0</code></pre>
+<p>With the default stripe count of 1, the whole file sits in one object and the delivered rate is that of a single target, 2.0 GB/s, however many targets the file system has. The rate rises linearly with \(k\) until \(k\,b_{\text{ost}}\) reaches the link rate, at \(k=B_{\text{link}}/b_{\text{ost}}=6\), where the delivered rate is 11.98 GB/s, and a stripe count above 6 buys nothing in the model. The 11.98 instead of 12.00 at \(k=6\) comes from the chunk count: 1000 chunks do not divide evenly over 6 objects, so four objects hold 167 chunks and two hold 166. The largest object holds 0.167 of the file, and its write time at 2 GB/s, 0.0876 s, is slightly longer than the link time, 0.0874 s. The 123 extra bytes do not change this result. Striping a file is therefore a decision with a numerical consequence, and the right stripe count depends on how many clients write the file and how fast each client's link is. The model contains no cost for the metadata work or for small files, so it cannot say when a stripe count above 1 hurts; the manual has a section on striping considerations (§19.2) that this chapter did not read.</p>
+<p>The interconnect enters the cost of every message. The book writes the time to send \(m\) bytes between two nodes as \(T_{\text{msg}}(m)=\alpha+\beta m\), where \(\alpha\) is the latency in seconds and \(\beta\) the inverse bandwidth in seconds per byte; chapter 14 measures both on this machine and fits them. The lecture's requirement of "high bandwidth and low latency" is the requirement of small \(\beta\) and small \(\alpha\).</p>
+
+<h2 id="node">Inside one compute node: sockets, memory, input and output, and the peak rate <a class="timestamp" href="https://www.youtube.com/watch?v=G8zq1xqe_jI&amp;t=1516s">W2L3 25:16</a></h2>
+<p>The lecture shows a row of racks, eight in its photograph, each holding many nodes, and then opens one node. A node has a motherboard that takes two sockets, each holding a CPU (an Intel Xeon in the picture), memory modules (DIMMs) in the slots next to each socket, and input and output, of which the lecture shows the network interface card that connects the node to the switches. The slide of the motherboard labels a dual Intel LGA3647 socket, 8 DIMMs for up to 1024 GB, the Intel C621 chipset and a PCI Express x16 (generation 3) link, and a second version of the slide adds a red accelerator card in the PCI Express slot. The lecture's summary of the node is CPU, memory and input and output. Its list of the components of a supercomputer is: processors, memory, interconnects (system area networks) and accelerators or co-processors. The slide's labels are the only specification the lecture gives of this board, and this chapter does not look up the processors that fit it.</p>
+<p><strong>The peak of a core from its structure.</strong> The model section defines the peak rate as \(P_{\text{core}}=f\phi\) with \(\phi=2X\ell\). For the P-core of the laptop, Intel's manual lists in its table of execution units the multiply and fused multiply-add unit as "2x256-bit" (Table 2-4, row "Mul/FMA", p. 2-14), so \(X=2\) FMA instructions per cycle on 256-bit registers, and \(\ell=4\) doubles per register. Then \(\phi=2\times2\times4=16\) flop per cycle, and</p>
+\[
+P_{\text{core}}(4.4\ \text{GHz})=4.4\times10^{9}\times16=70.4\ \text{Gflop/s},\qquad 4\,P_{\text{core}}=281.6\ \text{Gflop/s}. \tag{6.3}
+\]
+<p>The figure 281.6 Gflop/s is an upper bound on the contribution of the 4 P-cores at their highest clock, 4.4 GHz; the clock of all cores running together is lower and was not found in a document that could be opened. The same arithmetic at the P-core's low clock, 2.0 GHz, gives 32 Gflop/s per core. The manual's Table 2-3 marks FMA units on three ports, two of them with notes that did not survive the text extraction of the opened document; the table of execution units gives 2 units of 256 bits for multiplication and FMA, and this chapter uses that number. The measurement below agrees with it: the rate stops rising at 2 vector FMA per cycle. The per-cycle figure of the E-core (Gracemont) is in a section of the manual that was not part of the opened document. It comes from a measurement database, uops.info (data file dated 2026-03-29), which lists the measured latency, reciprocal throughput and micro-operation count of each instruction form on each core type; the figures are measurements by the database's authors, not vendor figures, and they describe single instruction forms. For the 256-bit form of <code>VFMADD231PD</code> the database gives for the P-core 1 micro-operation on ports 0 and 1, reciprocal throughput 0.50 cycles and latency 4 cycles, which agrees with Intel's tables (\(X=2\), \(L=4\)). For the E-core it gives 2 micro-operations, reciprocal throughput 1.00 cycle and latency 6 cycles. The E-core therefore starts one 256-bit FMA per cycle (\(X_E=1\)), \(\phi_E=2\times1\times4=8\) flop per cycle, and at its highest clock, 3.3 GHz, \(P_{E}=26.4\) Gflop/s; four E-cores give 105.6 Gflop/s. The bound for all 8 cores at their highest clocks is \(281.6+105.6=387.2\) Gflop/s. The second hardware thread of a P-core adds no FMA unit, so the 12 logical processors do not raise it. Two quantities that the lecture does not give are therefore fixed for the P-core: the issue width \(X=2\) and, from the manual's bypass table (Table 2-5, p. 2-14), the latency of an FMA, \(L=4\) cycles. The next two sections test both numbers by measurement.</p>
+
+<h2 id="why-parallel">Why parallel: capacity, time, and the concurrency a program offers <a class="timestamp" href="https://www.youtube.com/watch?v=G8zq1xqe_jI&amp;t=1551s">W2L3 25:51</a></h2>
+<p>The lecture gives two reasons for parallel computing and a third that combines them. A single CPU is slow, so a program that runs on it may take days or weeks; with more CPUs the job divides into smaller jobs that finish sooner. A single node has limited memory, so the data may not fit; with more CPUs, each with its own memory, the total memory grows. A user can therefore save time, solve a larger problem, or solve a larger problem in a shorter time.</p>
+<p><strong>The capacity argument, in numbers.</strong> The book's Jacobi problem stores two arrays \(u\) and \(u_{\text{new}}\) of \((N+2)^2\) doubles, so the memory is \(16(N+2)^2\) bytes. On the 15 GiB of the guest the largest grid has \(N\approx\sqrt{15\cdot2^{30}/16}-2\approx31{,}700\) points per side, if nothing else uses memory. A grid of \(N=10^{6}\) needs \(16\times(10^6+2)^2=1.6\times10^{13}\) bytes, 16 TB, which is at least 994 nodes of 15 GiB. The memory per side grows as the square root of the number of nodes, \(N\propto\sqrt{n_{\text{node}}}\), so a thousandfold increase in memory buys a 32-fold increase in the number of points per side. Memory capacity decides whether a problem can run at all, and the computing time decides whether it finishes; the next paragraphs define the property that decides the second.</p>
+<p><strong>Who parallelizes.</strong> The lecture describes the use of HPC as teamwork. A domain expert, for example in weather, knows the mathematics and the algorithms; a computational expert knows the cluster, its tools and its frameworks. The route goes from an algorithm to a parallel algorithm, to code in a language such as C or Python, to a program compiled with a parallel framework such as OpenMP or MPI, and then to workflows or problem-solving environments with a graphical interface, through which domain experts use the program without seeing the hardware or the framework. Some such applications are commercial products; the lecture names MATLAB. The rest of this section concerns the second step, the parallel algorithm, and the property that decides whether it exists.</p>
+<p><strong>Concurrency as a property of the computation.</strong> The lecture states that a parallel algorithm must show concurrency, and that if the output of the first part is the input of the next, concurrency is lost and the program is unsuited to a supercomputer. The slide defines concurrency as the ability to perform many actions simultaneously. This definition can be made exact. Describe a computation as a directed acyclic graph whose nodes are operations and whose edges say that an operation needs the result of another. The <em>work</em> \(W\) is the number of operations, and the <em>span</em> \(D\) is the number of operations on the longest path, the length of the longest chain of dependences. The ratio \(W/D\) is the <em>concurrency</em> of the computation. The lecture's "output of the first is the input of the next" is a graph that is one path: \(D=W\) and the concurrency is 1. Two bounds follow, for \(p\) processing elements that each execute one operation per time step. First, no schedule can finish before \(D\) steps, because the longest chain is sequential, and none before \(W/p\) steps, because \(p\) elements do at most \(p\) operations per step; so \(T_p\ge\max(D,W/p)\) and</p>
+\[
+S_p=\frac{T_1}{T_p}\le\min\Bigl(p,\frac{W}{D}\Bigr),\qquad T_p\le\frac{W-D}{p}+D\ \text{ for a greedy schedule.} \tag{6.4}
+\]
+<p>A <em>greedy schedule</em> never leaves a processing element idle while an operation is ready. The second bound is proved as follows. Call a step <em>complete</em> if \(p\) operations run in it, and <em>incomplete</em> otherwise. In an incomplete step every ready operation runs, so the length of the longest path in the remaining graph falls by one; there are therefore at most \(D\) incomplete steps, say \(I\le D\), each running at least one operation. The complete steps run \(p\) operations each, so their number \(C\) satisfies \(pC\le W-I\), and \(T_p=C+I\le (W-I)/p+I=W/p+I(1-1/p)\le W/p+D(1-1/p)=(W-D)/p+D\). Brent (1974) proved a bound of this kind for the evaluation of arithmetic expressions: his abstract states that an expression with \(n\) variables and constants, using addition, multiplication and division with any nesting, can be evaluated in time \(4\log_2 n+10(n-1)/p\) on \(p\) processors that each perform an operation in unit time, and that this is within a constant factor of the best possible (<a href="https://doi.org/10.1145/321812.321815">Journal of the ACM 21(2), 201–206</a>; abstract only). The bound (6.4) is the general form that the proof above gives; the expression result is the special case that Brent's paper treats.</p>
+<p>The program builds the graphs of three ways to add \(n=1024\) numbers and computes \(W\), \(D\), the concurrency, and the time of a greedy schedule for \(p=1,4,16,64\), together with the bound of (6.4). The serial chain adds term after term to a running total. The balanced tree adds pairs, then pairs of pairs. The third computation is what an OpenMP reduction does: 8 threads each form a private partial sum of 128 terms, and one thread then adds the 8 partial sums in a chain. The program checks \(T_1=W\) and that every simulated time is at most the bound. It is deterministic, and its output is checked exactly.</p>
+<pre><code class="language-python" data-file="workspan.py" data-run="python3 workspan.py">"""Work, span and greedy schedules of three computations that each add n = 1024 numbers."""
+import heapq
+from math import ceil
+
+
+def chain(n):
+    """Serial sum: operation i adds term i + 1 to the running total, so it needs operation i - 1."""
+    return {i: ([i - 1] if i else []) for i in range(n - 1)}
+
+
+def tree(n):
+    """Balanced tree: the n inputs are values, not operations; each operation adds two values."""
+    deps, level, nid = {}, [None] * n, 0
+    while len(level) &gt; 1:
+        nxt = []
+        for a, b in zip(level[0::2], level[1::2]):
+            deps[nid] = [x for x in (a, b) if x is not None]
+            nxt.append(nid)
+            nid += 1
+        level = nxt
+    return deps
+
+
+def partial_sums(n, p):
+    """p private partial sums (chains of n/p - 1 adds), then a chain of p - 1 adds: an OpenMP reduction."""
+    deps, ids, last = {}, 0, []
+    for _ in range(p):
+        prev = None
+        for _ in range(n // p - 1):
+            deps[ids] = [] if prev is None else [prev]
+            prev = ids
+            ids += 1
+        last.append(prev)
+    acc = last[0]
+    for t in last[1:]:
+        deps[ids] = [acc, t]
+        acc = ids
+        ids += 1
+    return deps
+
+
+def work_span(deps):
+    """Work = number of operations; span = length of the longest dependence chain."""
+    depth = {}
+    for v in sorted(deps):                  # node ids are topologically ordered in all builders
+        depth[v] = 1 + max((depth[u] for u in deps[v]), default=0)
+    return len(deps), max(depth.values())
+
+
+def greedy_time(deps, p):
+    """Greedy schedule: at each step run up to p ready operations, one time unit each."""
+    waiting = {v: len(us) for v, us in deps.items()}
+    users = {v: [] for v in deps}
+    for v, us in deps.items():
+        for u in us:
+            users[u].append(v)
+    ready = [v for v, k in waiting.items() if k == 0]
+    heapq.heapify(ready)
+    steps = 0
+    while ready:
+        batch = [heapq.heappop(ready) for _ in range(min(p, len(ready)))]
+        for v in batch:
+            for w in users[v]:
+                waiting[w] -= 1
+                if waiting[w] == 0:
+                    heapq.heappush(ready, w)
+        steps += 1
+    return steps
+
+
+n = 1024
+ps = (1, 4, 16, 64)
+print(f"{'computation':15}{'W':&gt;5}{'D':&gt;6}{'W/D':&gt;8}   T_p for p = 1, 4, 16, 64        bound (W-D)/p + D")
+for name, deps in (("serial chain", chain(n)), ("balanced tree", tree(n)), ("8 partial sums", partial_sums(n, 8))):
+    w, d = work_span(deps)
+    times = [greedy_time(deps, p) for p in ps]
+    bounds = [ceil((w - d) / p + d) for p in ps]
+    ok = times[0] == w and all(t &lt;= b for t, b in zip(times, bounds))
+    print(f"{name:15}{w:5d}{d:6d}{w / d:8.1f}   {str(times):28}{bounds}  {'holds' if ok else 'VIOLATED'}")
+</code></pre>
+<pre><code class="output">computation        W     D     W/D   T_p for p = 1, 4, 16, 64        bound (W-D)/p + D
+serial chain    1023  1023     1.0   [1023, 1023, 1023, 1023]    [1023, 1023, 1023, 1023]  holds
+balanced tree   1023    10   102.3   [1023, 257, 67, 21]         [1023, 264, 74, 26]  holds
+8 partial sums  1023   134     7.6   [1023, 261, 134, 134]       [1023, 357, 190, 148]  holds</code></pre>
+<p>All three computations have the same work, \(W=1023\) additions, and very different spans: 1023, 10 and 134. The serial chain has concurrency 1.0 and no schedule on any number of processing elements shortens it, which is the lecture's example. The balanced tree has concurrency 102.3; the simulated times 257, 67 and 21 for \(p=4,16,64\) are within 7, 7 and 5 steps of the bounds 264, 74 and 26. The partial-sum computation has span \(127+7=134\) and concurrency 7.6: with 16 or 64 threads it finishes in 134 steps, the same as with 8, because the chain inside one partial sum is 127 additions long. The concurrency of a program is therefore a property of how the computation is written as well as of the problem: all three programs add the same numbers. The bound \(S_p\le W/D\) also explains the lecture's warning that a desktop program does not run fast on a supercomputer: a program whose graph has concurrency 1 gains nothing from added processing elements.</p>
+<p><strong>The other three attributes.</strong> The lecture lists scalability as resilience to increasing processor counts, data locality as having the needed data in the memory of the processor that runs the code, and modularity as the property of any well-written program. These are defined and measured later: scalability by the speedup and efficiency curves of chapters 11 and 16, locality by the number of bytes \(Q\) moved between memory and processor and by the message cost \(\alpha+\beta m\) in chapters 7, 10 and 14. The lecture states that data in another processor's memory arrive through a network slower than data in the local memory; the cluster model above shows why, since the interconnect is a separate link with its own \(\alpha\) and \(\beta\).</p>
+<p><strong>Frameworks and the hardware they target.</strong> The lecture closes the topic with three frameworks. OpenMP works on shared-memory computers, which the lecture illustrates with one node of two sockets and several memory modules, and is invoked by compiler directives (<code>#pragma</code>). MPI suits distributed-memory computers, a cluster of nodes each with its own memory, and is a library linked into the program, with messages across the nodes. OpenACC targets computers with attached accelerators and again uses compiler directives. The summary adds CUDA to the list. The mapping to the hardware of this chapter is: OpenMP on the cores of one node (chapters 11 to 13), MPI across nodes (chapters 14 to 16), and OpenACC and CUDA on the accelerators (chapters 17 to 26). A program that uses several frameworks together, such as MPI between nodes and OpenMP inside a node, maps each layer of the program to one layer of the hardware.</p>
+
+<h2 id="instruction">From a statement to instructions: opcode, operand, latency and throughput <a class="timestamp" href="https://www.youtube.com/watch?v=xWBICsJyDZo&amp;t=43s">W2L4 0:43</a></h2>
+<p>The lecture of the second recording starts from the kinds of computer (the desktop used by one person, the embedded computer in an appliance, the tablet, the server shared by many users over a network, and the supercomputer, whose users submit scientific jobs) and from a simplified model of a computer in three layers: hardware, operating system, and application programs used by the user. The hardware is a processor connected to a main memory that holds data and code, with an input device and an output device. The <em>basic computing model</em> then follows one statement down through the layers. A programmer writes <code>a = a + b + 1</code> in a high-level language. The processor understands machine language, whose one-to-one text form is assembly language, and a compiler converts the statement to a series of instructions. The lecture's example is <code>ADD A, B</code> followed by <code>INC A</code>. Each instruction has an <em>opcode</em>, which names the operation (ADD, INC), and <em>operands</em>, which locate the data (here the registers A and B). The <em>arithmetic logic unit</em> (ALU) executes each instruction on its operands; the lecture's example is the addition 2 + 2 giving 4. The instructions and the data are stored in memory, in separate areas, and the result goes back to storage. The interface between the software that supplies the instructions and the hardware that executes them is the <em>instruction set architecture</em> (ISA).</p>
+<p><strong>The same statement on this machine.</strong> The session compiles the lecture's statement as a function, once without optimization and once with <code>-O2</code>, and disassembles the second result. The syntax is AT&amp;T syntax, in which the source operand comes before the destination.</p>
+<pre><code class="language-bash">$ cat stmt.c
+int update(int a, int b)
+{
+    a = a + b + 1;
+    return a;
+}
+$ gcc -O0 -S -fno-asynchronous-unwind-tables -fcf-protection=none stmt.c -o - | grep -v '^[[:space:]]*\.'
+update:
+        pushq   %rbp
+        movq    %rsp, %rbp
+        movl    %edi, -4(%rbp)
+        movl    %esi, -8(%rbp)
+        movl    -4(%rbp), %edx
+        movl    -8(%rbp), %eax
+        addl    %edx, %eax
+        addl    $1, %eax
+        movl    %eax, -4(%rbp)
+        movl    -4(%rbp), %eax
+        popq    %rbp
+        ret
+$ gcc -O2 -S -fno-asynchronous-unwind-tables -fcf-protection=none stmt.c -o - | grep -v '^[[:space:]]*\.'
+update:
+        leal    1(%rdi,%rsi), %eax
+        ret
+$ gcc -O2 -c stmt.c -o stmt.o &amp;&amp; objdump -d -M att stmt.o | tail -n 4
+0000000000000000 &lt;update&gt;:
+   0:   f3 0f 1e fa             endbr64
+   4:   8d 44 37 01             lea    0x1(%rdi,%rsi,1),%eax
+   8:   c3                      ret
+</code></pre>
+<p>Four observations follow. First, the series of instructions depends on the compiler: <code>-O0</code> produces 12 instructions, including six accesses to memory (two stores of the arguments to the stack, three loads, one store of the result) and a push and a pop, and <code>-O2</code> produces one arithmetic instruction and a return. The lecture's two-instruction series (ADD, INC) corresponds to the two <code>addl</code> instructions of the <code>-O0</code> output, where the second adds the constant 1; the optimizer replaces them by one <code>leal</code> (load effective address) instruction, whose address-arithmetic form adds two registers and a constant in one step, so that <code>a + b + 1</code> takes one instruction. The statement hides the traffic to memory that the unoptimized code makes. Second, the operands are not all registers: <code>-4(%rbp)</code> is a memory operand and <code>$1</code> is a constant inside the instruction. The lecture's picture (opcode plus register operands) is the simplest case. Third, the instructions are not equally long: the disassembly shows <code>endbr64</code> and the <code>lea</code> as 4 bytes each and <code>ret</code> as 1 byte, so x86-64 instructions have variable length, unlike the fixed-width view that "opcode and operand" suggests. Fourth, the ISA is a contract that several designs implement. Intel's manual states that the P-cores and the E-cores of the 12th generation processors share a symmetric instruction set, "converged to a common baseline", with AVX-512 and TSX absent from both (§2.3.1, p. 2-6). The program binary is the same for both kinds of core, and the execution time is not.</p>
+<p><strong>Time per instruction: latency and throughput.</strong> The ISA says what an instruction computes. The time it takes depends on two numbers defined in the model section: the <em>latency</em> \(L\) of an instruction, the cycles from ready operands to the ready result, and the <em>throughput</em> \(X\), the instructions of that kind that the core can start per cycle. The two limit a program in different ways. A chain of instructions in which each needs the result of the previous one (a <em>dependence chain</em>) advances by one link per \(L\) cycles, however many instructions the core could start. A set of \(K\) chains that depend on each other not at all advances by \(K\) links per \(L\) cycles, as long as \(K/L\le X\). The rate in instructions per cycle is therefore</p>
+\[
+R(K)=\min\Bigl(\frac{K}{L},\,X\Bigr),\qquad K^{*}=L\,X, \tag{6.5}
+\]
+<p>and \(K^{*}\) is the smallest number of independent chains that reaches the throughput limit. This is Little's law applied to the core. Little (1961) shows, for a queue with a stationary process, that the mean number of units in the system equals the mean arrival rate times the mean time a unit spends in the system (abstract of <a href="https://doi.org/10.1287/opre.9.3.383">Operations Research 9(3), 383–387</a>; abstract only). The units are the instructions in flight, the time in the system is \(L\), and the rate is \(X\): to complete \(X\) instructions per cycle, \(L X\) instructions must be in flight, and a chain contributes at most one. For the P-core, Intel's manual gives \(X=2\) for 256-bit multiply and FMA (Table 2-4, p. 2-14) and a latency of 4 cycles for FMA (Table 2-5, "FMA/0,1/4": execution unit, ports 0 and 1, latency 4), so \(K^{*}=8\). A scalar FMA is 2 flops, so (6.5) predicts \(2R(K)\) flop per cycle: 0.5, 1, 2, 4 and 4 for \(K=1,2,4,8,12\).</p>
+<p>The program below tests this prediction. It runs \(K\) independent chains \(\mathrm{acc}_k\leftarrow\mathrm{acc}_k\,b+c\) with one scalar FMA per link; the chains start from different values, because identical chains would be merged by the compiler. The program times each \(K\) three times, keeps the best, and estimates the clock before and after each timing with a chain of dependent integer additions of a register to a register, which are assumed to take 1 cycle each (a chain of additions of a constant ran faster than one per cycle on this processor and is not used); it prints the mean of the two estimates and the flop per cycle that follow from it. The clock of this machine changes with load, so the estimate carries an error that the output below makes visible: a value above the architectural limit of 4 flop per cycle cannot be real. The listing is built with <code>-O2 -mfma</code>, so that <code>__builtin_fma</code> compiles to a hardware FMA instruction. The timings are samples, and the check is the return code.</p>
+<pre><code class="language-c" data-file="fma_scalar.c" data-build="gcc -O2 -mfma fma_scalar.c -o fma_scalar" data-run="./fma_scalar" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;time.h&gt;
+
+static double now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &amp;ts);
+    return ts.tv_sec + 1e-9 * ts.tv_nsec;
+}
+
+/* Clock estimate: 16 dependent integer adds per trip, one cycle each; the add reads a
+   register, because an add of an immediate can be executed faster on this CPU. */
+static double clock_ghz(void)
+{
+    const long n = 20000000L;
+    long x = 0, y = 1;
+    double t0 = now();
+    for (long i = 0; i &lt; n; i++) {
+#define A asm volatile("add %1, %0" : "+r"(x) : "r"(y));
+        A A A A A A A A A A A A A A A A
+    }
+    return 16.0 * n / (now() - t0) * 1e-9 + (x &lt; 0);
+}
+
+/* K independent chains acc[k] = acc[k]*b + c, one scalar fma (2 flops) per link.  Each chain starts
+   from a different value, so the compiler cannot merge two chains into one. */
+#define SCALAR(K)                                                              \
+    static double s##K(long n, double b, double c)                             \
+    {                                                                          \
+        double acc[K], s = 0.0;                                                \
+        for (int k = 0; k &lt; K; k++) acc[k] = 1.0 + k;                          \
+        for (long i = 0; i &lt; n; i++)                                           \
+            _Pragma("GCC unroll 16")                                           \
+            for (int k = 0; k &lt; K; k++) acc[k] = __builtin_fma(acc[k], b, c);  \
+        for (int k = 0; k &lt; K; k++) s += acc[k];                               \
+        return s;                                                              \
+    }
+SCALAR(1) SCALAR(2) SCALAR(4) SCALAR(8) SCALAR(12)
+
+typedef double (*kernel)(long, double, double);
+
+/* Best of 3 runs, in Gflop/s.  The clock is estimated before and after the runs; *ghz is their mean. */
+static double best_gflops(kernel f, int k, double flops_per_step, long steps, double *ghz)
+{
+    double best = 1e30, sink = 0.0, before = clock_ghz();
+    for (int r = 0; r &lt; 3; r++) {
+        double t0 = now();
+        sink += f(steps / k, 0.9999999, 1e-9);
+        double t = now() - t0;
+        if (t &lt; best) best = t;
+    }
+    *ghz = 0.5 * (before + clock_ghz());
+    return flops_per_step * steps / best * 1e-9 + (sink &lt; 0);
+}
+
+int main(void)
+{
+    int ks[] = {1, 2, 4, 8, 12};
+    kernel fs[] = {s1, s2, s4, s8, s12};
+    double ghz;
+    printf("scalar fma, 2 flops each\n  K  Gflop/s   GHz  flop/cycle\n");
+    for (int j = 0; j &lt; 5; j++) {
+        double g = best_gflops(fs[j], ks[j], 2.0, 240000000L, &amp;ghz);
+        printf("%3d %8.2f %5.2f %10.2f\n", ks[j], g, ghz, g / ghz);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">scalar fma, 2 flops each
+  K  Gflop/s   GHz  flop/cycle
+  1     1.87  3.70       0.51
+  2     3.86  3.77       1.02
+  4     7.85  3.89       2.02
+  8    13.95  3.70       3.78
+ 12    15.23  3.58       4.26</code></pre>
+<p>The rate for one chain is 0.51 flop per cycle, so one FMA completes every 3.96 cycles: the latency of the instruction is 4 cycles, as the manual says. The rate doubles when \(K\) doubles up to \(K=4\) (1.02, 2.02), as the first branch of (6.5) predicts. At \(K=8\) the rate is 3.78 flop per cycle, and at \(K=12\) it is 4.26. The second value is above the limit \(2X=4\), so the clock estimate for that row (3.58 GHz) is at least 6 % too low. The limit is reached at \(K^{*}=8\) within the error of the estimate; across ten runs of this experiment the rate at \(K=8\) was between 87 % and 102 % of the rate at \(K=12\), so the knee of the curve is where (6.5) puts it. The kernel cannot use more than 14 vector registers (12 chains, \(b\) and \(c\)) because the machine has 16, which is why the experiments stop at \(K=12\).</p>
+
+<h2 id="flynn">Flynn's taxonomy, vector lanes, and the node as a multiple-instruction machine <a class="timestamp" href="https://www.youtube.com/watch?v=xWBICsJyDZo&amp;t=415s">W2L4 6:55</a></h2>
+<p>The lecture credits the classification of architectures by streams of instructions and streams of data to Michael J. Flynn, 1966. The first paper that did so is "Very high-speed computing systems", Proceedings of the IEEE 54(12), December 1966, pp. 1901–1909. Its abstract, which is the only part of it that this chapter read, states the four classes and defines the term: "Stream", as used there, refers to "the sequence of data or instructions as seen by the machine during the execution of a program" (<a href="https://doi.org/10.1109/PROC.1966.5273">Flynn 1966</a>, abstract; bibliographic data checked in Crossref, abstract text from OpenAlex). The lecture's four classes and its slides are these.</p>
+<ul>
+<li><strong>Single instruction, single data (SISD).</strong> One instruction stream drives one execution unit that reads one data stream. The lecture says this is the sequential computer and the building block of parallel systems.</li>
+<li><strong>Single instruction, multiple data (SIMD).</strong> One instruction stream drives several execution units, each reading its own part of the data. The slide says the first use was in vector supercomputers such as the Cray platforms, that SIMD instructions are executed by the ALU of modern processors, that the model suits streaming data such as audio and video, and that GPUs use it.</li>
+<li><strong>Multiple instruction, single data (MISD).</strong> Several instruction streams act on one data stream. The lecture calls it rarely implemented and lists fault tolerance, multiple frequency filters and the cracking of messages coded with cryptographic techniques as possible uses.</li>
+<li><strong>Multiple instruction, multiple data (MIMD).</strong> Independent processors execute different instructions on their own data. The lecture says most parallel computers are of this type, with two implementations, shared memory and distributed memory.</li>
+</ul>
+<p><strong>A clarification.</strong> In SIMD every execution unit receives the same instruction. The slide shows the instruction I1 going to both execution units, and the slide for MISD is the one that shows I1 and I2.</p>
+<p><strong>A formal reading.</strong> Let a <em>stream</em> be as in the quotation, and let \(m_I\) and \(m_D\) be the numbers of instruction streams and of data streams that the machine processes at one time, at a stated level of description. The class is the pair of answers to "is \(m_I\) greater than 1?" and "is \(m_D\) greater than 1?". The level matters, and the same machine belongs to different classes at different levels, as the table shows for this chapter's laptop.</p>
+<div class="table-wrap"><table>
+<caption>Table 6.1. Flynn's classes at four levels of the machine used in this chapter.</caption>
+<thead><tr><th scope="col">Level</th><th scope="col">\(m_I\)</th><th scope="col">\(m_D\)</th><th scope="col">Class</th><th scope="col">Where in this chapter</th></tr></thead>
+<tbody>
+<tr><td>one scalar FMA chain</td><td>1</td><td>1</td><td>SISD</td><td><code>fma_scalar.c</code></td></tr>
+<tr><td>one 256-bit vector FMA</td><td>1</td><td>4 (lanes)</td><td>SIMD</td><td><code>fma_vector.c</code></td></tr>
+<tr><td>12 hardware threads of one node</td><td>12</td><td>many</td><td>MIMD, shared memory</td><td><code>node_scaling.c</code></td></tr>
+<tr><td>nodes of a cluster, each with its own memory</td><td>many</td><td>many</td><td>MIMD, distributed memory</td><td>chapters 14 to 16</td></tr>
+</tbody></table></div>
+<p>An OpenMP program runs the same code in every thread, which the book later calls single program, multiple data; the hardware class is still MIMD, because each thread has its own program counter and so its own instruction stream. Flynn's 1972 paper, "Some computer organizations and their effectiveness", IEEE Transactions on Computers C-21(9), 948–960, analyzes the classes by their limits (<a href="https://doi.org/10.1109/TC.1972.5009071">Flynn 1972</a>, abstract only). Its abstract states that the overlapped simplex processor (SISD) is limited by data dependencies and that branching has a particularly degenerative effect, which is the dependence-chain limit of (6.5) seen from the architecture side; that for SIMD a "nesting type" explanation is offered for Minsky's conjecture that performance grows as \(\log M\) rather than \(M\) with \(M\) data-stream processors; and that multiprocessors (MIMD) saturate when the fraction of task time spent locked out approaches \(1/n\) for \(n\) processors. This chapter uses only the first of the three.</p>
+<p><strong>SIMD in one core.</strong> A 256-bit vector register holds \(\ell=4\) doubles, and one vector FMA performs 4 multiply-adds, 8 flops, with the same latency and, in Intel's table, the same throughput as the scalar instruction (Table 2-4 gives "2x256-bit" for the vector unit). Then (6.5) holds for vector chains with the same \(K^{*}=8\) and the flop rate is multiplied by \(\ell\): \(\phi=2X\ell=16\) flop per cycle. The program below repeats the experiment of the previous section with 256-bit FMA instructions from the compiler's intrinsic functions (<code>_mm256_fmadd_pd</code>), with \(K=1\) to 12 chains.</p>
+<pre><code class="language-c" data-file="fma_vector.c" data-build="gcc -O2 -mavx2 -mfma fma_vector.c -o fma_vector" data-run="./fma_vector" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;time.h&gt;
+#include &lt;immintrin.h&gt;
+
+static double now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &amp;ts);
+    return ts.tv_sec + 1e-9 * ts.tv_nsec;
+}
+
+/* Clock estimate: 16 dependent integer adds per trip, one cycle each; the add reads a
+   register, because an add of an immediate can be executed faster on this CPU. */
+static double clock_ghz(void)
+{
+    const long n = 20000000L;
+    long x = 0, y = 1;
+    double t0 = now();
+    for (long i = 0; i &lt; n; i++) {
+#define A asm volatile("add %1, %0" : "+r"(x) : "r"(y));
+        A A A A A A A A A A A A A A A A
+    }
+    return 16.0 * n / (now() - t0) * 1e-9 + (x &lt; 0);
+}
+
+/* K independent chains acc[k] = acc[k]*b + c, one 256-bit vector fma (4 lanes, 8 flops) per link.
+   Each chain starts from a different value, so the compiler cannot merge two chains into one. */
+#define VECTOR(K)                                                              \
+    static double v##K(long n, double bs, double cs)                           \
+    {                                                                          \
+        __m256d b = _mm256_set1_pd(bs), c = _mm256_set1_pd(cs), acc[K];        \
+        double s = 0.0, t[4];                                                  \
+        for (int k = 0; k &lt; K; k++) acc[k] = _mm256_set1_pd(1.0 + k);          \
+        for (long i = 0; i &lt; n; i++)                                           \
+            _Pragma("GCC unroll 16")                                           \
+            for (int k = 0; k &lt; K; k++) acc[k] = _mm256_fmadd_pd(acc[k], b, c);\
+        for (int k = 0; k &lt; K; k++) { _mm256_storeu_pd(t, acc[k]); s += t[0] + t[1] + t[2] + t[3]; } \
+        return s;                                                              \
+    }
+VECTOR(1) VECTOR(2) VECTOR(4) VECTOR(8) VECTOR(10) VECTOR(12)
+
+typedef double (*kernel)(long, double, double);
+
+/* Best of 3 runs, in Gflop/s.  The clock is estimated before and after the runs; *ghz is their mean. */
+static double best_gflops(kernel f, int k, double flops_per_step, long steps, double *ghz)
+{
+    double best = 1e30, sink = 0.0, before = clock_ghz();
+    for (int r = 0; r &lt; 3; r++) {
+        double t0 = now();
+        sink += f(steps / k, 0.9999999, 1e-9);
+        double t = now() - t0;
+        if (t &lt; best) best = t;
+    }
+    *ghz = 0.5 * (before + clock_ghz());
+    return flops_per_step * steps / best * 1e-9 + (sink &lt; 0);
+}
+
+int main(void)
+{
+    int ks[] = {1, 2, 4, 8, 10, 12};
+    kernel fs[] = {v1, v2, v4, v8, v10, v12};
+    double ghz;
+    printf("256-bit vector fma, 8 flops each\n  K  Gflop/s   GHz  flop/cycle\n");
+    for (int j = 0; j &lt; 6; j++) {
+        double g = best_gflops(fs[j], ks[j], 8.0, 120000000L, &amp;ghz);
+        printf("%3d %8.2f %5.2f %10.2f\n", ks[j], g, ghz, g / ghz);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">256-bit vector fma, 8 flops each
+  K  Gflop/s   GHz  flop/cycle
+  1     7.50  3.78       1.98
+  2    14.64  3.74       3.91
+  4    32.08  3.77       8.52
+  8    51.76  3.85      13.44
+ 10    60.19  3.75      16.04
+ 12    58.73  3.70      15.86</code></pre>
+<p>One vector chain gives 1.98 flop per cycle, which is 8 flops every 4 cycles, four times the scalar value for the same latency. The rate follows (6.5) up to \(K=4\), where it is 8.52 flop per cycle against the limit 8 (the clock estimate is again about 6 % low), is 13.44 at \(K=8\), and reaches 16.04 at \(K=10\); at \(K=12\) it is 15.86. The plateau is 16 flop per cycle and does not rise with more chains. This is the evidence for \(X=2\) with 256-bit vectors that the scalar experiment could not give: a third FMA unit would have lifted the plateau to 24. At the clock of the estimate, 3.75 GHz, 60.19 Gflop/s is 85 % of the 70.4 Gflop/s of (6.3), which assumes the highest P-core clock, 4.4 GHz; the ratio of the measured rate to the rate of (6.1) at the estimated clock is 16.04/16 = 100 %. In 12 runs of this experiment the plateau at \(K=10\) to 12 was between 56.9 and 69.5 Gflop/s, and 69.5 Gflop/s is 99 % of the 70.4 Gflop/s of (6.3). The plateau of the vector kernel is 3.95 times that of the scalar kernel in this sample (60.19 against 15.23 Gflop/s), which is \(\ell=4\) within 1.3 %.</p>
+<p><strong>The same loop, five builds.</strong> A compiler decides whether a loop uses these instructions. The program below writes the polynomial loop of the running case to a file, builds it with five sets of gcc flags, counts the packed floating-point instructions in each binary (packed multiply, packed add, and packed FMA), times it, and prints a checksum of the output. The data are 2048 doubles in and 2048 out, 32 KiB, so the loop runs from the L1 cache. The flag <code>-O1</code> and the flags <code>-O2 -fno-tree-vectorize</code> give scalar code. The flag <code>-O2</code> alone already gives vector code in gcc 13; the packed instructions in that binary are the SSE forms <code>mulpd</code> and <code>addpd</code>, which use 128-bit registers (2 doubles), and not the AVX forms. The flag <code>-O3 -march=native</code> lets the compiler use every instruction of the machine on which it runs, which here includes AVX2 and FMA. The timings are samples and the check is the return code.</p>
+<pre><code class="language-python" data-file="variants.py" data-run="python3 variants.py" data-check="returncode">"""Build one in-cache polynomial loop with five gcc flag sets; count instructions; time each build."""
+import os, re, subprocess, tempfile
+
+C_SOURCE = r"""
+#include &lt;stdio.h&gt;
+#include &lt;time.h&gt;
+#define N 2048                       /* in + out = 32 KiB: fits a 48 KiB L1 data cache */
+#define CALLS 20000L
+static double x[N], y[N];
+
+static double now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &amp;ts);
+    return ts.tv_sec + 1e-9 * ts.tv_nsec;
+}
+
+/* out[i] = degree-8 polynomial in in[i] by Horner's rule: 8 multiplies + 8 adds = 16 flops */
+__attribute__((noinline)) static void poly(const double *restrict in, double *restrict out)
+{
+    for (int i = 0; i &lt; N; i++) {
+        double t = in[i], r = 1.0 / 9.0;
+        r = r * t + 1.0 / 8.0;  r = r * t + 1.0 / 7.0;  r = r * t + 1.0 / 6.0;  r = r * t + 1.0 / 5.0;
+        r = r * t + 1.0 / 4.0;  r = r * t + 1.0 / 3.0;  r = r * t + 1.0 / 2.0;  r = r * t + 1.0;
+        out[i] = r;
+    }
+}
+
+int main(void)
+{
+    for (int i = 0; i &lt; N; i++) x[i] = 0.5 + 1e-4 * i;
+    double best = 1e30;
+    for (int rep = 0; rep &lt; 3; rep++) {
+        double t0 = now();
+        for (long c = 0; c &lt; CALLS; c++) poly(x, y);
+        double t = now() - t0;
+        if (t &lt; best) best = t;
+    }
+    printf("%.12f %.3f\n", y[0] + y[N - 1], 16.0 * N * CALLS / best * 1e-9);
+    return 0;
+}
+"""
+
+BUILDS = ["-O1", "-O2 -fno-tree-vectorize", "-O2", "-O3", "-O3 -march=native"]
+
+PACKED = r"\bv?(?:mul|add)pd\b|\bvfmadd\w*pd\b"      # packed multiply, packed add, packed fma
+PACKED_FMA = r"\bvfmadd\w*pd\b"
+
+with tempfile.TemporaryDirectory() as d:
+    src, exe = os.path.join(d, "poly.c"), os.path.join(d, "poly")
+    open(src, "w").write(C_SOURCE)
+    print(f"{'flags':26} {'packed':&gt;6} {'fma':&gt;4} {'Gflop/s':&gt;8}  checksum")
+    for flags in BUILDS:
+        subprocess.run(["gcc", *flags.split(), src, "-o", exe], check=True)
+        asm = subprocess.run(["objdump", "-d", exe], capture_output=True, text=True, check=True).stdout
+        checksum, gflops = subprocess.run([exe], capture_output=True, text=True, check=True).stdout.split()
+        print(f"{flags:26} {len(re.findall(PACKED, asm)):6d} {len(re.findall(PACKED_FMA, asm)):4d} "
+              f"{float(gflops):8.2f}  {checksum}")
+</code></pre>
+<pre><code class="output">flags                      packed  fma  Gflop/s  checksum
+-O1                             0    0     9.43  3.104635913073
+-O2 -fno-tree-vectorize         0    0     8.81  3.104635913073
+-O2                            20    0    16.86  3.104635913073
+-O3                            20    0    17.24  3.104635913073
+-O3 -march=native              10   10    58.73  3.104635913073</code></pre>
+<p>The scalar builds run at 9.43 and 8.81 Gflop/s in this sample, with no packed instruction in the binary. The default build with vectorization (<code>-O2</code>, SSE2, 2 lanes) runs at 16.86 Gflop/s, 1.8 to 1.9 times the scalar rates, which matches \(\ell=2\). The build that uses AVX2 and FMA runs at 58.73 Gflop/s, 3.5 times the SSE2 build and 6.2 to 6.7 times the scalar builds, and it is the only binary with FMA instructions (10 of them). The expected factor against the scalar build is the reduction in instructions per element. The scalar build executes 8 multiplications and 8 additions per element, 16 instructions; the AVX2 build executes 8 FMA instructions for 4 elements, 2 per element, a factor of 8. The measured factor is 78 % to 84 % of 8 in the sample, 6.2 to 7.3 in five of six runs, and 3.9 in a sixth run under load. The checksum, the sum of the first and last output values, is the same to 12 digits in all five builds. The fused multiply-add rounds once where multiplication followed by addition rounds twice, so agreement in the last bits is not required and was not checked. For one element, Horner's rule is a chain of 8 dependent steps (\(8L=32\) cycles with FMA), so the hardware has to overlap \(K^{*}=8\) elements; the AVX2 build reaches 98 % of the 60.19 Gflop/s plateau of the vector experiment and 83 % of the 70.4 Gflop/s of (6.3), without a line of source code that mentions a vector or an FMA. The distance of the scalar build to the peak, a factor of 7.5 (70.4 against 9.43), is a statement about the compilation, and closing it needs no change of algorithm. The lecture says only that SIMD instructions exist and are useful for streaming data; the measurement gives their worth for dense arithmetic on one core.</p>
+<p><strong>The node as a multiple-instruction machine.</strong> The next program runs the kernel of the previous experiments in \(p\) threads at once and prints a total rate in Gflop/s, for 1 and for 10 chains per thread. One chain per thread uses about \(1/8\) of the FMA capacity of a P-core and \(1/6\) of an E-core, by (6.5). Ten chains per thread saturate it. Each thread starts from different values and the sums are reduced at the end so that the compiler cannot remove the work. The number of threads is set with <code>omp_set_num_threads</code>; the threads are not pinned, so the operating system and the hypervisor place them. The parallel region ends at its implicit barrier and every thread does the same work \(W_1\), so the program prints \(p\) times the work of one thread divided by the time of the slowest thread:</p>
+\[
+R_{\text{printed}}=\frac{p\,W_1}{\max_t T_t}=p\,r_{\min},\qquad r_{\min}=\frac{W_1}{\max_t T_t}, \tag{6.6}
+\]
+<p>where \(T_t\) is the time of thread \(t\) and \(r_{\min}\) the rate of the slowest thread. The printed rate is not the sum of the rates of the threads; it equals that sum only if all threads run at the same rate.</p>
+<pre><code class="language-c" data-file="node_scaling.c" data-build="gcc -O2 -mavx2 -mfma -fopenmp node_scaling.c -o node_scaling" data-run="./node_scaling" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+#include &lt;immintrin.h&gt;
+
+/* Register-resident 256-bit FMA kernel.  chains = 1: one dependent chain per thread (uses about
+   1/8 of a P-core's FMA capacity).  chains = 10: ten independent chains (saturates the FMA units).
+   Chains start from different values so the compiler cannot merge them. */
+static double kernel(long n, int chains)
+{
+    __m256d b = _mm256_set1_pd(0.9999999), c = _mm256_set1_pd(1e-9);
+    __m256d a0 = _mm256_set1_pd(1), a1 = _mm256_set1_pd(2), a2 = _mm256_set1_pd(3), a3 = _mm256_set1_pd(4),
+            a4 = _mm256_set1_pd(5), a5 = _mm256_set1_pd(6), a6 = _mm256_set1_pd(7), a7 = _mm256_set1_pd(8),
+            a8 = _mm256_set1_pd(9), a9 = _mm256_set1_pd(10);
+    if (chains == 1) {
+        for (long i = 0; i &lt; n; i++) a0 = _mm256_fmadd_pd(a0, b, c);
+    } else {
+        for (long i = 0; i &lt; n; i++) {
+            a0 = _mm256_fmadd_pd(a0, b, c); a1 = _mm256_fmadd_pd(a1, b, c); a2 = _mm256_fmadd_pd(a2, b, c);
+            a3 = _mm256_fmadd_pd(a3, b, c); a4 = _mm256_fmadd_pd(a4, b, c); a5 = _mm256_fmadd_pd(a5, b, c);
+            a6 = _mm256_fmadd_pd(a6, b, c); a7 = _mm256_fmadd_pd(a7, b, c); a8 = _mm256_fmadd_pd(a8, b, c);
+            a9 = _mm256_fmadd_pd(a9, b, c);
+        }
+    }
+    __m256d s = _mm256_add_pd(_mm256_add_pd(_mm256_add_pd(a0, a1), _mm256_add_pd(a2, a3)),
+                              _mm256_add_pd(_mm256_add_pd(a4, a5), _mm256_add_pd(_mm256_add_pd(a6, a7), _mm256_add_pd(a8, a9))));
+    double t[4];
+    _mm256_storeu_pd(t, s);
+    return t[0] + t[1] + t[2] + t[3];
+}
+
+/* Total Gflop/s of p threads that each run the kernel; best of 3 runs. */
+static double total_gflops(int p, int chains, long n)
+{
+    double best = 1e30, sink = 0.0;
+    omp_set_num_threads(p);
+    for (int r = 0; r &lt; 3; r++) {
+        double t0 = omp_get_wtime();
+        #pragma omp parallel reduction(+:sink)
+        sink += kernel(n, chains);
+        double t = omp_get_wtime() - t0;
+        if (t &lt; best) best = t;
+    }
+    return 8.0 * chains * n * p / best * 1e-9 + (sink &lt; 0);
+}
+
+int main(void)
+{
+    int ps[] = {1, 2, 4, 6, 8, 12};
+    printf("%3s %22s %22s\n", "p", "1 chain/thread Gflop/s", "10 chains/thread Gflop/s");
+    for (int j = 0; j &lt; 6; j++)
+        printf("%3d %22.1f %22.1f\n", ps[j], total_gflops(ps[j], 1, 250000000L), total_gflops(ps[j], 10, 25000000L));
+    return 0;
+}
+</code></pre>
+<pre><code class="output">  p 1 chain/thread Gflop/s 10 chains/thread Gflop/s
+  1                    7.0                   57.1
+  2                   14.9                  110.6
+  4                   29.9                  197.0
+  6                   41.6                  207.2
+  8                   51.1                  202.3
+ 12                   57.8                  260.7</code></pre>
+<p>A thread with one chain issues one dependent vector FMA per \(L\) cycles, 8 flops per \(L\) cycles: 8.8 Gflop/s on a P-core (\(L=4\)) at 4.4 GHz and 4.4 Gflop/s on an E-core (\(L=6\), uops.info, third-party) at 3.3 GHz. For \(p\le4\) threads on distinct P-cores the bound of (6.6) is \(8.8p\): 8.8, 17.6 and 35.2 Gflop/s, and the sample measured 7.0, 14.9 and 29.9 (80 % to 85 %). For \(p=6\) and 8 two comparators bracket the result. If threads 5 to 8 stay on E-cores for the whole run, the program prints \(4.4p\): 26.4 and 35.2 Gflop/s. If they move to faster processors, the most it can print is the sum of the rates, 44.0 and 52.8. The sample measured 41.6 and 51.1, and eight runs at \(p=8\) gave 35 to 53, the whole interval. The threads are therefore not held on E-cores in most runs; the experiment does not show where Windows places them. At \(p=12\) the same reasoning gives 52.8 Gflop/s if four threads stay on E-cores (\(12\times4.4\)), whatever the second threads of the P-cores gain. The sum of the rates, an upper bound for what could be printed, is 88.0 Gflop/s if every second thread on a P-core doubles the rate of its core. The sample measured 57.8 (43 to 59 in eight runs), inside this interval. Because the slowest thread sets the printed rate, this experiment cannot separate the gain of Hyper-Threading (6.8) from the E-core stragglers, and it neither confirms nor refutes the model.</p>
+<p>With 10 chains per thread the bounds at the highest clocks are 70.4 Gflop/s for one P-core and 281.6 for four (6.3); the sum of the per-core peaks of the node, 387.2, is derived in the node section. The sample measured 57.1 Gflop/s for one thread (81 % of 70.4), 110.6 for two and 197.0 for four (70 % of 281.6). For \(p=6\), 8 and 12, (6.6) gives the value that the program prints when some threads stay on slower processors: \(6\times35.2=211.2\) if two threads share P-cores, \(8\times26.4=211.2\) and \(12\times26.4=316.8\) if four threads stay on E-cores. The sample measured 207.2, 202.3 and 260.7 Gflop/s, which is 98 %, 96 % and 82 % of these values, and 52 % and 67 % of 387.2 at \(p=8\) and 12. In eight runs the totals at \(p=12\) were 196 to 284 Gflop/s (51 % to 73 % of 387.2), at \(p=8\) 185 to 260 and at \(p=4\) 150 to 230. Two causes lower the total below 387.2: the slowest thread sets the time of a region with equal shares (6.6), and the clocks of cores that run together are lower than the highest clocks that the bounds assume. This experiment does not separate them. The measurements support two limited conclusions. The structure of a P-core predicts the rate of one thread to within 20 %. A program that gives equal work to all 12 logical processors of this hybrid node is bounded by \(12\,r_{\min}\), not by the sum of the per-core peaks, and it reached 51 % to 73 % of that sum.</p>
+<div class="table-wrap"><table>
+<caption>Table 6.2. Peak rates from (6.1) and rates measured on the machine of this chapter (Gflop/s).</caption>
+<thead><tr><th scope="col">Quantity</th><th scope="col">Bound from structure</th><th scope="col">Measured in this chapter</th></tr></thead>
+<tbody>
+<tr><td>one P-core, scalar FMA (\(\phi=4\))</td><td>17.6 at 4.4 GHz</td><td>15.0 to 17.1 at \(K=12\) (11 runs)</td></tr>
+<tr><td>one P-core, 256-bit FMA (\(\phi=16\))</td><td>70.4 at 4.4 GHz</td><td>56.9 to 69.5 at \(K=10\) to 12 (12 runs)</td></tr>
+<tr><td>polynomial loop, scalar build</td><td>17.6 (scalar FMA bound)</td><td>8.6 to 10.0 (<code>-O1</code>, <code>-O2 -fno-tree-vectorize</code>, 7 runs); 5.2 and 6.5 in one run under load</td></tr>
+<tr><td>polynomial loop, <code>-O3 -march=native</code></td><td>70.4</td><td>58.7 in the sample; 56.3 to 65.5 in seven of eight runs, 34.2 in the eighth</td></tr>
+<tr><td>one E-core, 256-bit FMA (\(\phi=8\))</td><td>26.4 at 3.3 GHz (uops.info and Notebookcheck, third-party)</td><td>not measured alone</td></tr>
+<tr><td>8 threads, 1 chain per thread</td><td>35.2 if threads 5 to 8 stay on E-cores (6.6); 52.8 as the sum of the rates (4 P-cores at 8.8, 4 E-cores at 4.4)</td><td>51.1 in the sample; 35 to 53 in eight runs</td></tr>
+<tr><td>12 threads, 10 chains per thread</td><td>316.8 by (6.6) with four threads on E-cores (12 &times; 26.4); 387.2 as the sum of the per-core peaks (4 P-cores 281.6, 4 E-cores 105.6)</td><td>196 to 284 (8 runs); 261 in the sample</td></tr>
+</tbody></table></div>
+<p>The scalar bound for the polynomial loop is the FMA bound, 17.6 Gflop/s; the scalar builds do not use FMA instructions, so their own bound is lower. Every bound uses the highest clock in the third-party specification (4.4 GHz for a P-core, 3.3 GHz for an E-core).</p>
+
+<h2 id="processes">Programs, processes, and sharing one core: multiprogramming, time slicing, the context switch <a class="timestamp" href="https://www.youtube.com/watch?v=xWBICsJyDZo&amp;t=747s">W2L4 12:27</a></h2>
+<p>The lecture connects the architectures to the programs that run on them through the interface of the instruction set. A program is a sequence of instructions, and the processor executes it instruction by instruction. The slide on process basics shows the route from source code to execution: the compiler turns source code into object code, the linker turns object code into binary code, the binary is stored on disk as a program file, and the loader places it in main memory. The lecture defines a <em>process</em> as the program that has been loaded and runs. While it runs, it needs resources: CPU time, more memory when it calls an allocation routine such as <code>malloc</code>, and files on disk. It asks the operating system for them and the operating system manages them for the life of the process. This chapter takes the definition one step further: a process is a program in execution with its own address space, so that two processes do not see each other's data unless the operating system arranges it.</p>
+<p><strong>Single tasking.</strong> The lecture's first example is the original IBM PC: an Intel 8088 at 4.77 MHz, 256 KB of memory, MS-DOS. The slide states that early systems allowed one program at a time and that the running process had complete control of the system and all its resources. The timeline on the slide is the sequence operating system, loader, process P1 (with a system call in the middle), operating system, loader, process P2. The processor is idle whenever the program waits, for example for input from the user or a block from the disk.</p>
+<p><strong>Multiprogramming.</strong> The lecture describes multiprogramming as the use of that idle time: several processes are in memory, CPU scheduling is its basic characteristic, and when the running process waits for an input or output request, the operating system takes the CPU from it and gives it to another process, so that some process is always running. The lecture also mentions terminate-and-stay-resident programs of MS-DOS, which stay in memory and are invoked at intervals. A simple model shows how much this can gain. Let a process spend a fraction \(w\) of its time waiting for input and output, and suppose that \(n\) processes are in memory and that their waits are independent. The CPU is idle only when all \(n\) wait at once, which has probability \(w^n\), so the CPU utilization is</p>
+\[
+U(n)=1-w^{\,n}. \tag{6.7}
+\]
+<p>For \(w=0.8\), which is a program that computes during 20 % of its time, \(U(1)=0.20\), \(U(4)=1-0.4096=0.59\) and \(U(10)=1-0.1074=0.89\); the slide on scheduling criteria states that in real systems the CPU utilization typically varies between 40 % and 90 %, a claim without a source on the slide. The model assumes independence of the waits, ignores the cost of switching and ignores the limit that memory puts on \(n\); it is a derivation under these assumptions, not a measurement. It is the reason for the lecture's statement that the objective of multiprogramming is to keep the CPU as busy as possible. It also shows what multiprogramming does not do: it raises the utilization of one CPU and does not shorten any process, and a process that never waits (a long calculation) gains nothing from it.</p>
+<p><strong>Multitasking by time slices.</strong> The lecture's multitasking is the second way to share one CPU. Each process receives a slice of time, milliseconds or microseconds; when the slice ends, control returns to the operating system, which gives the CPU to another process. The slide states that this needs hardware support inside the CPU, which was not present in the 8088 and is present in the 80286 and later processors from Intel, and that the operating system also switches when the running process waits for an input or output operation or an event. The lecture adds that the effect is an impression that all processes run continuously. The lecture's diagram of two processes (its source line reads "OS Principles - Galvi…", cut off in the frame) shows the mechanism. An interrupt or a system call transfers control to the operating system. The operating system saves the state of process P1 in the <em>process control block</em> of P1 (PCB1) and reloads the state saved earlier in PCB2, and process P2 runs; at its next interrupt or system call the same exchange happens in the other direction. This exchange is the <em>context switch</em>. The state that it saves and restores is the registers, the program counter and the description of the address space and open files; the lecture adds that the hardware (a timer, and dedicated support) takes part.</p>
+<p><strong>The hardware claim, checked against a data sheet.</strong> The Intel data sheet of the M80C286, a low-power version of the 80286 that the data sheet calls compatible with the HMOS M80286, describes the processor as designed for multi-user and multi-tasking applications. It states that the processor has built-in memory protection with a four-level protection mechanism for task isolation, a hardware task switching facility, and memory management that maps \(2^{30}\) bytes of virtual address space per task into \(2^{24}\) bytes of physical memory, and that one instruction can end the execution of one task, save its state, switch to a new task, load its state and start it (<a href="https://ic.unicamp.br/~cortes/mc602/material_complementar/27110301.PDF">Intel M80C286 data sheet</a>, introduction, p. 1 of the file). This supports the lecture's statement that the 80286 has hardware support for multitasking that the 8088 lacks, in the sense of isolation between tasks and a one-instruction task switch. It does not settle a narrower question: whether time slicing as such is impossible on a processor without these features. Time slicing needs at least a periodic interrupt that returns control to the operating system, and this chapter did not open a document that says whether the 8088 system of the lecture had one. The lecture's statement is therefore supported for protection and task switching and open for time slicing alone.</p>
+<p><strong>The cost of a switch, measured.</strong> A context switch costs time during which no program computes. The program below measures an upper bound on it. Two processes (or, in the other mode, two threads) are connected by two pipes and pinned to one logical processor with <code>sched_setaffinity</code>; the parent writes one byte, the other side reads it and writes it back, and the parent reads the echo. Each round trip makes the single processor run first one side and then the other, so it contains two context switches and four system calls (two writes, two reads). The program prints the time per round trip and half of it. The measured quantity is the latency of a one-byte pipe exchange between two schedulable entities that share one logical processor. It is not the time of the context switch alone, because the system calls are inside it. The listing runs both modes twice. The output is a sample, and the check is the return code.</p>
+<pre><code class="language-c" data-file="pingpong.c" data-build="gcc -O2 pingpong.c -o pingpong -lpthread" data-run="./pingpong process 2; ./pingpong thread 2; ./pingpong process 2; ./pingpong thread 2" data-check="returncode">#define _GNU_SOURCE
+#include &lt;pthread.h&gt;
+#include &lt;sched.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;sys/wait.h&gt;
+#include &lt;time.h&gt;
+#include &lt;unistd.h&gt;
+
+#define ROUNDS 200000
+
+static int ab[2], ba[2];                    /* pipe A-&gt;B and pipe B-&gt;A */
+
+static double now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &amp;ts);
+    return ts.tv_sec + 1e-9 * ts.tv_nsec;
+}
+
+static void pin(int cpu)
+{
+    cpu_set_t set;
+    CPU_ZERO(&amp;set);
+    CPU_SET(cpu, &amp;set);
+    if (sched_setaffinity(0, sizeof set, &amp;set)) { perror("sched_setaffinity"); exit(1); }
+}
+
+static void echo_side(void)                 /* reads one byte, writes it back, ROUNDS times */
+{
+    char c;
+    for (int i = 0; i &lt; ROUNDS; i++) {
+        if (read(ab[0], &amp;c, 1) != 1 || write(ba[1], &amp;c, 1) != 1) exit(1);
+    }
+}
+
+static void *thread_main(void *arg) { (void)arg; echo_side(); return NULL; }
+
+static double drive(void)                   /* the other side: write, then wait for the echo */
+{
+    char c = 'x';
+    double t0 = now();
+    for (int i = 0; i &lt; ROUNDS; i++) {
+        if (write(ab[1], &amp;c, 1) != 1 || read(ba[0], &amp;c, 1) != 1) exit(1);
+    }
+    return (now() - t0) / ROUNDS;
+}
+
+int main(int argc, char **argv)
+{
+    int threads = argc &gt; 1 &amp;&amp; strcmp(argv[1], "thread") == 0;
+    int cpu = argc &gt; 2 ? atoi(argv[2]) : 2;
+    if (pipe(ab) || pipe(ba)) return 1;
+    pin(cpu);                               /* children and new threads inherit this CPU mask */
+    double rt;
+    if (threads) {
+        pthread_t t;
+        pthread_create(&amp;t, NULL, thread_main, NULL);
+        rt = drive();
+        pthread_join(t, NULL);
+    } else {
+        pid_t pid = fork();
+        if (pid == 0) { echo_side(); _exit(0); }
+        rt = drive();
+        waitpid(pid, NULL, 0);
+    }
+    printf("%-7s on cpu %d: %.2f us per round trip, %.2f us per half round trip\n", threads ? "threads" : "process", cpu, rt * 1e6, rt * 1e6 / 2);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">process on cpu 2: 3.69 us per round trip, 1.84 us per half round trip
+threads on cpu 2: 3.81 us per round trip, 1.90 us per half round trip
+process on cpu 2: 3.61 us per round trip, 1.81 us per half round trip
+threads on cpu 2: 3.24 us per round trip, 1.62 us per half round trip</code></pre>
+<p>The round trip takes 3.69 and 3.61 µs for processes and 3.81 and 3.24 µs for threads in this sample; in four sessions of this listing the round trip was between 2.6 and 4.4 µs in both modes (up to 6.0 µs in the runs of exercise 6). Half a round trip is therefore 1.3 to 2.2 µs, which is an upper bound on the cost of one switch together with two system calls. At the 58.7 Gflop/s of the vectorized polynomial loop, 1.3 to 2.2 µs is 76,000 to 130,000 flops, so one switch costs about \(10^5\) flops of lost work. If a time slice is \(q\) and a switch costs \(t_{cs}\), the share of the time that a core spends on switching is at most \(t_{cs}/(q+t_{cs})\); for \(t_{cs}=2\) µs and \(q=1\) ms this is 0.2 %. The cost is small for one process per core and large when many runnable threads compete for few cores, because each switch also disturbs the caches, which this measurement does not include.</p>
+<p>The lecture says that switching between threads is quicker than switching between processes. This test does not show it. The ratio of the thread round trip to the process round trip was 1.03 and 0.90 in this sample and between 0.84 and 1.06 over the nine pairs of the four sessions, so the difference between the two modes is within the variation between runs. A switch between processes changes the address space and a switch between threads of one process does not, and the lecture's claim has that mechanism behind it. The hardware here may hide it (the guest's <code>/proc/cpuinfo</code> lists the <code>pcid</code> flag, shown in the session of the model section, which lets a processor keep address-space translations across a switch, but this chapter did not test whether it matters), and the machine is a virtual machine, so the test does not decide the claim. It shows only that on this machine, for a pipe exchange, the difference is below the noise of about 10 %.</p>
+<p><strong>Several processors.</strong> The lecture's slide on multiprocessor scheduling states that with more than one processor the load of processes and threads can be shared, but scheduling becomes more complex. In <em>asymmetric multiprocessing</em> a master takes the scheduling decisions; in <em>symmetric multiprocessing</em> each processor schedules itself and picks tasks from a ready queue. The diagram on the slide shows four processing elements, each with a local memory and a communication interface, joined by a communication network; it is the picture of the distributed-memory machine of the previous section, whereas the two definitions on the slide concern only who decides which thread runs where.</p>
+
+<h2 id="threads">Threads and Hyper-Threading <a class="timestamp" href="https://www.youtube.com/watch?v=xWBICsJyDZo&amp;t=1526s">W2L4 25:26</a></h2>
+<p>The lecture defines a <em>thread</em> as a lightweight process and the basic unit of CPU utilization. A traditional process has one thread and a modern process may have several. The slide's table separates what is unique to a thread (a thread identifier, a program counter, a register set and a stack) from what a thread shares with the other threads of the same process (the code section, the data section, and operating-system resources such as open files). The Linux manual page <code>pthreads(7)</code> states the same division for POSIX threads: a process can contain multiple threads, all executing the same program, which share the same global memory (the data and heap segments), but each thread has its own stack of automatic variables (<a href="https://man7.org/linux/man-pages/man7/pthreads.7.html">man7.org, pthreads(7)</a>). The lecture's two reasons for threads are that a process with several threads can perform several tasks, and that one application often performs many similar tasks, as a web server does when each request from a browser is handled by its own thread. The slide lists four benefits: responsiveness, because one blocked thread does not block the others; sharing of resources, because the code, data and open files are common; economy, because switching threads is quicker; and suitability for multiprocessor architectures. It lists four criteria for scheduling: CPU utilization, throughput (more output in a given time), turnaround time and waiting time.</p>
+<p>The division of storage in the table is the model that OpenMP uses in chapter 11. A variable that lives in the data section or on the heap is visible to every thread of the team, and a variable that lives on a thread's stack is that thread's own. Chapter 12 treats the clauses that change this. The multiple threads of an OpenMP program are the threads of this section, and their number and placement on the 12 logical processors of the laptop are decided by the operating system, as the lecture says.</p>
+<p><strong>Hyper-Threading.</strong> The lecture's slide on Intel's technology states that it allows more than one thread to run on each core, that the CPU exposes two execution contexts per physical core, that one physical core behaves like two logical cores that can handle different threads, that the technology duplicates the architectural state (5 % more die area) and shares one set of execution resources, that there is no loss if a single thread runs, that two logical cores can run tasks more efficiently than a single-threaded core by overcoming idle time while one task waits, that Intel claims up to 30 % more CPU throughput in server applications, that it is enabled through a BIOS setting, and, in red, that it is recommended to be disabled for HPC workloads. The slide gives the recommendation without a reason.</p>
+<p>The source of the slide's numbers is the paper that described the first implementation, in the Intel Xeon processor MP. The abstract states that the technology makes a single physical processor appear as two logical processors, that the physical execution resources are shared and the architecture state is duplicated, and that the instructions of both logical processors "will persist and execute simultaneously on shared execution resources". The paper states that the die area cost of the first implementation was less than 5 % of the total (p. 4 of the paper), that each logical processor maintains a complete set of the architecture state (registers, control registers, interrupt-controller registers, some machine-state registers; p. 4), and, in the conclusion, that measured performance on the Xeon MP shows gains of up to 30 % "on common server application benchmarks" (<a href="https://www.cl.cam.ac.uk/teaching/0607/CompArch/documents/all/beyond-risc/intel-smt.pdf">Marr et al., Intel Technology Journal 6(1), 2002</a>, abstract, p. 4 and p. 11 of the paper). Two limits on the slide's figures follow from the paper. The figure of 5 % is an upper bound ("less than 5 %") for that implementation. The figure of 30 % is an upper bound on a set of server benchmarks on a 2002 processor, and it is not a property of the technique on any processor. The mechanism, as the paper states it, is simultaneous: the two logical processors have instructions in flight at the same time and share the units, which is what the slide's "shares one set of execution resources" says; it is not a time slicing of one execution unit between two threads. Intel's current manual states that the P-cores of the 12th generation processors can have Hyper-Threading enabled (§2.3.1, p. 2-6). With 8 cores and 12 logical processors, as Windows reports, the 4 extra logical processors correspond to the 4 P-cores; that the E-cores have one thread each is this chapter's inference from the count.</p>
+<p><strong>A model that predicts the gain.</strong> The core model of equation (6.5) says how much of the FMA capacity of a core one thread uses. A thread with \(K\) independent chains issues \(K/L\) FMA per cycle, a fraction \(u=K/(LX)\) of the throughput \(X\) (for \(K\le LX\)). Suppose two identical threads share the execution units of one core, and that each would use the fraction \(u\) alone. Together they ask for \(2u\), and the core can deliver at most 1, so the core's total rate relative to one thread is</p>
+\[
+g=\frac{\min(1,2u)}{u}=\min\Bigl(2,\;\frac{L\,X}{K}\Bigr). \tag{6.8}
+\]
+<p>For the P-core with \(LX=8\), a thread with one chain (\(u=1/8\)) gains \(g=2\): the second thread doubles the core's rate. A thread with 4 chains also gains \(g=2\). A thread with 6 chains gains \(g=8/6=1.33\), which is the order of Intel's 30 %. A thread with 8 or more chains already saturates the units and gains \(g=1\), and each of the two threads then runs at half of its single-thread speed. The model leaves out cache sharing and the partitioning of other resources that the paper describes, and it applies to one resource, the FMA units. What it contains is the lecture's own mechanism, the filling of idle time, with the measure of idle time that (6.5) provides: the rate of a core with two threads is between 1 and 2 times its rate with one, and the factor is set by how many execution slots one thread leaves unused, not by the technology.</p>
+<p>The model also gives a reading of the recommendation to disable Hyper-Threading for HPC. For threads that saturate the units (\(g=1\)) a core delivers the same rate with one thread or with two. Equation (6.6) gives the speedup of a region whose \(p\) threads have equal shares: \(S_p=p\,v_{\min}\), where \(v_{\min}\) is the speed of the slowest occupied logical processor relative to a thread alone on a P-core. On a homogeneous node of \(c\) cores, \(c\) pinned threads with Hyper-Threading off and \(2c\) threads with it on therefore give the same speedup: \(S=c\cdot1\) and \(S=2c\cdot\tfrac12\). The model shows a loss only when \(p=c\) threads run with Hyper-Threading on and two of them share a core while another core idles: then \(v_{\min}=\tfrac12\) and \(S=c/2\). That is a failure of placement, which pinning or disabling the second hardware threads prevents. On the hybrid laptop the E-cores set \(v_{\min}=26.4/70.4=0.375\) in both cases, so \(S_8=8\times0.375=3.0\) with 8 threads and \(S_{12}=4.5\) with 12. The model therefore reads the recommendation as protection against bad placement, not as a consequence of saturation.</p>
+<p>Slurm gives the resource manager that control. Its job option <code>--hint=nomultithread</code> means "don't use extra threads with in-core multi-threading", and the same page notes that in-core multi-threading "may also improve performance" for communication-intensive applications (<a href="https://slurm.schedmd.com/mc_support.html">Slurm, multi-core support</a>, retrieved 2026-10-26). A resource manager can therefore keep jobs off the second hardware threads without a BIOS setting. The thread-scaling run does not test this reading: its rate is set by the slowest thread (section on Flynn's taxonomy), so it cannot show the gain or the loss of a second thread on a P-core.</p>
+
+<h2 id="limits">What the models establish and what they do not</h2>
+<p>Table 6.3 lists the statements of the lectures that this chapter checked, with the status that the check gave each.</p>
+<div class="table-wrap"><table>
+<caption>Table 6.3. Statements of the lectures and their status in this chapter.</caption>
+<thead><tr><th scope="col">Statement of the lecture</th><th scope="col">Status</th><th scope="col">Evidence in this chapter</th></tr></thead>
+<tbody>
+<tr><td>The slide dates ENIAC "circa 1947".</td><td>Consistent, with context</td><td>Dedicated 15 February 1946; accepted by the Army Ordnance Department in July 1946; operational at Aberdeen from August 1947 (Army Ordnance monograph, 1961).</td></tr>
+<tr><td>The slide's vertical axis, "Peak speed (Rmax)".</td><td>Corrected</td><td>\(R_{\max}\) is the rate of one Linpack run, \(R_{\text{peak}}\) the theoretical peak; Frontier, June 2024: 0.703 (TOP500 pages).</td></tr>
+<tr><td>Frontier is the most powerful system, 1.206 Eflop/s, 8,699,904 cores.</td><td>Confirmed for June 2024, superseded</td><td>Matches the June 2024 entry; rank 2 from November 2024; in June 2026 it is rank 3 with 1.353 Eflop/s, rank 1 has 2.198 Eflop/s.</td></tr>
+<tr><td>Supercomputers of yesterday are not supercomputers of today.</td><td>Confirmed and quantified</td><td>Doubling time 1.63 years (rank 1) and 2.19 years (rank 500), June 2008 to June 2026; 11 years from the unique leader to the entry threshold at 1 Pflop/s.</td></tr>
+<tr><td>A parallel file system lets many processes work on parts of one file.</td><td>Confirmed; the rate depends on striping</td><td>Lustre manual §1.2.2; model (6.2): the default stripe count 1 delivers one target's rate.</td></tr>
+<tr><td>An algorithm without concurrency is unfit for a supercomputer.</td><td>Confirmed and quantified</td><td>\(S_p\le W/D\) (6.4); a serial chain has \(W/D=1\); 8 partial sums have 7.6.</td></tr>
+<tr><td>SIMD was first used in vector computers such as the Cray platforms (slide).</td><td>Not checked</td><td>No source was opened.</td></tr>
+<tr><td>SIMD instructions are executed by the ALU of modern processors.</td><td>Confirmed; quantified for dense arithmetic</td><td>4 lanes of 64 bits; vector FMA plateau 3.95 times the scalar one; the vectorized loop 6.2 to 6.7 times the scalar build.</td></tr>
+<tr><td>Hardware support for multitasking exists from the 80286 on and not in the 8088.</td><td>Partly confirmed</td><td>The M80C286 data sheet states memory protection and hardware task switching; whether time slicing alone needs more was not established.</td></tr>
+<tr><td>It is faster to create and switch context of threads than of processes (slide).</td><td>Not reproduced at this precision</td><td>Pipe ping-pong on one logical processor tests the switch only, not creation: thread/process ratio 0.84 to 1.06.</td></tr>
+<tr><td>Hyper-Threading duplicates the architectural state for 5 % more die area and shares the execution resources.</td><td>Confirmed as an upper bound for the first implementation</td><td>"Less than 5 %" (Marr et al., p. 4).</td></tr>
+<tr><td>Hyper-Threading gives up to 30 % in server applications.</td><td>Source identified; not reproduced</td><td>Up to 30 % on server benchmarks, Xeon MP, 2002 (Marr et al., p. 11); model (6.8) gives 1 to 2 times by workload; the thread-scaling run cannot test it, because the slowest thread sets its rate.</td></tr>
+<tr><td>Hyper-Threading should be disabled for HPC workloads.</td><td>Depends on placement</td><td>Model (6.8) and (6.6): no gain and no loss for saturating threads pinned one per core; a loss of up to a factor 2 when two threads share a core while another core idles; Slurm's <code>--hint=nomultithread</code> lets the resource manager keep jobs off the second hardware threads; not tested by measurement.</td></tr>
+</tbody></table></div>
+<p>The models of this chapter establish five things. The peak rate of a core is the product \(f\cdot2X\ell\), and for the P-core the factors \(X=2\) and \(L=4\) agree with the manual and with the measurements (6.1, 6.5). A program reaches the peak only if it exposes \(K\ge LX\) independent chains and uses the widest instructions, as the polynomial loop shows. The concurrency \(W/D\) of a computation bounds its speedup on any number of processing elements, and a greedy schedule finishes in at most \((W-D)/p+D\) steps (6.4), which is less than twice the lower bound \(\max(D,W/p)\). The bandwidth of a file on a striped parallel file system is the smaller of the sum of its targets and the link (6.2). The rate of a core with two threads is between 1 and 2 times its rate with one (6.8), and the speedup of a region with equal shares is set by the slowest thread (6.6).</p>
+<p>The models leave out most of the machine. Equation (6.5) treats one instruction type and ignores the front end, the load and store ports (exercise 1 adds them), branch prediction and memory. The peak bounds use the highest clocks, which cores that run together do not hold, and the E-core bound rests on a third-party measurement database (uops.info). The measurements are single sessions on one hybrid laptop under a virtual machine, so the ranges quoted are variation between runs and not confidence intervals. The cluster section describes roles and a software stack and does not model queueing, and the striping model has assumed bandwidths. The multiprogramming model (6.7) assumes independent waits. The Jacobi problem of the book enters only as a memory-capacity calculation; its flop rate against its memory traffic is the subject of chapter 10.</p>
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> The dot product \(s\leftarrow s+x_iy_i\) over arrays in the L1 cache needs two loads per FMA. Intel's Figure 2-2 labels the load path of the P-core "3x256", which this exercise reads as 3 loads of 256 bits per cycle. (a) Derive the throughput limit \(X_{\text{eff}}\) in FMA per cycle for 256-bit vectors, with FMA latency \(L=4\) and \(X=2\). (b) Derive the smallest number of independent accumulators \(K^{*}\) that reaches it. (c) At 4.0 GHz, predict the Gflop/s of the scalar and of the 256-bit version for \(K=1,2,4,8\).</p>
+<details><summary>Solution</summary>
+<p>(a) The core can start at most 2 FMA per cycle, and 3 loads per cycle supply \(3/2=1.5\) FMA per cycle, since each FMA consumes two loaded operands. The limit is the smaller: \(X_{\text{eff}}=\min(2,1.5)=1.5\) FMA per cycle. (b) By (6.5), \(K^{*}=LX_{\text{eff}}=4\times1.5=6\) accumulators, not 8: the loads, not the FMA units, saturate first, and a seventh and eighth accumulator add nothing. (c) The rate in FMA per cycle is \(R(K)=\min(K/4,1.5)\): 0.25, 0.5, 1.0 and 1.5 for \(K=1,2,4,8\). A scalar FMA is 2 flops, so at 4.0 GHz the rates are \(2\cdot R\cdot4.0=2.0,\ 4.0,\ 8.0,\ 12.0\) Gflop/s; a 256-bit FMA is 8 flops, so the rates are 8.0, 16.0, 32.0 and 48.0 Gflop/s. The plateau of the vector dot product, 48 Gflop/s, is 75 % of the 64 Gflop/s of the pure FMA kernel at the same clock, because loads limit it. The derivation assumes that the data come from the L1 cache and that the "3x256" label means 3 loads of 256 bits per cycle; the label is the only source used for it, and a program from main memory is limited by bandwidth instead (chapter 10). At \(K=1\) the loads do not limit, so the prediction equals that of the pure FMA kernel: 2.0 and 8.0 Gflop/s at 4.0 GHz, which is 1.85 and 7.4 at the estimated 3.7 GHz, against the measured 1.87 and 7.50 of <code>fma_scalar.c</code> and <code>fma_vector.c</code>.</p>
+</details>
+<p><strong>Exercise 2 (compute).</strong> A cluster has 100 nodes. Each node has 2 sockets, each socket 24 cores at 2.0 GHz, and each core has 2 FMA units of 512 bits (8 doubles) per cycle. Each node has 256 GiB of memory. Compute \(R_{\text{peak}}\). Assume that Linpack reaches 70 % of it (the efficiency of Frontier in June 2024) with a matrix that fills 80 % of the memory. Compute \(N_{\max}\) and the running time of the Linpack run.</p>
+<details><summary>Solution</summary>
+<p>The peak per core is \(\phi=2X\ell=2\times2\times8=32\) flop per cycle, so \(R_{\text{peak}}=100\times2\times24\times2.0\times10^{9}\times32=3.072\times10^{14}\) flop/s, 307.2 Tflop/s. At 70 %, \(R_{\max}=215.04\) Tflop/s. The memory is \(100\times256\times2^{30}=2.749\times10^{13}\) bytes, and 80 % of it holds the matrix of \(8N^2\) bytes: \(N=\sqrt{0.8\times2.749\times10^{13}/8}=1.658\times10^{6}\). The operation count is \(\tfrac23N^3=3.04\times10^{18}\) flop, and the time is \(3.04\times10^{18}/2.1504\times10^{14}=14{,}129\) s, 3.9 hours. The same arithmetic as in the listing <code>top500_arith.py</code> gave 2.1 hours for Frontier in June 2026: the run lasts hours because the work grows as \(N^3\) while the rate grows only with the machine.</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> A student claims: "A loop of 1024 independent additions, run by 8 threads that each add 128 numbers and then one thread adding the 8 results, speeds up in proportion to the number of processing elements up to 64." Use the results of this chapter to show that the claim is false for this program, and state the largest speedup that any number of processing elements can give.</p>
+<details><summary>Solution</summary>
+<p>The listing <code>workspan.py</code> gives for this program \(W=1023\) and \(D=134\), because each thread's partial sum is a chain of 127 additions and the final sum is a chain of 7 more. By (6.4) the speedup on any number of processing elements is at most \(W/D=1023/134=7.6\). The simulated greedy times are 261 steps for \(p=4\), 134 for \(p=16\) and 134 for \(p=64\), so the speedup at \(p=64\) is \(1023/134=7.6\), not 64, and 16 processing elements already reach the limit. The claim fails because it counts independent iterations and ignores the chains that the program creates: each thread's 127 additions are dependent. The balanced tree of the same 1023 additions has \(D=10\), a bound \(W/D=102\), and a simulated speedup of \(1023/21=48.7\) at \(p=64\), still not 64, which also shows that the bound of (6.4) is not reached at every \(p\). The fix for the student's program is more partial sums or a tree, not more threads.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> A colleague computes the peak of the laptop as 12 logical processors \(\times\) 4.4 GHz \(\times\) 16 flop per cycle \(=844.8\) Gflop/s, measures 261 Gflop/s with <code>node_scaling.c</code>, and concludes that the program reaches 31 % of the peak. Identify the assumptions of the computation that fail and state a better bound.</p>
+<details><summary>Solution</summary>
+<p>Three assumptions fail. First, a logical processor is not a core. The 12 logical processors are 4 P-cores with 2 hardware threads each and 4 E-cores with 1 thread each, and the two threads of a P-core share its FMA units, so the P-cores provide 4, not 8, sets of units (6.8: a saturating thread gains \(g=1\) from a sibling). Second, the E-cores run at lower clocks (1.5 to 3.3 GHz in the third-party specification) and, in the measurement database, start one 256-bit FMA per cycle, not two, so they deliver 8 flop per cycle and at most 26.4 Gflop/s, not 70.4. Third, 4.4 GHz is the highest clock of a P-core, and the clock when all cores are active is lower; the estimates of this chapter for one thread were 3.4 to 4.2 GHz. The bound that the sources support is the sum of the per-core peaks at the highest clocks, 387.2 Gflop/s ((6.3) and the node section). Against it, 261 Gflop/s is 67 %, and the eight runs of this chapter, 196 to 284 Gflop/s, are 51 % to 73 %. The colleague's 31 % compares a measurement with a number that rests on three assumptions that do not hold, and the corrected bound is 2.2 times smaller. For this program, which gives every thread the same work and waits for the slowest, equation (6.6) gives a tighter bound: \(12\times26.4=316.8\) Gflop/s if four threads stay on E-cores, and 261 Gflop/s is 82 % of it.</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> A cluster has login nodes with AVX-512 processors and compute nodes whose processors have AVX2 and FMA but no AVX-512. Users compile on the login node. Choose compiler flags for the shared build of a solver whose inner loop looks like the polynomial loop, and give the quantitative reasons.</p>
+<details><summary>Solution</summary>
+<p>The flag <code>-march=native</code> compiles for the processor on which the compiler runs. On this machine it was the only one of the five builds that produced FMA instructions (10 against 0), and it made the loop 3.5 times faster than the baseline vectorized build (58.73 against 16.86 Gflop/s). On the cluster in the question it would produce AVX-512 code on the login node, and the compute nodes do not implement those instructions; the instruction set is a contract (the section on instructions), and a binary that uses instructions outside the contract of the processor that runs it cannot be expected to run, so the job fails or must be built twice. The flags that name the lowest common set, <code>-O3 -mavx2 -mfma</code>, produce code that runs on both kinds of node and keeps the factor 3.5 that the baseline build gives up; a build on the login node for the compute nodes, with the flags named explicitly, also avoids the failure. The alternative of a baseline build (SSE2) is safe on every node but runs at about 1.8 to 1.9 times the scalar rate where the AVX2 build runs at 6.2 to 6.7 times, so for a solver whose time is in this loop it costs a factor 3.5 in time. The reasoning about the flag uses the observation of this chapter and the definition of an instruction set; the gcc documentation was not opened.</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement).</strong> Change <code>pingpong.c</code> so that the two processes run on different logical processors, the parent on processor 2 and the child on a processor given as a third argument. Predict whether the round trip becomes shorter or longer than on one processor, and run it.</p>
+<details><summary>Solution</summary>
+<p>The change is two lines: <code>int cpu = argc &gt; 2 ? atoi(argv[2]) : 2, cpu2 = argc &gt; 3 ? atoi(argv[3]) : cpu;</code> and <code>if (pid == 0) { pin(cpu2); echo_side(); _exit(0); }</code>. A first prediction is that the round trip becomes shorter, because the two processes no longer take turns on one core and no context switch is needed. The measurement contradicts it. In the sample runs on this machine (three runs of four commands, not reproduced by a listing), the round trip on one processor was 3.1 to 6.0 µs and the round trip with the child on processor 3, 6 or 10 was 26 to 70 µs, which is 7 to 14 times longer within each run of the four commands. The probable cause, which was not tested, is that each wake-up of a process that sleeps on another processor needs a signal to that processor and a return from its idle state, and that in a virtual machine the hypervisor takes part in both, whereas on one processor the wake-up is a direct switch. The lesson is that the cost of communication between two threads depends on where they run, which is the reason for the pinning options of OpenMP (chapter 11 ff.) and MPI. The measured quantity is the round trip of a one-byte pipe exchange, and the prediction failed because it assumed that the switch was the dominant cost.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li>Recordings: <a href="https://www.youtube.com/watch?v=G8zq1xqe_jI">W2L3, Introduction to High-Performance Computing (HPC) and Its Key Components</a> (slides: speed plot and units, TOP500, cluster diagram, software stack, motherboard, desirable attributes, frameworks); <a href="https://www.youtube.com/watch?v=xWBICsJyDZo">W2L4, Exploring Computing Platform Architecture and CPU Optimization Techniques</a> (slides: basic computing model, Flynn's four classes, process basics, single tasking, multiprogramming, multitasking, threads, multiprocessor scheduling, Hyper-Threading), NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay, 2025.</li>
+<li>TOP500, <a href="https://www.top500.org/system/180047/">Frontier system page</a>, retrieved 2026-10-26: June 2024 entry (\(R_{\max}\) 1,206.00 Pflop/s, \(R_{\text{peak}}\) 1,714.81 Pflop/s, 8,699,904 cores, 22,786 kW) and June 2026 entry (1,353.00 and 2,055.72 Pflop/s, 9,066,176 cores, \(N_{\max}\) 24,837,120).</li>
+<li>TOP500, lists <a href="https://www.top500.org/lists/top500/2008/06/">June 2008</a>, <a href="https://www.top500.org/lists/top500/list/2019/06/?page=5">June 2019 (ranks 401 to 500)</a>, <a href="https://www.top500.org/lists/top500/2026/06/">June 2026</a>, and <a href="https://www.top500.org/lists/top500/list/2026/06/?page=5">June 2026 (ranks 401 to 500)</a>, <a href="https://www.top500.org/lists/top500/list/2008/06/?page=5">June 2008 (ranks 401 to 500)</a>: the \(R_{\max}\) of ranks 1, 2 and 500 used for the doubling times.</li>
+<li>TOP500, <a href="https://www.top500.org/project/linpack/">Linpack project description</a>: \(R_{\max}\), \(N_{\max}\), \(N_{1/2}\), \(R_{\text{peak}}\); LU factorization with partial pivoting; operation count \(\tfrac23 n^3+O(n^2)\); exclusion of Strassen-type methods and of lower-precision solvers.</li>
+<li>Petitet, Whaley, Dongarra and Cleary, <a href="https://www.netlib.org/benchmark/hpl/">HPL, version 2.3 (2018)</a>: a portable implementation of the High-Performance Linpack benchmark for distributed-memory computers; 64-bit arithmetic; MPI and BLAS required.</li>
+<li>US Army Ordnance Corps, <a href="https://ed-thelen.org/comp-hist/U-S-Ord-61-ch02.html"><em>Historical Monograph: Electronic Computers within the Ordnance Corps</em></a> (November 1961), chapter II, pp. 19 to 24 of the monograph: construction of ENIAC, dedication on 15 February 1946, acceptance in July 1946, move to Aberdeen in 1947.</li>
+<li>SchedMD, <a href="https://slurm.schedmd.com/overview.html">Slurm Workload Manager, Overview</a>: the three functions of a workload manager (allocation, framework for execution, arbitration of contention).</li>
+<li>SchedMD, <a href="https://slurm.schedmd.com/mc_support.html">Slurm Workload Manager, Multi-core/Multi-thread Support</a>: the job option <code>--hint=[no]multithread</code> ("[don't] use extra threads with in-core multi-threading"); in-core multi-threading "may also improve performance" for communication-intensive applications.</li>
+<li>OpenHPC community, <a href="https://openhpc.community/">openhpc.community</a>: aggregation of provisioning, resource management, I/O clients, development tools and scientific libraries for HPC Linux clusters.</li>
+<li><a href="https://doc.lustre.org/lustre_manual.xhtml">Lustre Software Release 2.x Operations Manual</a>: §1.2.2 (MDS, MDT, OSS, OST, clients; several clients may write different parts of one file), §1.3 (the bandwidth rule: aggregate bandwidth is the minimum of disk and network bandwidth), §1.3.1 (striping as RAID 0; default stripe count 1 and stripe size 1 MB). §19.2 was not read.</li>
+<li>M. J. Flynn, <a href="https://doi.org/10.1109/PROC.1966.5273">"Very high-speed computing systems"</a>, Proceedings of the IEEE 54(12) (1966) 1901–1909. Abstract only: the four classes SISD, SIMD, MISD, MIMD and the definition of a stream.</li>
+<li>M. J. Flynn, <a href="https://doi.org/10.1109/TC.1972.5009071">"Some computer organizations and their effectiveness"</a>, IEEE Transactions on Computers C-21(9) (1972) 948–960. Abstract only: the limit of SISD by data dependencies, Minsky's conjecture for SIMD, saturation of MIMD.</li>
+<li>Intel, <a href="https://cdrdv2-public.intel.com/930023/355308-051-optimization-reference-manual-changes-doc.pdf">Intel 64 and IA-32 Architectures Optimization Reference Manual, Documentation Changes, document 355308-051</a> (October 2026; the chapter-2 pages carry the document number 248966-051): §2.3.1, p. 2-6 (hybrid 12th generation processors; E-cores support AVX2 and AVX-VNNI, not AVX-512; P-cores can have Hyper-Threading; symmetric instruction set), Figure 2-2, p. 2-11 (48 KB data cache; load path "3x256"), Table 2-4, pp. 2-13 and 2-14 (the multiply and FMA row, 2x256-bit, is on p. 2-14), Table 2-5, p. 2-14 (FMA on ports 0 and 1, latency 4). Intel's product specification page for the i5-12450H and the Intel table of Golden Cove instruction latencies refused automated access and were not used.</li>
+<li>uops.info, <a href="https://uops.info/instructions.xml">instruction table (XML, root date 2026-03-29)</a>: measured latency, reciprocal throughput and micro-operation count of <code>VFMADD231PD</code> (YMM, YMM, YMM) and related forms on Alder Lake P-cores (latency 4, 0.50 cycles, ports 0 and 1) and E-cores (latency 6, 1.00 cycle, 2 micro-operations). A third-party measurement database, not a vendor document.</li>
+<li><a href="https://www.notebookcheck.net/Intel-Core-i5-12450H-Processor-Benchmarks-and-Specs.589270.0.html">Notebookcheck, Intel Core i5-12450H</a> (retrieved 2026-10-26): 4 P-cores and 4 E-cores, 12 threads; clock 2.0 to 4.4 GHz (P) and 1.5 to 3.3 GHz (E). A third-party database, used only for the clock range.</li>
+<li>Intel, <a href="https://ic.unicamp.br/~cortes/mc602/material_complementar/27110301.PDF">M80C286 High Performance CHMOS Microprocessor with Memory Management and Protection, data sheet</a>, introduction: multi-tasking design, four-level protection, hardware task switching, one-instruction task switch.</li>
+<li>D. T. Marr, F. Binns, D. L. Hill, G. Hinton, D. A. Koufaty, J. A. Miller, M. Upton, <a href="https://www.cl.cam.ac.uk/teaching/0607/CompArch/documents/all/beyond-risc/intel-smt.pdf">"Hyper-Threading Technology Architecture and Microarchitecture"</a>, Intel Technology Journal 6(1) (2002): abstract (two logical processors, shared execution resources, duplicated architecture state, simultaneous execution); p. 4 (die area under 5 %, architecture state); p. 11 (gains of up to 30 % on common server benchmarks).</li>
+<li><a href="https://man7.org/linux/man-pages/man7/pthreads.7.html">Linux man-pages, pthreads(7)</a>: threads of one process share global memory (data and heap) and each has its own stack.</li>
+<li>J. D. C. Little, <a href="https://doi.org/10.1287/opre.9.3.383">"A proof for the queuing formula: \(L=\lambda W\)"</a>, Operations Research 9(3) (1961) 383–387. Abstract only.</li>
+<li>R. P. Brent, <a href="https://doi.org/10.1145/321812.321815">"The parallel evaluation of general arithmetic expressions"</a>, Journal of the ACM 21(2) (1974) 201–206. Abstract only: evaluation time \(4\log_2 n+10(n-1)/p\) on \(p\) processors.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-05-shell-scripting-processes-and-control-flow.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-07-hierarchical-memory-and-scalable-architectures.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

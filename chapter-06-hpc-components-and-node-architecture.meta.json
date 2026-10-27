@@ -1,0 +1,497 @@
+{
+  "chapter": 6,
+  "title": "The components of an HPC system and the architecture of a compute node",
+  "status": "revised after review round 2",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "G8zq1xqe_jI",
+      "label": "W2L3",
+      "playlist_index": 11,
+      "duration_seconds": 2062
+    },
+    {
+      "video_id": "xWBICsJyDZo",
+      "label": "W2L4",
+      "playlist_index": 12,
+      "duration_seconds": 2094
+    }
+  ],
+  "frames_viewed": {
+    "G8zq1xqe_jI": [
+      "f0002",
+      "f0003",
+      "f0008",
+      "f0010",
+      "f0037",
+      "f0043",
+      "f0046",
+      "f0048",
+      "f0050",
+      "f0051",
+      "f0052",
+      "f0060",
+      "f0063"
+    ],
+    "xWBICsJyDZo": [
+      "f0009",
+      "f0010",
+      "f0017",
+      "f0019",
+      "f0021",
+      "f0023",
+      "f0027",
+      "f0029",
+      "f0037",
+      "f0041",
+      "f0045",
+      "f0049",
+      "f0053",
+      "f0056",
+      "f0058",
+      "f0059",
+      "f0061",
+      "f0063"
+    ]
+  },
+  "lecture_corrections": [
+    "The slide of the speed plot labels the vertical axis 'Peak speed (Rmax)'. Rmax is the rate of one Linpack run and Rpeak the theoretical peak (TOP500 Linpack page); the chapter keeps them apart.",
+    "Frontier at 1.206 Eflop/s with 8,699,904 cores is the June 2024 TOP500 entry (confirmed). Frontier was rank 1 from June 2022 to June 2024, rank 2 from November 2024, and rank 3 in June 2026 with 1.353 Eflop/s; rank 1 then has 2.198 Eflop/s.",
+    "Hardware support for multitasking from the 80286: supported for memory protection and hardware task switching by the Intel M80C286 data sheet; whether time slicing alone needs more than a periodic interrupt on the 8088 was not established.",
+    "Switching between threads is quicker than between processes: not reproduced at the precision of a pipe ping-pong on one logical processor (thread/process round-trip ratio 0.84 to 1.06 over nine pairs of runs in four sessions).",
+    "Hyper-Threading in HPC: the slide recommends disabling it for HPC workloads without a reason on the slide. The chapter's model (6.8) with equal shares (6.6) shows no gain and no loss for saturating threads pinned one per core, and a loss only when two threads share a core while another core idles (a placement failure); Slurm's --hint=nomultithread lets the resource manager keep jobs off the second hardware threads. Not tested by measurement."
+  ],
+  "source_uncertainties": [
+    "Intel's product specification page for the i5-12450H and Intel's table of Golden Cove instruction throughput and latency returned 'Access Denied' to automated clients. The clock range (P-cores 2.0 to 4.4 GHz, E-cores 1.5 to 3.3 GHz) comes from a third-party database (Notebookcheck, retrieved 2026-10-26). The 8 cores and 12 logical processors are from Windows (Get-CimInstance Win32_Processor); the nominal clock reported by Windows is 2000 MHz.",
+    "Intel Optimization Reference Manual: only the 'Documentation Changes' document 355308-051 (October 2026) was opened. It contains section 2.3.1 (hybrid processors), Figure 2-2, Tables 2-3 to 2-5 of the Golden Cove description. Page numbers are those printed in the extracted chapter 2 (2-6, 2-11, 2-13, 2-14). The notes marking two of the three FMA entries in Table 2-3 did not survive text extraction. The E-core description (section 4.1) was not in the document; the E-core figures come from uops.info (next item). The load path label '3x256' of Figure 2-2 is read as three loads of 256 bits per cycle and is used only in exercise 1. FMA latency 4 and two 256-bit FMA units are taken from Tables 2-4 (p. 2-14, Mul/FMA row) and 2-5 (p. 2-14) and agree with the measurements.",
+    "uops.info instruction table: the first download, cut off by a command timeout, ended in the middle of an element at the instruction VCVTSD2SS and held no FMA entries; a second, complete download (142 MB, compressed transfer) was parsed with a streaming XML parser. The data (root date 2026-03-29) are third-party measurements: Alder Lake P-core VFMADD231PD (YMM): latency 4, reciprocal throughput 0.50, ports 0 and 1, 1 micro-operation; E-core: latency 6, reciprocal throughput 1.00, 2 micro-operations (XMM form: 0.60 to 0.63, 1 micro-operation). The authorship and the measurement method of the database were not checked beyond the file. The E-core peak 26.4 Gflop/s at 3.3 GHz and the node bound 387.2 Gflop/s rest on this source and on the third-party clock range.",
+    "Agner Fog's instruction tables (last updated 2025-09-20) were opened; their processor list has no Alder Lake or Golden Cove entry, so they were not used.",
+    "Flynn (1966, 1972), Little (1961) and Brent (1974): only abstracts were read (bibliographic data from Crossref, abstract text from OpenAlex). The IEEE and ACM full texts were not opened. Brent's abstract gives the bound for arithmetic expressions; the general greedy bound (W-D)/p + D is proved in the chapter, not cited.",
+    "TOP500 pages were retrieved on 2026-10-26 and describe the lists as served on that date: Frontier June 2024 and June 2026 entries, rank 1, 2 and 500 values of June 2008, June 2019, November 2019 (rank 500 only, not quoted in the text) and June 2026. The chapter does not claim the first list in which rank 500 passed 1 Pflop/s, only the June 2019 value 1.02 Pflop/s. The decomposition of 8,699,904 into nodes and compute units was not used.",
+    "Lustre manual (version 2.x, retrieved 2026-10-26): sections 1.2.2, 1.3 and 1.3.1 were read. The manual's section 19.2 (striping considerations) was not read. The stripe model uses assumed bandwidths (2 GB/s per target, 12 GB/s link); equation (6.2) is the chapter's reading of the manual's file-system-level rule for one file written by one client.",
+    "Slurm overview (version 26.05 of the site), the Slurm multi-core support page (--hint=[no]multithread) and the OpenHPC front page were read in full. The slide's CentOS 7.x is not dated by a source; no end-of-life claim is made.",
+    "US Army Ordnance monograph (1961): chapter II pages 19 to 24 read; the statement about plugging connections refers to the description of the units' program controls on later pages of the same chapter, read in outline only.",
+    "Marr et al. (2002): the copy hosted by the University of Cambridge course site was read; page numbers in the chapter (4 and 11) are the pages of that PDF, whose own footers number the pages 1 to 12.",
+    "Intel M80C286 data sheet: the CHMOS low-power part, described by the data sheet as compatible with the HMOS M80286, was used as a proxy for the 80286. No document about the 8088 or about the timer of the IBM PC was opened, so the question whether time slicing is possible without protection hardware is left open. The timer of the original IBM PC (an Intel 8253 channel on interrupt level 0, according to secondary sources only) was not confirmed in the IBM PC Technical Reference, which was not found; the Table 6.3 row stays 'Partly confirmed'.",
+    "Lecture statements that were not checked: SIMD first used in the Cray platforms (slide, no date); the COVID-19 vaccine remark; the list of application areas. The assumption that the lecture's 'cores' (8,699,904) mix CPU cores and GPU compute units is the slide's own statement.",
+    "A dependent chain of 'add $1, reg' ran at the equivalent of 13 to 21 GHz on the twelve guest processors, so it is not executed at one add per cycle. The cause was not investigated; the clock estimate in the listings uses a register operand.",
+    "Clock estimates (dependent register adds) vary between 3.4 and 4.3 GHz across runs and carry errors of about 6 percent: flop-per-cycle columns exceed the architectural limits (4 scalar, 16 vector) in some rows (4.26, 4.06, 16.5). Rates in Gflop/s are best of 3 runs inside each program.",
+    "The machine was shared with other jobs during all measurements. Ranges quoted are over 5 to 12 runs; one run of variants.py taken under load gave 34.2 Gflop/s for the -O3 -march=native build and earlier runs under load gave 5.2 and 6.5 Gflop/s for the scalar builds. The sample outputs pasted in the chapter come from more than one capture: the FMA, thread-scaling and five-build samples from the round-1 captures (variants.py from the fifth of five runs), the ping-pong sample from a capture after review round 1; the final code_lab.py run produced other values for all timing listings, which were not pasted.",
+    "The WSL 2 guest shows 6 cores x 2 threads; the mapping from guest processors to physical cores and core types is decided by Windows and was not controlled. node_scaling.c prints p times the work of one thread divided by the time of the slowest thread (p r_min, equation 6.6), not the sum of the thread rates. The printed rate at 12 threads with one chain (43 to 59 Gflop/s) lies between 52.8 (E-core stragglers, any Hyper-Threading gain) and 88.0 (sum of the rates, every second thread doubling its core); the experiment cannot test the Hyper-Threading model (6.8). At 8 threads with one chain the eight runs (35 to 53) cover the interval from 35.2 (threads stay on E-cores) to 52.8 (sum of the rates). The 12-thread totals with 10 chains (196 to 284 Gflop/s) are 51 to 73 percent of the sum of the per-core peaks 387.2 and 62 to 90 percent of the equal-share value 316.8 (four threads on E-cores); the lower clock of cores that run together was not measured, so it is not separated from the straggler effect. A rewrite of the listing in which each thread times its own kernel call would allow both quantities to be printed; it was not done.",
+    "The cross-processor ping-pong of exercise 6 (round trip 26 to 70 microseconds against 3.1 to 6.0 on one processor, three runs of four commands) was run with a modified copy of pingpong.c and is not reproduced by a listing; the cause (inter-processor wake-up under the hypervisor) was not tested. The context-switch listing measures a pipe round trip with four system calls and two switches, not the switch alone.",
+    "The machine transcripts were used as a guide to topic order and timestamps only. Statements that rest only on the speech and are contradicted or not supported by a slide (the spoken SIMD and Hyper-Threading explanations, the spoken symmetric and asymmetric multiprocessing explanation, the lecturer's reason for disabling Hyper-Threading, ENIAC funding by the Department of Defense, the early-1970s date for Cray vector computers, MPEG decoding as an SIMD example) are not reported as lecture claims or corrections in the chapter (brief lesson 12).",
+    "Timestamps are section anchors from local speech-recognition segment times and locate topic changes to within a few seconds.",
+    "Process notes moved from the chapter text: an early version of the FMA experiment started all chains from the same value, the compiler merged them, and it credited one chain with the work of ten; this was found and fixed before the sample outputs were taken. The knee statistic for the scalar kernel (K = 8 at 87 to 102 percent of K = 12) and the vector plateau range (56.9 to 69.5 Gflop/s) use ten and twelve runs, some of them with earlier versions of the program that estimated the clock once instead of before and after each timing.",
+    "stripe.py: the 11.98 GB/s at k = 6 comes from 1000 chunks not dividing evenly over 6 objects (167, 167, 167, 167, 166, 166 chunks); the 123 extra bytes do not change it (review round 1, B1).",
+    "Coincidence check (review minor m11): fma_vector.c (K = 12) and variants.py (-O3 -march=native) both print 58.73 Gflop/s in the pasted samples; the two blocks come from separate runs (variants.py from the fifth of five captured runs, fma_vector.c from a separate capture), and neither was pasted from the other."
+  ],
+  "sections": [
+    {
+      "section": "The objects of the chapter and the running case",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Basic vocabulary used by both lectures (node, cluster, core, thread).",
+      "research_extension": "Intel Optimization Reference Manual section 2.3.1 (hybrid cores); Notebookcheck (clock range).",
+      "teaching_construction": "Peak-rate model phi = 2 X l, P = f phi; Rpeak versus Rmax; machine description and session; running case (polynomial loop).",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "Units, the TOP500 list, and what the lecture means by high performance computing",
+      "video_id": "G8zq1xqe_jI",
+      "start": 6.0,
+      "end": 1080.0,
+      "lecture_material": "ENIAC, speed plot, flop units, TOP500 and HPL, Frontier figures, computation as third mode of science, definitions of HPC and supercomputer, parallel versus distributed, applications.",
+      "research_extension": "TOP500 Frontier page and lists (2008, 2019, 2026); TOP500 Linpack description; HPL page; Army Ordnance monograph on ENIAC.",
+      "teaching_construction": "Arithmetic listing: Rmax/Rpeak, per-core rate, energy, HPL work and time, doubling times of rank 1 and rank 500; corrections of dates and of the axis label.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "The components of a cluster and the path of a job",
+      "video_id": "G8zq1xqe_jI",
+      "start": 1080.0,
+      "end": 1516.0,
+      "lecture_material": "Cluster diagram (login, compute, accelerated, interconnect, storage layers, management); software stack slide; home on NFS and scratch on Lustre.",
+      "research_extension": "Slurm overview; OpenHPC site; Lustre manual sections 1.2.2, 1.3, 1.3.1.",
+      "teaching_construction": "Role partition and access rule; job path in steps; striping model with listing and the bandwidth rule (6.2) for one file.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Inside one compute node: sockets, memory, input and output, and the peak rate",
+      "video_id": "G8zq1xqe_jI",
+      "start": 1516.0,
+      "end": 1551.0,
+      "lecture_material": "Rack, node, dual-socket motherboard, DIMMs, network interface, accelerator card; components of a supercomputer.",
+      "research_extension": "Intel manual Tables 2-3 to 2-5 (2x256-bit FMA units, latency 4); uops.info measurements for P-core and E-core FMA.",
+      "teaching_construction": "Derivation of the P-core peak 16 flop per cycle, 70.4 Gflop/s at 4.4 GHz, and of the E-core 8 flop per cycle, 26.4 Gflop/s at 3.3 GHz; node bound 387.2 Gflop/s at the highest clocks.",
+      "evidence_class": "product specification"
+    },
+    {
+      "section": "Why parallel: capacity, time, and the concurrency a program offers",
+      "video_id": "G8zq1xqe_jI",
+      "start": 1551.0,
+      "end": 2062.0,
+      "lecture_material": "Reasons for parallel computing; concurrency, scalability, data locality, modularity; OpenMP, MPI, OpenACC and CUDA. Teamwork of domain and computational experts; the route from algorithm to parallel algorithm, code, parallel framework, and workflows or problem-solving environments with a graphical interface; commercial applications such as MATLAB (t = 1612 to 1743).",
+      "research_extension": "Brent (1974) abstract.",
+      "teaching_construction": "Memory-capacity arithmetic for the Jacobi grid; work-span definition of concurrency; proof of the greedy bound; work-span listing for three additions of 1024 numbers.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "From a statement to instructions: opcode, operand, latency and throughput",
+      "video_id": "xWBICsJyDZo",
+      "start": 43.0,
+      "end": 415.0,
+      "lecture_material": "Computer types, simplified model, basic computing model (a = a + b + 1, ADD/INC, opcode, operand, ALU, ISA).",
+      "research_extension": "Little (1961) abstract; Intel manual 2.3.1 (symmetric ISA), Tables 2-4 and 2-5.",
+      "teaching_construction": "gcc -O0 and -O2 sessions for the lecture's statement; R(K) = min(K/L, X) and K* = L X; scalar FMA ramp listing and its interpretation; anomaly of add-immediate chains.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Flynn's taxonomy, vector lanes, and the node as a multiple-instruction machine",
+      "video_id": "xWBICsJyDZo",
+      "start": 415.0,
+      "end": 747.0,
+      "lecture_material": "Flynn's four classes with slides and examples; SIMD in vector computers, CPUs and GPUs; MIMD shared and distributed memory.",
+      "research_extension": "Flynn (1966, 1972) abstracts.",
+      "teaching_construction": "Formal reading of the classes at four levels; vector FMA ramp listing; five builds of the polynomial loop; thread-scaling listing, whose printed rate is p r_min by (6.6); bounds from P-core and E-core latencies; Table 6.2 of peaks and measurements; clarification of the SIMD definition from the slides. The measurements lie between the E-core-straggler value and the sum of the rates.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "Programs, processes, and sharing one core: multiprogramming, time slicing, the context switch",
+      "video_id": "xWBICsJyDZo",
+      "start": 747.0,
+      "end": 1526.0,
+      "lecture_material": "Process basics, single tasking on the IBM PC with MS-DOS, multiprogramming, multitasking, process control block, context switch, symmetric and asymmetric multiprocessing. Terminate-and-stay-resident programs (t = 1192).",
+      "research_extension": "Intel M80C286 data sheet.",
+      "teaching_construction": "Utilization model U(n) = 1 - w^n; check of the hardware claim; pipe ping-pong listing for processes and threads; overhead share of a time slice.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "Threads and Hyper-Threading",
+      "video_id": "xWBICsJyDZo",
+      "start": 1526.0,
+      "end": 2094.0,
+      "lecture_material": "Thread definition and table of unique and shared items; benefits and scheduling criteria; Hyper-Threading slide.",
+      "research_extension": "pthreads(7); Marr et al. (2002); Intel manual 2.3.1. Slurm multi-core support page (--hint=nomultithread).",
+      "teaching_construction": "Shared-core model g = min(2, L X / K) (6.8); reading of the HPC recommendation from the equal-share speedup (6.6) as protection against bad placement; the thread-scaling run cannot test it.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "What the models establish and what they do not",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Table of 16 lecture statements and their status.",
+      "research_extension": "None.",
+      "teaching_construction": "Table 6.3; limits of the models.",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "TOP500, Frontier system page",
+      "url": "https://www.top500.org/system/180047/",
+      "supports": "June 2024 entry: Rmax 1,206.00 Pflop/s, Rpeak 1,714.81 Pflop/s, 8,699,904 cores, 22,786 kW; June 2026 entry: 9,066,176 cores, Rmax 1,353.00, Rpeak 2,055.72 Pflop/s, Nmax 24,837,120.",
+      "page_checked": "retrieved 2026-10-26; system and ranking tables"
+    },
+    {
+      "title": "TOP500 list June 2008",
+      "url": "https://www.top500.org/lists/top500/2008/06/",
+      "supports": "Rank 1 Roadrunner 1,026 Tflop/s, rank 2 478.2 Tflop/s.",
+      "page_checked": "retrieved 2026-10-26; ranks 1 to 10"
+    },
+    {
+      "title": "TOP500 list June 2008, ranks 401 to 500",
+      "url": "https://www.top500.org/lists/top500/list/2008/06/?page=5",
+      "supports": "Rank 500 Rmax 9.00 Tflop/s.",
+      "page_checked": "retrieved 2026-10-26; last row"
+    },
+    {
+      "title": "TOP500 list June 2019, ranks 401 to 500",
+      "url": "https://www.top500.org/lists/top500/list/2019/06/?page=5",
+      "supports": "Rank 500 Rmax 1.02 Pflop/s.",
+      "page_checked": "retrieved 2026-10-26; last row"
+    },
+    {
+      "title": "TOP500 list June 2026",
+      "url": "https://www.top500.org/lists/top500/2026/06/",
+      "supports": "Rank 1 LineShine 2,198.40 Pflop/s; Frontier rank 3 with 1,353.00 Pflop/s.",
+      "page_checked": "retrieved 2026-10-26; ranks 1 to 10"
+    },
+    {
+      "title": "TOP500 list June 2026, ranks 401 to 500",
+      "url": "https://www.top500.org/lists/top500/list/2026/06/?page=5",
+      "supports": "Rank 500 Rmax 2.66 Pflop/s.",
+      "page_checked": "retrieved 2026-10-26; last row"
+    },
+    {
+      "title": "TOP500 Linpack project page",
+      "url": "https://www.top500.org/project/linpack/",
+      "supports": "Rmax, Nmax, N1/2, Rpeak; LU with partial pivoting; operation count 2/3 n^3 + O(n^2); exclusion of Strassen-type and lower-precision methods.",
+      "page_checked": "retrieved 2026-10-26; full page"
+    },
+    {
+      "title": "HPL - A Portable Implementation of the High-Performance Linpack Benchmark for Distributed-Memory Computers, version 2.3",
+      "url": "https://www.netlib.org/benchmark/hpl/",
+      "supports": "64-bit dense solver; two-dimensional block-cyclic distribution; needs MPI and BLAS.",
+      "page_checked": "retrieved 2026-10-26; front page"
+    },
+    {
+      "title": "US Army Ordnance, Historical Monograph: Electronic Computers within the Ordnance Corps (1961), chapter II The ENIAC",
+      "url": "https://ed-thelen.org/comp-hist/U-S-Ord-61-ch02.html",
+      "supports": "Final assembly fall 1945; dedication 15 February 1946; acceptance July 1946; Aberdeen January 1947; operational August 1947; Ordnance Department as sponsor.",
+      "page_checked": "monograph pages 19 to 24 (later pages in outline)"
+    },
+    {
+      "title": "Slurm Workload Manager, Overview",
+      "url": "https://slurm.schedmd.com/overview.html",
+      "supports": "Three key functions: allocation, framework for starting and monitoring work, arbitration of contention by a queue.",
+      "page_checked": "retrieved 2026-10-26; overview text"
+    },
+    {
+      "title": "OpenHPC",
+      "url": "https://openhpc.community/",
+      "supports": "Community effort aggregating provisioning, resource management, I/O clients, development tools and scientific libraries for HPC Linux clusters.",
+      "page_checked": "retrieved 2026-10-26; front page"
+    },
+    {
+      "title": "Lustre Software Release 2.x Operations Manual",
+      "url": "https://doc.lustre.org/lustre_manual.xhtml",
+      "supports": "Section 1.2.2: MDS, MDT, OSS, OST, clients, several clients may write different parts of a file; 1.3: aggregate bandwidth is the minimum of disk and network bandwidth; 1.3.1: striping as RAID 0, default stripe_count 1 and stripe_size 1 MB.",
+      "page_checked": "sections 1.2.2, 1.3, 1.3.1; section 19.2 not read"
+    },
+    {
+      "title": "M. J. Flynn, Very high-speed computing systems, Proc. IEEE 54(12), 1901-1909 (1966)",
+      "url": "https://doi.org/10.1109/PROC.1966.5273",
+      "supports": "Four classes SISD, SIMD, MISD, MIMD; definition of a stream.",
+      "page_checked": "abstract only"
+    },
+    {
+      "title": "M. J. Flynn, Some computer organizations and their effectiveness, IEEE Trans. Comput. C-21(9), 948-960 (1972)",
+      "url": "https://doi.org/10.1109/TC.1972.5009071",
+      "supports": "SISD limited by data dependencies, Minsky conjecture for SIMD, saturation of MIMD at lockout fraction 1/n.",
+      "page_checked": "abstract only"
+    },
+    {
+      "title": "Intel 64 and IA-32 Architectures Optimization Reference Manual, Documentation Changes, 355308-051 (October 2026)",
+      "url": "https://cdrdv2-public.intel.com/930023/355308-051-optimization-reference-manual-changes-doc.pdf",
+      "supports": "E-cores support AVX2 and AVX-VNNI, not AVX-512; symmetric ISA; P-cores can have Hyper-Threading; Golden Cove 48 KB data cache; multiply/FMA 2x256-bit; FMA latency 4 (ports 0,1).",
+      "page_checked": "section 2.3.1 p. 2-6; Figure 2-2 p. 2-11; Table 2-4 pp. 2-13 and 2-14 (Mul/FMA row on p. 2-14); Table 2-5 p. 2-14"
+    },
+    {
+      "title": "Notebookcheck, Intel Core i5-12450H",
+      "url": "https://www.notebookcheck.net/Intel-Core-i5-12450H-Processor-Benchmarks-and-Specs.589270.0.html",
+      "supports": "4 P-cores and 4 E-cores, 12 threads; P-core clock 2.0 to 4.4 GHz, E-core 1.5 to 3.3 GHz.",
+      "page_checked": "retrieved 2026-10-26; description and specification table (third-party database)"
+    },
+    {
+      "title": "uops.info instruction table (instructions.xml)",
+      "url": "https://uops.info/instructions.xml",
+      "supports": "Measured latency, reciprocal throughput and micro-operation counts of VFMADD231PD (YMM) on Alder Lake P-cores (latency 4, 0.50, ports 0 and 1) and E-cores (latency 6, 1.00, 2 micro-operations); VADDPD and VMULPD forms.",
+      "page_checked": "complete file, root date 2026-03-29; third-party measurements"
+    },
+    {
+      "title": "Intel M80C286 High Performance CHMOS Microprocessor with Memory Management and Protection (data sheet)",
+      "url": "https://ic.unicamp.br/~cortes/mc602/material_complementar/27110301.PDF",
+      "supports": "Designed for multi-tasking; four-level protection for task isolation; hardware task switching; one instruction switches tasks.",
+      "page_checked": "introduction, first page"
+    },
+    {
+      "title": "D. T. Marr et al., Hyper-Threading Technology Architecture and Microarchitecture, Intel Technology Journal 6(1) (2002)",
+      "url": "https://www.cl.cam.ac.uk/teaching/0607/CompArch/documents/all/beyond-risc/intel-smt.pdf",
+      "supports": "Two logical processors, shared execution resources, duplicated architecture state, simultaneous execution; die area under 5 percent; gains up to 30 percent on common server benchmarks.",
+      "page_checked": "abstract; PDF pages 4 and 11"
+    },
+    {
+      "title": "Linux man-pages: pthreads(7)",
+      "url": "https://man7.org/linux/man-pages/man7/pthreads.7.html",
+      "supports": "Threads share global memory (data and heap), each has its own stack.",
+      "page_checked": "description section"
+    },
+    {
+      "title": "J. D. C. Little, A proof for the queuing formula L = lambda W, Operations Research 9(3), 383-387 (1961)",
+      "url": "https://doi.org/10.1287/opre.9.3.383",
+      "supports": "Under stationarity, mean number in system equals arrival rate times mean time in system.",
+      "page_checked": "abstract only"
+    },
+    {
+      "title": "R. P. Brent, The parallel evaluation of general arithmetic expressions, J. ACM 21(2), 201-206 (1974)",
+      "url": "https://doi.org/10.1145/321812.321815",
+      "supports": "Expression evaluation in time 4 log2 n + 10(n-1)/p on p processors.",
+      "page_checked": "abstract only"
+    },
+    {
+      "title": "Slurm Workload Manager, Multi-core/Multi-thread Support",
+      "url": "https://slurm.schedmd.com/mc_support.html",
+      "supports": "Job option --hint=[no]multithread ('[don't] use extra threads with in-core multi-threading'); in-core multi-threading 'may also improve performance' for communication-intensive applications.",
+      "page_checked": "retrieved 2026-10-26; application hints section"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "f",
+      "first_section": "model",
+      "definition": "clock frequency in cycles per second"
+    },
+    {
+      "symbol": "l (ell)",
+      "first_section": "model",
+      "definition": "doubles per vector register (lanes); 4 for 256 bits"
+    },
+    {
+      "symbol": "X",
+      "first_section": "model",
+      "definition": "throughput: FMA instructions started per cycle"
+    },
+    {
+      "symbol": "L",
+      "first_section": "model",
+      "definition": "latency of an FMA in cycles"
+    },
+    {
+      "symbol": "phi",
+      "first_section": "model",
+      "definition": "flop per cycle of a core, 2 X l"
+    },
+    {
+      "symbol": "n_node, c",
+      "first_section": "model",
+      "definition": "number of nodes; cores per node"
+    },
+    {
+      "symbol": "R_max, R_peak",
+      "first_section": "model",
+      "definition": "rate of one Linpack run; theoretical peak product of hardware parameters"
+    },
+    {
+      "symbol": "N_max",
+      "first_section": "measure",
+      "definition": "problem size of the Rmax run"
+    },
+    {
+      "symbol": "k, b_ost, B_link",
+      "first_section": "cluster",
+      "definition": "stripe count; bandwidth of one object storage target; client link bandwidth"
+    },
+    {
+      "symbol": "W, D, W/D",
+      "first_section": "why-parallel",
+      "definition": "work (operations), span (longest dependence chain), concurrency"
+    },
+    {
+      "symbol": "p, T_p, S_p",
+      "first_section": "why-parallel",
+      "definition": "processing elements, time on p, speedup T_1/T_p"
+    },
+    {
+      "symbol": "K, K*",
+      "first_section": "instruction",
+      "definition": "number of independent chains; smallest number reaching the throughput limit, L X"
+    },
+    {
+      "symbol": "R(K)",
+      "first_section": "instruction",
+      "definition": "instruction rate per cycle of K chains, min(K/L, X)"
+    },
+    {
+      "symbol": "m_I, m_D",
+      "first_section": "flynn",
+      "definition": "numbers of instruction and data streams at a stated level"
+    },
+    {
+      "symbol": "w, U(n)",
+      "first_section": "processes",
+      "definition": "fraction of time a process waits for I/O; CPU utilization with n resident processes, 1 - w^n"
+    },
+    {
+      "symbol": "t_cs, q",
+      "first_section": "processes",
+      "definition": "context-switch cost; time slice"
+    },
+    {
+      "symbol": "u, g",
+      "first_section": "threads",
+      "definition": "fraction of a core's FMA throughput used by one thread, K/(L X); gain of two threads on one core, min(2, L X / K)"
+    },
+    {
+      "symbol": "v_min",
+      "first_section": "threads",
+      "definition": "relative speed of the slowest occupied logical processor; S_p = p v_min with equal static shares (6.6)"
+    },
+    {
+      "symbol": "r_min, W_1, T_t",
+      "first_section": "flynn",
+      "definition": "rate of the slowest thread; work of one thread; time of thread t; printed rate of node_scaling.c is p W_1 / max_t T_t = p r_min (6.6)"
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python code_lab.py --chapter 6",
+    "listings": 8,
+    "all_passed": true
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "REVISE",
+      "report": "ch06-r1.md",
+      "blocking": 2,
+      "major": 5,
+      "minor": 14,
+      "fixed": [
+        "B1",
+        "B2",
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M5 (items 1-14)",
+        "m1",
+        "m2",
+        "m3",
+        "m4",
+        "m5",
+        "m6",
+        "m7",
+        "m8",
+        "m9",
+        "m10",
+        "m11",
+        "m12",
+        "m14"
+      ],
+      "not_fixed": [
+        "m13 (IBM PC Technical Reference not found; row left as 'Partly confirmed')",
+        "B2 optional stronger fix (per-thread timing in node_scaling.c) not done"
+      ],
+      "notes": "Equations renumbered: printed rate p r_min is (6.6) in the section on Flynn's taxonomy, the multiprogramming utilization is (6.7), the Hyper-Threading gain is (6.8). Brief lesson 12 applied after the round: lecture corrections 4 (SIMD), 5 (Hyper-Threading 'switched'), the SMP passage and the ENIAC funder were removed or reworded as clarifications; no mention of the transcript remains in the chapter."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT WITH FIXES",
+      "report": "ch06-r2.md",
+      "blocking": 0,
+      "major": 0,
+      "minor": 9,
+      "fixed": [
+        "n1",
+        "n2",
+        "n3",
+        "n4",
+        "n5",
+        "n6",
+        "n7",
+        "n8",
+        "optional utilization sentence (slide f0058)",
+        "n9 (LC7 merged into LC3; ENIAC, Hyper-Threading figures and SIMD moved to a clarifications list)"
+      ],
+      "not_fixed": [],
+      "notes": "n8 is a comment change in node_scaling.c; code_lab.py --chapter 6 rerun, 8 of 8 pass."
+    }
+  ],
+  "clarifications": [
+    "ENIAC: the slide is titled 'ENIAC - Circa 1947' and is consistent with the 1961 US Army Ordnance monograph (final assembly fall 1945, dedication 15 February 1946, acceptance July 1946, arrival at Aberdeen January 1947, operation there by August 1947). The chapter gives these dates as context.",
+    "Hyper-Threading figures on the slide: 'takes 5% more die area' is an upper bound ('less than 5 %') and 'up to 30 %' is a figure for server benchmarks on the 2002 Xeon MP (Marr et al., 2002); the mechanism is simultaneous execution of both logical processors on shared units.",
+    "SIMD: in SIMD every execution unit receives the same instruction; the slide shows I1 on both units, and the MISD slide shows I1 and I2."
+  ]
+}
