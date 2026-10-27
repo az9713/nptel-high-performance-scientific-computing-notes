@@ -1,0 +1,317 @@
+{
+  "chapter": 11,
+  "title": "OpenMP I: shared-memory threads and the distribution of work",
+  "status": "revised after review round 2",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "DVQhXs8_o-A",
+      "label": "W3L6",
+      "playlist_index": 20,
+      "duration_seconds": 1656
+    },
+    {
+      "video_id": "Cz8KRZBbgpI",
+      "label": "W4L1",
+      "playlist_index": 21,
+      "duration_seconds": 1525
+    }
+  ],
+  "frames_viewed": {
+    "DVQhXs8_o-A": [
+      "f0004",
+      "f0008",
+      "f0010",
+      "f0018",
+      "f0020",
+      "f0023",
+      "f0030",
+      "f0031",
+      "f0036",
+      "f0038",
+      "f0044",
+      "f0048",
+      "f0053"
+    ],
+    "Cz8KRZBbgpI": [
+      "f0004",
+      "f0007",
+      "f0010",
+      "f0013",
+      "f0016",
+      "f0020",
+      "f0025",
+      "f0030",
+      "f0032",
+      "f0033",
+      "f0034",
+      "f0039",
+      "f0042",
+      "f0043",
+      "f0045"
+    ]
+  },
+  "source_uncertainties": [
+    "Dagum and Menon (1998), IEEE Comput. Sci. Eng. 5(1) 46-55: the full text and the IEEE Xplore abstract page could not be opened (the page returned an empty body to scripted clients on 2026-10-26). The bibliographic data were checked in Crossref (DOI 10.1109/99.660313; pages 46-55; volume 5, issue 1) and the abstract text was read through the OpenAlex record. The chapter cites the paper for abstract-level statements only and relies on no other claim of the paper.",
+    "Menon (1998) Cray User Group slides: slide 5 gives Fortran v1.0 specification October 1997 and C/C++ v1.0 specification August 1998. The slides carry no date, so it is not known whether the C/C++ date was planned or achieved when the talk was given. The chapter says so.",
+    "Amdahl (1967) was read in the 2007 IEEE SSCS News reprint (redrawn figure); the reprint's editors state the paper has no equations. The AFIPS original was not opened. The formula S = 1/(f + (1-f)/p) is presented as a later formalization derived in the chapter; the chapter's remark that 1/f gives 5 and 7.5 for housekeeping fractions of 0.20 and 0.133 is the author's reading of the paper's 'five to seven', not a statement of the paper.",
+    "OpenMP 5.2 (November 2021) is the document cited for definitions. gcc 13.3 reports _OPENMP = 201511 (version 4.5). OpenMP 6.0 was not opened, so the chapter does not claim that the data-race wording is unchanged there. Page numbers are the printed page numbers of the 5.2 PDF (PDF page minus 20).",
+    "Drepper (2007): the chapter reads 'overhead computed by dividing the time with a single cache line by the time with a separate cache line per thread is 390%, 734% and 1,147%' as time ratios of 3.9, 7.3 and 11.5. His text gives the percentages and the division, not the word 'ratio'.",
+    "Statements about the libgomp runtime (thread reuse between regions) rest on the author's timings only; the libgomp documentation on thread pools was not opened (only the GOMP_SPINCOUNT page was). The explanation that gcc -O2 keeps sum[id*stride] in a register is inferred from timings; the generated assembly was not inspected.",
+    "ASR errors in the machine transcript corrected from slides: the transcript gives the four-thread time of the lecture's table as '2.97 seconds'; the slide reads 0.97. 'OMP-setnum-threads' = omp_set_num_threads; 'poo' = pooh; 'CIDR file' = header file. The slide's code prints num_steps = 100000 while its timing line says 100000000 steps; the chapter takes 10^8 from the timing line and says so. The slide's sum runs from i = 0 to N (N+1 terms) while the code runs N terms.",
+    "The lecture's hello-world runs were on a MacBook (gcc-14 visible in a frame) with 8 processing cores per the lecturer's statement; the chapter uses only what was stated or shown. The lecturer's remark that the timing-study average should be taken over about five runs is reported as stated.",
+    "Timestamps are section anchors from local speech-recognition segment times and locate topic changes to within a few seconds.",
+    "Hybrid processor (Intel ARK, retrieved 2026-10-26): 4 P-cores x 2 threads + 4 E-cores x 1 thread; max turbo 4.40 / 3.30 GHz. The author's own fetch of the ARK page returned HTTP 403; the page was opened by the reviewer, and a web search returned consistent core counts, thread counts and turbo frequencies from secondary sources (Notebookcheck, TechPowerUp). WSL 2 shows a synthetic 6 cores x 2 threads; placement was not controlled. Explanations given as consistent with the data but not tested: (a) the speedup plateau near 3.7-4.4 for the pi loop, as S_p = p v_min with equal shares (copies, final session: v_min 0.87, 0.75, 0.49, 0.41 for 2, 4, 8, 12; at p = 12 the threaded loop reaches 80 % of C_12, a gap not explained; the best-of-5 rule of the copies may overstate C_12); (b) S_24 slightly above S_12 and the 100/1000-thread runs, as oversubscription that moves S toward the sum of per-processor speeds; (c) the region-cost rise at p = 10-12 (in the final sample the cost at p = 10 still follows the trend and the rise starts at p = 11), as preemption of spinning team threads (libgomp spin count 300,000 when OMP_WAIT_POLICY is undefined) when all logical processors are occupied; it does not start at p = 9, so it is not a topology effect; (d) cyclic S above p in earlier triangle.c runs (2.11 at p = 2, 4.27 at p = 4), as a slow one-thread reference; (e) the non-monotone unpadded -O0 time at p = 8, 12, 24, as fewer concurrent writers per cache line when 24 threads are time-sliced on 12 processors. Still unexplained: the one-line penalty for 4-byte counters (2.9-3.0 times) against 8-byte counters (2.0-2.6 times).",
+    "The machine was shared with other jobs (other agents) during the final capture of all timing samples and timing sessions (first regions of 1000 threads, single runs, independent copies). The hello-world output counts (1619 123 114 99 18 10 8 6 2 1; 112) come from an earlier session and were not recaptured. Every speed is therefore lower by an unknown amount and the run-to-run variation is wider than on an idle machine. The chapter says so in the section on the model and in the limits. Numbers quoted as 'earlier runs' come from earlier sessions with the same programs or earlier versions of them (for example the first parallel region cost 6-28 ms in eight runs; the one-line false-sharing ratio at p = 8 was 2.0-2.6 in four runs; the cyclic speedup of triangle.c at p = 4 was 3.54, 3.84 and 4.27 in three runs) and are not reproduced by a listing.",
+    "A hung process from an earlier out-of-range experiment (5000 threads writing past a 64-slot array; the experiment was dropped) was present in WSL during the first timing runs of the first draft and was gone before the final captures of the revision."
+  ],
+  "sections": [
+    {
+      "section": "The objects of the chapter and the running case",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Running problem: midpoint-rule pi (W4L1).",
+      "research_extension": "None.",
+      "teaching_construction": "Formal model: events, program order, fork, join, schedules, storage (shared/private), cost of a region; symbol list; machine description.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "OpenMP is directives, a runtime library and environment variables",
+      "video_id": "DVQhXs8_o-A",
+      "start": 6.0,
+      "end": 576.0,
+      "lecture_material": "API of directives, library routines and environment variables; legacy-code motivation; solution stack; common core of 21 items; directive syntax and structured block; omp.h and -fopenmp.",
+      "research_extension": "Dagum and Menon 1998 (abstract); Menon 1998 slides (specification dates); OpenMP 5.2 sections 1.3, 3.3, 4.3.",
+      "teaching_construction": "Scope of the chapter within the common core; reading of a directive as a change of meaning.",
+      "evidence_class": "product specification"
+    },
+    {
+      "section": "A first parallel program, its many outputs and the interleaving model",
+      "video_id": "DVQhXs8_o-A",
+      "start": 576.0,
+      "end": 1075.0,
+      "lecture_material": "Hello world in a parallel region; output varies between runs; 8, 4 and 24 threads; concurrency and parallelism definitions.",
+      "research_extension": "None.",
+      "teaching_construction": "Count of schedules (2p)!/2^p and outputs (Catalan numbers); enumeration program; 2000-run experiment.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Fork-join execution and the size of the team",
+      "video_id": "DVQhXs8_o-A",
+      "start": 1075.0,
+      "end": 1599.0,
+      "lecture_material": "Fork-join model and nested regions; team size from an environment variable; omp_set_num_threads; thread number; hello world with thread number.",
+      "research_extension": "OpenMP 5.2 sections 1.3, 10.1, 10.1.1 (Algorithm 2.1), 18.2.1, 18.2.2, 21.1.2.",
+      "teaching_construction": "team.c checking precedence and thread numbers; correction of 'operating system' to the runtime ICV.",
+      "evidence_class": "product specification"
+    },
+    {
+      "section": "Shared and private storage, redundant execution and the data race",
+      "video_id": "Cz8KRZBbgpI",
+      "start": 101.0,
+      "end": 334.0,
+      "lecture_material": "Parallel region with pooh(ID, A); redundant execution; shared array and private ID; implicit barrier; requested versus actual threads; scalar promoted to array to avoid a race.",
+      "research_extension": "OpenMP 5.2 sections 5.1.1 and 1.4.1 (data-race definition, update granularity).",
+      "teaching_construction": "Model definition of a race; race.c; remark that race-freedom (memory units) and false sharing (cache lines) are independent.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "The midpoint rule for pi: cost and error",
+      "video_id": "Cz8KRZBbgpI",
+      "start": 334.0,
+      "end": 653.0,
+      "lecture_material": "Integral of 4/(1+x^2) as a sum of rectangles; serial program; omp_get_wtime.",
+      "research_extension": "OpenStax Calculus Volume 2 section 3.6 Theorem 3.5 (error bound).",
+      "teaching_construction": "Derivation of the bound and of the h^2/24 [f'] expansion; M = 8; h^2/12 for this f; cost-accuracy budget; pi_error.c.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "The SPMD program: cyclic and block distribution of iterations",
+      "video_id": "Cz8KRZBbgpI",
+      "start": 653.0,
+      "end": 974.0,
+      "lecture_material": "SPMD pi program with sum[id], thread 0 copying the team size, serial global sum, cyclic and block distribution.",
+      "research_extension": "OpenMP 5.2 section 1.3 (different numbers of threads, different numeric results).",
+      "teaching_construction": "Dependence argument and reduction; distributions; load-balance model (11.3), (11.4); pi_spmd.c; triangle.c.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Speedup, efficiency and Amdahl's law",
+      "video_id": "Cz8KRZBbgpI",
+      "start": 974.0,
+      "end": 1336.0,
+      "lecture_material": "Timing table 1.86/1.03/1.08/0.97 s; speedup, linear and superlinear; Amdahl's law with alpha.",
+      "research_extension": "Amdahl 1967 (argument, 40 percent housekeeping, five to seven times; no equations).",
+      "teaching_construction": "Derivation from assumptions A1-A3; experimental serial fraction; two-core model; amdahl.py.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "The cost of a parallel region and the choice of the thread count",
+      "video_id": "Cz8KRZBbgpI",
+      "start": 1336.0,
+      "end": 1525.0,
+      "lecture_material": "Overheads of thread creation, destruction and management; 1000 threads slower than serial; OMP_NUM_THREADS without recompiling; timing study.",
+      "research_extension": "None.",
+      "teaching_construction": "Overhead model and optimum team size; fork_cost.c; single-shot 1000-thread runs; capacity-plus-creation model; selection procedure.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "False sharing: cache-line arithmetic and a measurement",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "Drepper 2007 sections 3.2, 6.4.1 (64-byte lines, write ownership, measured penalties).",
+      "teaching_construction": "Line-index formula (11.8); falseshare.c; pi_scaling.c with -O0/-O2 and strides 1/8; independent-copies capacity measurement.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "What the model establishes and what it does not",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "None.",
+      "teaching_construction": "Claim table (Table 11.1) and boundaries.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Exercises",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "None.",
+      "teaching_construction": "Six exercises with full solutions: derive, compute, counterexample, diagnose an assumption, design judgment, implementation and measurement.",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "Lecture W3L6 recording",
+      "url": "https://www.youtube.com/watch?v=DVQhXs8_o-A",
+      "supports": "OpenMP overview, syntax, hello world, concurrency definitions, fork-join, thread count and thread number.",
+      "page_checked": "slide frames listed in frames_viewed"
+    },
+    {
+      "title": "Lecture W4L1 recording",
+      "url": "https://www.youtube.com/watch?v=Cz8KRZBbgpI",
+      "supports": "Parallel regions, pi by the midpoint rule, SPMD with cyclic and block distribution, timing table, speedup and Amdahl's law, overhead.",
+      "page_checked": "slide frames listed in frames_viewed"
+    },
+    {
+      "title": "OpenMP Application Programming Interface, Version 5.2 (November 2021)",
+      "url": "https://www.openmp.org/wp-content/uploads/OpenMP-API-Specification-5-2.pdf",
+      "supports": "p. 23-24: fork-join, implicit barrier, nested region with one thread when nesting is disabled, different numbers of threads may give different numeric results; p. 27: update granularity, definition of data race, result unspecified; p. 69: _OPENMP is yyyymm; p. 76: structured blocks; p. 97: automatic variables declared inside the construct are private; p. 99: variables referenced in a parallel construct without default clause are shared; p. 223: team creation, thread numbers consecutive from zero, team size constant; p. 226-227: Algorithm 2.1 for the number of threads; p. 348-349: omp_set_num_threads, omp_get_num_threads; p. 413-414: omp_get_wtime per-thread time; p. 600: OMP_NUM_THREADS sets nthreads-var.",
+      "page_checked": "text extracted from the PDF (669 pages); printed page numbers = PDF page minus 20"
+    },
+    {
+      "title": "Amdahl, Validity of the single processor approach to achieving large scale computing capabilities (AFIPS 1967; 2007 IEEE SSCS News reprint)",
+      "url": "https://www3.cs.stonybrook.edu/~rezaul/Spring-2019/CSE613/reading/Amdahl-1967.pdf",
+      "supports": "Housekeeping is 40 percent of executed instructions, might be halved but not reduced by a factor of three; overhead alone limits throughput to five to seven times; the reprint's editors state the paper has no equations and one figure.",
+      "page_checked": "both pages of the reprint (pp. 19-20 of the newsletter)"
+    },
+    {
+      "title": "Dagum and Menon, OpenMP: an industry standard API for shared-memory programming, IEEE Computational Science & Engineering 5(1), 1998, pp. 46-55",
+      "url": "https://doi.org/10.1109/99.660313",
+      "supports": "Abstract: OpenMP is a set of compiler directives and callable runtime library routines extending Fortran (and separately C and C++) to express shared-memory parallelism; it builds on X3H5 concepts and extends them to coarse-grain parallelism; the standard includes a runtime library with environment variables.",
+      "page_checked": "abstract only (via the OpenAlex record); bibliographic data via Crossref; full text not opened"
+    },
+    {
+      "title": "Menon, OpenMP Application Program Interface, slides, Cray User Group 1998",
+      "url": "https://cug.org/5-publications/proceedings_attendee_lists/1998CD/S98PROC/AUTHORS/MENON/SLIDES.PDF",
+      "supports": "Slide 5: Fortran v1.0 specification October 1997, C/C++ v1.0 specification August 1998.",
+      "page_checked": "all 17 slides read as extracted text; slide 5"
+    },
+    {
+      "title": "OpenStax, Calculus Volume 2, section 3.6 Numerical Integration",
+      "url": "https://openstax.org/books/calculus-volume-2/pages/3-6-numerical-integration",
+      "supports": "Theorem 3.5, eq. 3.12: for f continuous with a second derivative bounded by M on [a,b], the midpoint-rule error is at most M(b-a)^3/(24 n^2).",
+      "page_checked": "section text, Theorem 3.5"
+    },
+    {
+      "title": "Drepper, What every programmer should know about memory (2007)",
+      "url": "https://akkadia.org/drepper/cpumemory.pdf",
+      "supports": "p. 15 (section 3.2): cache lines of 64 bytes are the norm; pp. 65-67 (section 6.4.1): writes to a shared line need exclusive state and many request-for-ownership messages; false sharing measured at 390%, 734% and 1,147% (one line against one line per thread, 2-4 threads) on four Pentium 4 processors; no growing penalty on a single-processor quad-core Core 2.",
+      "page_checked": "pp. 15, 65-67 of the 114-page PDF"
+    },
+    {
+      "title": "Intel, Intel Core i5-12450H processor specifications (ARK)",
+      "url": "https://www.intel.com/content/www/us/en/products/sku/132222/intel-core-i512450h-processor-12m-cache-up-to-4-40-ghz/specifications.html",
+      "supports": "Total cores 8: 4 performance cores (2 threads each) and 4 efficient cores (1 thread each); 12 threads; maximum turbo frequency 4.40 GHz (P-core) and 3.30 GHz (E-core); launched Q1 2022.",
+      "page_checked": "retrieved 2026-10-26 (opened by the reviewer; the author's fetch returned HTTP 403; consistent figures from secondary sources via web search)"
+    },
+    {
+      "title": "GNU libgomp manual, GOMP_SPINCOUNT",
+      "url": "https://gcc.gnu.org/onlinedocs/libgomp/GOMP_005fSPINCOUNT.html",
+      "supports": "A waiting thread spins 300,000 times when OMP_WAIT_POLICY is undefined (30 billion for ACTIVE, 0 for PASSIVE); if there are more OpenMP threads than available CPUs, 1000 spins (ACTIVE) and 100 spins (undefined).",
+      "page_checked": "full page text, retrieved 2026-10-26"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "p, m, T_1, T_p, S_p, E_p",
+      "first_section": "model",
+      "definition": "Team size, logical processors, wall-clock times on 1 and p threads, speedup, efficiency."
+    },
+    {
+      "symbol": "f, kappa, b",
+      "first_section": "model",
+      "definition": "Serial fraction (exact definition in speedup), per-thread cost of a parallel region, cache-line size 64 B."
+    },
+    {
+      "symbol": "I, M_N, h, N, f(x)",
+      "first_section": "model",
+      "definition": "Integral, midpoint sum, width 1/N, number of subintervals, integrand 4/(1+x^2)."
+    },
+    {
+      "symbol": "H, W, C_p",
+      "first_section": "hello",
+      "definition": "Events print 'hello ' and print 'world', Catalan number counting distinct outputs."
+    },
+    {
+      "symbol": "E_N, M, [a,b]",
+      "first_section": "midpoint",
+      "definition": "Error I - M_N, bound on |f''|, interval."
+    },
+    {
+      "symbol": "id, n_thr, q, r, I_t, w_t, c(i), W, E_dist",
+      "first_section": "spmd",
+      "definition": "Thread number, team size, quotient and remainder of N/p, iteration set of thread t, its load, iteration cost, total work, efficiency of a distribution."
+    },
+    {
+      "symbol": "A1-A3, f_exp, C_c, C",
+      "first_section": "speedup",
+      "definition": "Assumptions of Amdahl's law, experimental serial fraction, throughput of c independent copies, capacity."
+    },
+    {
+      "symbol": "p*, kappa_c",
+      "first_section": "overhead",
+      "definition": "Team size minimizing T_p, one-time creation cost per thread."
+    },
+    {
+      "symbol": "sigma, l(t)",
+      "first_section": "false-sharing",
+      "definition": "Stride in elements, cache-line index of thread t's element."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python code_lab.py --chapter 11",
+    "listings": 11,
+    "all_passed": true
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "REVISE (5 blocking, 5 major, 13 minor)",
+      "changes": "B1: removed two TAB characters that broke math in Table 11.1 (no other tab or control character in the source). B2: model section states the hybrid processor (4 P x 2 + 4 E x 1, turbo 4.40/3.30 GHz, Intel ARK) and the synthetic WSL view. B3: C_c redefined as c times the speed of the slowest copy (C_c = c v_min); S_p = p v_min for equal shares; the plateau and the p = 24 speedup explained and hedged; matching edits in observation 3 and exercise 4. B4: Table 11.1 row on superlinear speedup corrected (triangle.c cyclic 4.27 at p = 4 in an earlier run). B5: the -O2 stride comparison restated against the table (within 15 percent; largest difference has the padded version slower). M1: the p = 10-12 region-cost rise is not attributed to the hybrid layout; occupation of all logical processors and libgomp spinning given as an untested hypothesis with its predictions. M2: triangle.c deviations explained by core speeds (reference run, slowest thread). M3: the 1000-thread model uses the session's own T_1 and a capacity C defined where it is used (C = 4.2, threshold 0.066 s). M4: Table 11.1 gained the lecture's own explanation of the table, the homework as stated, and the claim that cyclic and block distributions give the same answer. M5: limits paragraph and source_uncertainties rewritten. m1: storage timestamp moved to 1:41 (t = 101). m2: slide variable names. m3: lead names the slide's machine. m4: 'minimum of 1'. m5: T_1 of about 1.0 s. m6: row 3 conditions and row 2 section. m7: best-of-5 caveat for the copies. m8: hypothesis for the non-monotone -O0 time. m9: reason for thread 0 attributed correctly. m10: lock-step converse case. m11: probabilities for sum[2] and sum[4]. m12: no cuts made; the chapter's prose count excluding math is about 6,700 words. m13: all timing listings and shell sessions recaptured in one session (machine shared; stated in the chapter and here); all prose numbers re-checked against the new outputs; every OpenMP 5.2 page citation re-confirmed against the extracted PDF text (printed page = PDF page minus 20)."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT WITH FIXES (1 blocking, 1 major, 8 minor)",
+      "changes": "B1: the falseshare p = 8 sentence now states the fall from 8 to 2 threads per line and the rise from sigma = 4 (0.22 s) to sigma = 8 (0.26 s) against the prediction. M1: 'consistent with every table' replaced; the explanation fits p <= 8 (94-104 % of C_p) and does not account for p = 12 (80 % of C_12); sidecar item (a) records the gap. m1: rounding slips fixed (104 %, 102 %, 94 %, 80 %; 94-104 %; C_c quoted to two decimals; f_exp 0.10 at p = 2; S_p quoted as printed; 28 ms; 0.31 s). m2: the region-cost rise starts at p = 11 in the final sample; limits and sidecar item (c) say p = 10 to 12. m3: the model section and the sidecar state which sessions were recaptured and that the hello-world counts come from an earlier session. m4: exercise 3 states the -O2 versions are at most 15 % apart. m5: Table 11.1 superlinear row says two earlier measurements. m6: duplicated sentence in the SPMD section removed. m7: 'converse cause' replaced. m8: no cuts (the reviewer does not require them). No listing changed, so the code lab was not rerun; the last run (11 of 11 passed) stands."
+    }
+  ]
+}

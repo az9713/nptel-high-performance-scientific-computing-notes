@@ -1,0 +1,816 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="5cc6fef238faf0dd377be793b8d07a70b504c4db3964dc4545a9a368e313012b"><title>OpenMP I: shared-memory threads and the distribution of work · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>OpenMP I: shared-memory threads and the distribution of work</h1>
+<p class="lead">A loop of \(10^{9}\) independent iterations computes \(\pi\) by the midpoint rule. On one thread it runs in about 1.0 s on the machine used for this chapter. The loop reads and writes no array, so a model with perfect division of work predicts \(T_p=T_1/p\), which is 0.08 s on 12 threads. The first parallel version in the lecture, timed on the machine named in the slide (a dual-core Intel Core i5 at 1.7 GHz), took 1.86 s on one thread, 1.03 s on two and 0.97 s on four, a speedup of 1.9 on four threads. The same algorithm, compiled without optimization on this chapter's machine, reaches a speedup of 1.3 on four threads; with its partial sums moved 64 bytes apart it reaches 2.8; no build exceeds 4.5 on any team size up to 24. This chapter defines the execution model of OpenMP threads, shows how the iterations of a loop are assigned to threads, derives the bounds that the numbers must satisfy, and identifies which of them the measurements violate and why.</p>
+<p class="source-note">Grounded in two recordings of the NPTEL course <em>High Performance Scientific Computing</em> (Prof. Shivasubramanian Gopalakrishnan, IIT Bombay): <a href="https://www.youtube.com/watch?v=DVQhXs8_o-A">W3L6, Introduction to Shared Memory Programming using OpenMP</a>, and <a href="https://www.youtube.com/watch?v=Cz8KRZBbgpI">W4L1, Distribution of work using multiple OpenMP Threads</a>. <strong>Lecture material:</strong> what OpenMP is and the 21-item common core; the solution stack; the directive syntax; the multi-threaded "hello world" and its varying output; concurrency and parallelism; fork–join execution; the number of threads and the thread number; shared and private data in a parallel region and the implicit barrier; the midpoint-rule computation of \(\pi\); the single-program-multiple-data (SPMD) version with cyclic and block distribution of iterations; speedup, linear and superlinear speedup, Amdahl's law; the effect of thread-management overhead and of the number of threads. The lecture states that its slides come from the Argonne Training Program on Exascale Computing, 2024. <strong>Research extensions:</strong> the OpenMP 5.2 specification (execution model, team size, data-sharing rules, data-race definition, numeric associativity); Amdahl (1967); Dagum and Menon (1998, abstract only); Menon's 1998 conference slides (dates of the first specifications); OpenStax <em>Calculus Volume 2</em> (midpoint-rule error bound); Drepper (2007, cache lines and false sharing). <strong>Original teaching constructions:</strong> the formal model of schedules and storage; the count of possible outputs of the first program; the midpoint-rule error expansion and the \(\pi\) cost-accuracy budget; the load-balance model and its test; the derivation of Amdahl's law from three stated assumptions, the experimental serial fraction and the two-core model; the overhead model; the cache-line arithmetic; all programs and measurements; the six exercises.</p>
+
+<h2 id="model">The objects of the chapter and the running case</h2>
+<p>The chapter studies one kind of program: a sequential program in which some regions are executed by several threads that share memory. A <em>thread</em> is a sequence of instructions with its own program counter and its own call stack. The threads of one process address the same memory. The operating system decides on which processor, and when, each thread runs.</p>
+<p>The formal model has four parts. <strong>Execution.</strong> An <em>event</em> is one execution of one operation by one thread. The events of one thread are totally ordered by <em>program order</em>. A <em>parallel region</em> is a block of code that a team of \(p\) threads executes. The thread that reaches the region is the <em>encountering thread</em>; it becomes thread number 0 of the new <em>team</em>, and the other threads of the team have the numbers \(1,\dots,p-1\). The <em>fork</em> orders the encounter before the first event of every team thread. The <em>join</em> orders the last event of every team thread before the first event after the region. Two events of different team threads inside one region are <em>unordered</em> unless a synchronization construct orders them; this chapter uses no construct that does so, apart from the join. A <em>schedule</em> is a total order of all events that respects program order, the fork and the join. The operating system and the hardware choose the schedule; the program does not. <strong>Storage.</strong> A <em>memory unit</em> is a location that one load or store accesses as a whole. A <em>shared</em> variable is one memory unit that every thread of the team references. A <em>private</em> variable is a separate memory unit for each thread. <strong>Cost.</strong> Each thread \(t\) of a region spends a time \(w_t\) on its share of the work, and the region lasts as long as its slowest thread plus the cost of forking and joining. <strong>Performance symbols.</strong> \(p\) is the number of threads in the team, \(m\) the number of logical processors of the machine, \(T_1\) and \(T_p\) the wall-clock times of the program on one and on \(p\) threads, \(S_p=T_1/T_p\) the speedup, \(E_p=S_p/p\) the parallel efficiency, \(f\) the serial fraction of \(T_1\) (defined exactly in the section on Amdahl's law), \(\kappa\) the cost, per thread, of starting and ending a parallel region, and \(b=64\ \mathrm{B}\) the size of a cache line. Each symbol is repeated at its first substantive use.</p>
+<p>The running case is the midpoint-rule computation of \(\pi\). The integral \(I=\int_0^1 \frac{4}{1+x^2}\,dx\) equals \(\pi\). For \(N\) subintervals of width \(h=1/N\), the midpoint rule is \(M_N=h\sum_{i=0}^{N-1}f\bigl((i+\tfrac12)h\bigr)\) with \(f(x)=4/(1+x^2)\). The lecture uses this problem because its \(N\) iterations are independent: no iteration reads a value that another iteration writes. The only dependence is the final addition of the \(N\) terms.</p>
+<p>All measurements in the chapter come from one machine: an Intel Core i5-12450H laptop under Windows 11, with all programs built and run in a WSL 2 Ubuntu 24.04 guest by gcc 13.3. The processor is a <em>hybrid</em> design. It has 4 performance cores (P-cores) with 2 hardware threads each and 4 efficient cores (E-cores) with 1 hardware thread each: 8 cores and 12 logical processors, so \(m=12\). The maximum turbo frequency is 4.40 GHz for a P-core and 3.30 GHz for an E-core (<a href="https://www.intel.com/content/www/us/en/products/sku/132222/intel-core-i512450h-processor-12m-cache-up-to-4-40-ghz/specifications.html">Intel ARK, i5-12450H specifications</a>, retrieved 2026-10-26; launched Q1 2022). A <em>logical processor</em> is one hardware thread. The two hardware threads of a P-core share that core's execution units, so two threads on one P-core do not run at twice the speed of one. The 12 logical processors therefore do not run a given loop at one common speed. The guest reports 6 cores with 2 threads each and 6 level-2 caches (the session below). That view is synthetic: Windows decides on which physical core each of the guest's 12 processors runs, and this chapter does not control that placement. Every time is measured with <code>omp_get_wtime</code> and is the minimum over 3 to 5 repetitions of the same run, a choice that suppresses interference from other processes at the cost of hiding variability. A timing listing is checked only by its return code. The output printed under it is one sample run on this machine; another run prints other digits. The samples of all timing listings and of the timing sessions (first regions of 1000 threads, single runs with 1, 100 and 1000 threads, independent copies) were captured in one session while other jobs ran on the machine, which lowers every speed by an unknown amount and widens the run-to-run variation. The counts of hello-world outputs come from an earlier session.</p>
+<pre><code class="language-bash">$ gcc --version | head -1
+gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+$ nproc
+12
+$ lscpu | grep -E 'Model name|Thread|Core|Socket|L1d|L2|L3'
+Model name:                           12th Gen Intel(R) Core(TM) i5-12450H
+Thread(s) per core:                   2
+Core(s) per socket:                   6
+Socket(s):                            1
+L1d cache:                            288 KiB (6 instances)
+L2 cache:                             7.5 MiB (6 instances)
+L3 cache:                             12 MiB (1 instance)
+$ getconf LEVEL1_DCACHE_LINESIZE
+64
+$ cat /sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size
+64
+</code></pre>
+
+<h2 id="api">OpenMP is directives, a runtime library and environment variables <a class="timestamp" href="https://www.youtube.com/watch?v=DVQhXs8_o-A&amp;t=6s">W3L6 0:06</a></h2>
+<p>The lecture describes OpenMP as an application programming interface (API) for writing parallel applications, built from compiler directives and library routines, and motivates it by the research groups that own legacy serial codes and cannot rewrite them from the start. The directives let a programmer parallelize an existing Fortran, C or C++ program one region at a time. The lecture adds that later versions of the interface handle non-uniform memories, vectorization and GPU programming. Dagum and Menon (1998) describe OpenMP, in the abstract of their paper, as a set of compiler directives and callable runtime library routines that extend Fortran, and separately C and C++, to express shared-memory parallelism, with accompanying environment variables; the abstract states that OpenMP builds on the X3H5 concepts and extends them to coarse-grain parallelism (<a href="https://doi.org/10.1109/99.660313">IEEE Computational Science &amp; Engineering 5(1), pp. 46–55</a>; only the abstract could be read). The three parts named there are the ones the lecture's solution stack shows: directives processed by the compiler, a runtime library, and environment variables, resting on an operating system with thread support and on the hardware.</p>
+<p>The lecture dates the start of the specification to about 1997. Menon's 1998 conference slides give the dates of the first two specifications as October 1997 for Fortran 1.0 and August 1998 for C/C++ 1.0 (<a href="https://cug.org/5-publications/proceedings_attendee_lists/1998CD/S98PROC/AUTHORS/MENON/SLIDES.PDF">Menon, Cray User Group 1998</a>, slide 5); the slides do not say whether the second date was planned or achieved. The lecture also shows that the length of the specification grew across versions and states that the interface covers many more features than a short course can treat. It therefore limits itself to the "common core" of 21 items: the <code>parallel</code> construct, the routines that set and query the number of threads and the thread number, the timer, the <code>OMP_NUM_THREADS</code> variable, barrier and critical synchronization, work-sharing loops, reductions, loop schedules, data-sharing clauses, <code>nowait</code>, <code>single</code> and tasks. This chapter covers the first group, up to the timer and the environment variable. Chapter 12 covers synchronization, loop work-sharing, schedules and data-sharing clauses, and chapter 13 the memory model and tasks.</p>
+<p>The lecture restricts itself to a symmetric multiprocessor: a multi-core processor with one shared address space in which every core reaches every memory location at about the same cost. It excludes non-uniform memory access and GPUs from this part. The restriction is part of the model of this chapter. The cost of a memory access is treated as independent of which thread makes it, except where the section on false sharing shows an effect of the caches.</p>
+<p>The directive syntax in C and C++ is <code>#pragma omp construct [clause [clause]…]</code>. The Fortran form is <code>!$OMP construct</code>. A construct applies to the <em>structured block</em> that follows it: a block with one point of entry at the top and one point of exit at the bottom (the lecture's slide; <a href="https://www.openmp.org/wp-content/uploads/OpenMP-API-Specification-5-2.pdf">OpenMP 5.2</a> §4.3, p. 76, adds that a structured block may call <code>exit()</code>, as the lecture says). A program that uses library routines includes <code>omp.h</code> and is compiled with an OpenMP flag, <code>-fopenmp</code> for gcc. A compiler that supports a preprocessor defines the macro <code>_OPENMP</code> as <code>yyyymm</code>, the year and month of the specification version it supports (§3.3, p. 69). The gcc 13.3 used here defines it as 201511, the date of version 4.5. This chapter takes its definitions from version 5.2 (November 2021); every construct and routine it uses is also accepted by this compiler.</p>
+<p>The specification states one more property that governs how a directive is read. The interface is intended to support programs that execute correctly both as parallel programs and as sequential programs, with the directives ignored and a stub library supplied. It then states that a conforming program may execute correctly as a parallel program and not as a sequential program, or may produce different results as a parallel program (§1.3, p. 23). A directive is therefore not a hint that leaves the result unchanged. It changes what the program means, and the programmer must establish that the changed program is correct.</p>
+
+<h2 id="hello">A first parallel program, its many outputs and the interleaving model <a class="timestamp" href="https://www.youtube.com/watch?v=DVQhXs8_o-A&amp;t=576s">W3L6 9:36</a></h2>
+<p>The lecture's first program prints "hello world" in a parallel region. Each thread executes two <code>printf</code> calls, one that prints <code>hello </code> and one that prints <code>world</code> and a newline. The program takes no input, writes only to standard output, and is built with <code>gcc -O2 -fopenmp</code>. Without a request for a team size, the runtime chooses one; the lecture's laptop, which has 8 processor cores, produced 8 greetings. The listing runs the program with <code>OMP_NUM_THREADS=4</code>. The run checks only that the program terminates normally, because its output depends on the schedule.</p>
+<pre><code class="language-c" data-file="hello.c" data-build="gcc -O2 -fopenmp hello.c -o hello" data-run="OMP_NUM_THREADS=4 ./hello" data-check="returncode">#include &lt;omp.h&gt;
+#include &lt;stdio.h&gt;
+
+int main()
+{
+    #pragma omp parallel
+    {
+        printf("hello ");
+        printf("world\n");
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">hello world
+hello world
+hello world
+hello world</code></pre>
+<p>The sample shows four complete lines. The lecture's slide shows a different pattern for the same program: lines such as <code>hello hello world</code> followed by <code>world</code>, because the <code>hello </code> of one thread appeared before the <code>world</code> of another. The lecture attributes the difference between runs to the absence of synchronization: each thread prints whenever the operating system lets it run.</p>
+<p><strong>The model explains how many outputs are possible.</strong> The lecture's two definitions, stated at <a class="timestamp" href="https://www.youtube.com/watch?v=DVQhXs8_o-A&amp;t=854s">W3L6 14:14</a>, are these. Tasks are <em>concurrent</em> when several are active, none is ordered with respect to the others, and each makes forward progress under some scheduling policy. They execute <em>in parallel</em> when they make forward progress at the same time. A program on one processor can therefore be concurrent without being parallel. The lecture names the converse case as well: tasks that run in lock step, as in SIMD execution, are parallel without being concurrent in this sense. For the set of possible results, the distinction does not matter: the model of the previous section describes both cases by the set of schedules. Each thread executes the events \(H\) (print <code>hello </code>) and \(W\) (print <code>world\n</code>) in this order. With \(p\) threads there are \(2p\) events, partitioned into \(p\) chains of length 2. A schedule is an interleaving of the chains, and the number of interleavings is the multinomial coefficient \((2p)!/(2!)^p\): 6 for \(p=2\), 90 for \(p=3\), 2520 for \(p=4\). An output is the string of \(H\) and \(W\) symbols, because the threads print the same text. A string is a possible output exactly when every prefix has at least as many \(H\) as \(W\), since each \(W\) is preceded by the \(H\) of its own thread; every such string arises from some schedule. These strings are the ballot sequences, and their number is the Catalan number \(C_p=\binom{2p}{p}/(p+1)\): 2, 5 and 14 for \(p=2,3,4\), and 208 012 for \(p=12\). The model assumes that one <code>printf</code> call is not divided by another call, which is consistent with the whole strings in the lecture's sample output. The listing enumerates all schedules for \(p\le4\) and checks both counts. It is a check for small \(p\), not a proof of the general formula.</p>
+<pre><code class="language-python" data-file="interleavings.py" data-run="python3 interleavings.py">"""Count the executions and the distinct outputs of p threads that each run H then W."""
+from math import factorial
+
+
+def executions(chains):
+    """Yield every interleaving of the chains that keeps each chain's own order."""
+    if all(not c for c in chains):
+        yield ()
+        return
+    for k, c in enumerate(chains):
+        if c:
+            rest = chains[:k] + (c[1:],) + chains[k + 1:]
+            for tail in executions(rest):
+                yield ((k, c[0]),) + tail
+
+
+print(" p  executions  (2p)!/2^p  distinct outputs")
+for p in (2, 3, 4):
+    chains = tuple(("H", "W") for _ in range(p))     # H prints "hello ", W prints "world\n"
+    runs = list(executions(chains))
+    outputs = {"".join(event for _, event in run) for run in runs}
+    print(f"{p:2d} {len(runs):11d} {factorial(2 * p) // 2**p:10d} {len(outputs):17d}")
+
+print("one printf per thread, p = 4:")
+chains = tuple(("P",) for _ in range(4))
+runs = list(executions(chains))
+print(f"  executions {len(runs)}, distinct outputs {len({tuple(t for t, _ in r) for r in runs})}")
+</code></pre>
+<pre><code class="output"> p  executions  (2p)!/2^p  distinct outputs
+ 2           6          6                 2
+ 3          90         90                 5
+ 4        2520       2520                14
+one printf per thread, p = 4:
+  executions 24, distinct outputs 24</code></pre>
+<p>The count shows why testing by repeated runs cannot establish that a parallel program is correct. The program has 14 possible outputs for 4 threads and many more schedules. The shell session below runs the hello program 2000 times with 4 threads and counts the runs that produced each distinct output. It then runs 300 times with 12 threads.</p>
+<pre><code class="language-bash">$ for i in $(seq 2000); do OMP_NUM_THREADS=4 ./hello | md5sum; done | sort | uniq -c | sort -rn | awk '{print $1}' | tr '\n' ' '; echo
+1619 123 114 99 18 10 8 6 2 1
+$ for i in $(seq 300); do OMP_NUM_THREADS=12 ./hello | md5sum; done | sort | uniq -c | wc -l
+112
+</code></pre>
+<p>Ten of the 14 possible outputs occurred in 2000 runs with 4 threads, and 1619 of the runs, 81 %, produced the same output. With 12 threads, 112 distinct outputs occurred in 300 runs, out of 208 012 possible. A tester who ran the 4-thread program 100 times would very probably see only the most frequent outputs. The outputs that are rare under one load can be frequent under another, so the absence of an output in a test is not evidence that no schedule produces it. The remedy is not more runs. It is a program whose result is the same for every schedule, which is the subject of the data-race definition in the section on shared and private storage.</p>
+
+<h2 id="fork-join">Fork–join execution and the size of the team <a class="timestamp" href="https://www.youtube.com/watch?v=DVQhXs8_o-A&amp;t=1075s">W3L6 17:55</a></h2>
+<p>The lecture states the OpenMP execution model as fork–join parallelism. The program starts as one thread, the <em>initial thread</em>. At each <code>parallel</code> construct the encountering thread forks a team of threads. When the region ends, the team ends, and the program continues as one thread until the next region. A region can contain another region; the lecture's slide draws one nested region. The specification gives the same model (§1.3, pp. 23–24) and adds that a nested region creates a team of one thread when nested parallelism is disabled. This chapter uses one level of parallelism.</p>
+<p>The specification fixes three properties of a team that the model needs. When a thread encounters a <code>parallel</code> construct, it becomes the primary thread of the new team with thread number zero. All threads of the team, including the primary thread, execute the region, and the number of threads in the team stays constant until the region ends. The thread numbers are consecutive whole numbers from zero to one less than the team size (§10.1, p. 223). An implicit barrier ends the region. After it, only the primary thread continues (§1.3, p. 24). The routine <code>omp_get_thread_num</code> returns the caller's thread number, and <code>omp_get_num_threads</code> returns the size of the team of the innermost enclosing region (§18.2.2, p. 349). Outside any parallel region both describe the initial thread: the team size is 1 and the thread number is 0.</p>
+<p><strong>How many threads the team has.</strong> The lecture states that the number is determined by the operating system through an environment variable, and that a program can set it with <code>omp_set_num_threads</code>. The specification places the decision in the runtime, not the operating system, through the internal control variable <code>nthreads-var</code>. Its initial value is implementation defined, and the environment variable <code>OMP_NUM_THREADS</code> sets it (§21.1.2, p. 600). The routine <code>omp_set_num_threads</code> sets it for the subsequent regions of the calling task (§18.2.1, p. 348), so a call in the program takes precedence over the environment variable for those regions. Algorithm 2.1 of the specification (§10.1.1, pp. 226–227) then determines the actual size. If the variable <code>dyn-var</code> (dynamic adjustment) is false and the requested number does not exceed the available number, the team has exactly the requested size. If <code>dyn-var</code> is true, the team has between one and the requested number of threads. If <code>dyn-var</code> is false and the request exceeds the available number, the behavior is implementation defined. The lecture's statement that a system may give fewer threads than requested refers to these last two cases. The consequence for programs is that the requested size is not a guarantee. A program must read the team size inside the region.</p>
+<p>The lecture sets 24 threads on a machine with 8 processors. The 24 threads run in turn on the 8 processors, and the greetings arrive in another order. The model is unchanged: there are 24 chains and the operating system chooses the schedule. What changes is the cost, which the section on overhead measures.</p>
+<p>The next program checks these statements. It reads <code>_OPENMP</code> and the team size and thread number outside a region, calls <code>omp_set_num_threads(4)</code> while the environment requests 6 threads, and then runs a region in which every thread increments the element of an array selected by its own thread number. The elements are distinct memory units, so the writes do not conflict. The program prints how many threads had each thread number. Its output is the same for every schedule, so the check is exact. The run uses <code>OMP_NUM_THREADS=6</code>.</p>
+<pre><code class="language-c" data-file="team.c" data-build="gcc -O2 -fopenmp team.c -o team" data-run="OMP_NUM_THREADS=6 ./team">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+int main(void)
+{
+    int seen[16] = {0};   /* seen[k] counts the threads that had thread number k */
+    int team = 0;
+
+    printf("_OPENMP = %d\n", _OPENMP);
+    printf("outside a region: team size %d, thread number %d\n",
+           omp_get_num_threads(), omp_get_thread_num());
+    printf("omp_get_max_threads() = %d (from OMP_NUM_THREADS)\n", omp_get_max_threads());
+
+    omp_set_num_threads(4);
+    printf("after omp_set_num_threads(4): omp_get_max_threads() = %d\n", omp_get_max_threads());
+
+    #pragma omp parallel
+    {
+        int id = omp_get_thread_num();   /* declared inside the block: private */
+        seen[id] += 1;                   /* each thread writes only its own element */
+        if (id == 0) team = omp_get_num_threads();
+    }
+
+    printf("inside the region: team size %d\n", team);
+    printf("thread numbers seen:");
+    for (int k = 0; k &lt; 16; k++)
+        if (seen[k]) printf(" %d(x%d)", k, seen[k]);
+    printf("\n");
+    return 0;
+}
+</code></pre>
+<pre><code class="output">_OPENMP = 201511
+outside a region: team size 1, thread number 0
+omp_get_max_threads() = 6 (from OMP_NUM_THREADS)
+after omp_set_num_threads(4): omp_get_max_threads() = 4
+inside the region: team size 4
+thread numbers seen: 0(x1) 1(x1) 2(x1) 3(x1)</code></pre>
+<p>The environment variable gives a maximum of 6 threads, the call lowers it to 4, and the region has 4 threads whose numbers are 0, 1, 2 and 3, each once. Outside the region the team size is 1. The thread numbers identify threads; they carry no information about the order in which the threads run. The lecture's second hello-world program, in which each thread prints its own thread number, printed the four numbers in orders such as 1 0 3 2 and 2 1 0 3 in successive runs, and the lecture concludes that the numbers imply no priority. With one <code>printf</code> per thread there are \(p!\) schedules and \(p!\) distinct outputs, 24 for \(p=4\), as the last line of the enumeration above shows.</p>
+
+<h2 id="storage">Shared and private storage, redundant execution and the data race <a class="timestamp" href="https://www.youtube.com/watch?v=Cz8KRZBbgpI&amp;t=101s">W4L1 1:41</a></h2>
+<p>The lecture's example creates a team of 4 threads that each call a function <code>pooh(ID, A)</code>, where <code>A</code> is an array of 1000 doubles declared before the region and <code>ID</code> is the thread number, followed by <code>printf("all done\n")</code> after the region. The lecture draws four calls <code>pooh(0,A)</code> to <code>pooh(3,A)</code> side by side, one copy of <code>A</code> shared by all, and a barrier before the <code>printf</code>. Two statements follow from this example. First, the threads execute the same code redundantly, and the only difference between them is the value of <code>ID</code>. If <code>pooh</code> ignores its first argument, the program does \(p\) times the work of the serial program, and \(T_p\ge T_1\) even with perfect parallel hardware. A region reduces the time only when the threads use their thread number or the team size to divide the work. Second, the end of the region is a barrier: <code>all done</code> prints once, after every thread has finished.</p>
+<p><strong>Which variables are shared.</strong> The lecture states two rules for the data in a region. A variable declared before the region is shared by all threads, and a variable declared inside the region is private to each thread. The specification states the same rules for C and C++ (version 5.2, §5.1.1, p. 97 for the predetermined rule and p. 99 for the implicit rule). A variable with automatic storage duration declared in a scope inside the construct is private. In a <code>parallel</code> construct without a <code>default</code> clause, a variable that is referenced but declared outside is shared. Here <code>A</code> is shared, and <code>ID</code>, declared inside the block, is private: each thread has its own variable of that name. Chapter 12 treats the other attributes and the clauses that change them.</p>
+<p><strong>The data race.</strong> Shared data are useful because threads can exchange results through them, and dangerous for the same reason. The specification defines the hazard in its memory model (§1.4.1, p. 27): two memory operations are <em>unordered</em> if the memory consistency guarantees of §1.4.6 do not specify the order in which they must complete. "If multiple threads write to the same memory unit (…) then a data race occurs if the writes are unordered. Similarly, if at least one thread reads from a memory unit and at least one thread writes to that same memory unit then a data race occurs if the read and write are unordered. If a data race occurs then the result of the program is unspecified." In the model of this chapter, two operations on the same memory unit by different threads of one region, at least one of which is a write, are in a data race unless a fork, a join or a synchronization construct orders them. The other orderings that the specification lists belong to chapter 13. The definition has two consequences. The result of a program with a race is not merely uncertain among a few values: the specification assigns it no meaning. And the definition refers to memory units. Two threads that write different elements of an array write different memory units, because the minimum unit that an update may rewrite along with its neighbours is no larger than the base language requires (p. 27). The writes do not race even if the elements are adjacent. The next sections show that adjacent elements can still cost time.</p>
+<p><strong>A race observed.</strong> The program below has four threads that each increment a shared counter 1 000 000 times and also increment a private counter. The shared counter is <code>volatile</code>, which forces the compiler to load it and store it in every iteration; <code>volatile</code> is a property of the C language that stops the compiler from keeping the value in a register. It does not make the increment indivisible and does not order it with respect to other threads, so it does not prevent the race. Without it, an optimizing compiler would keep the counter in a register and the program would not show the effect. Each thread then stores its private count in its own slot of an array, and the initial thread adds the slots after the join. The expected value is 4 000 000. A schedule that loses updates is the following: thread A loads the value 7, thread B loads the value 7, both store 8, and one increment is lost. The run is one sample on this machine, and a data race has no defined result, so another run prints another value for the shared counter. The program is correct only in its last line, because the private partial counts are written to distinct memory units and the join orders them before the sum.</p>
+<pre><code class="language-c" data-file="race.c" data-build="gcc -O2 -fopenmp race.c -o race" data-run="./race" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+#define PER_THREAD 1000000L
+#define THREADS 4
+#define PAD 8
+
+static volatile long shared_count = 0;   /* one location, written by every thread */
+static long partial[THREADS * PAD];      /* one location per thread, 64 bytes apart */
+
+int main(void)
+{
+    #pragma omp parallel num_threads(THREADS)
+    {
+        int id = omp_get_thread_num();
+        long mine = 0;                    /* declared inside the block: private */
+        for (long k = 0; k &lt; PER_THREAD; k++) {
+            shared_count++;               /* load, add, store: not atomic */
+            mine++;
+        }
+        partial[id * PAD] = mine;
+    }
+    long total = 0;
+    for (int t = 0; t &lt; THREADS; t++) total += partial[t * PAD];
+    printf("expected             %ld\n", PER_THREAD * THREADS);
+    printf("shared counter       %ld\n", (long)shared_count);
+    printf("sum of private parts %ld\n", total);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">expected             4000000
+shared counter       1000025
+sum of private parts 4000000</code></pre>
+<p>The shared counter retains about 25 % of the increments in this sample (1 000 025 of 4 000 000), and in earlier runs on this machine it retained about 24 % and 42 % (978 937; 1 663 639 and 1 675 866); the sum of the private parts is exact. The lecture's repair is the same idea: its slide says "Promote scalar to an array dimensioned by number of threads to avoid race condition", so that each thread accumulates into its own element, and it lets only the thread with number 0 write the shared variable that records the team size; in the model of this chapter, this choice also ensures that two threads never write one address. Chapter 12 introduces the synchronization constructs that make shared updates safe.</p>
+
+<h2 id="midpoint">The midpoint rule for \(\pi\): cost and error <a class="timestamp" href="https://www.youtube.com/watch?v=Cz8KRZBbgpI&amp;t=334s">W4L1 5:34</a></h2>
+<p>The lecture computes \(\pi\) from \(\int_0^1 4/(1+x^2)\,dx\) by summing the areas of rectangles of equal width whose height is the integrand at the middle of the interval. The slide writes the sum from \(i=0\) to \(N\), which has \(N+1\) terms, and the code on the next slides loops \(i=0,\dots,N-1\); this chapter uses the \(N\) terms of the code. The lecture then states that a larger number of steps gives a more accurate answer at a higher cost. This section states how much more.</p>
+<p><strong>Cost.</strong> Each iteration computes <code>x = (i + 0.5) * step</code> (one addition, one multiplication), <code>1.0 + x * x</code> (one multiplication, one addition), <code>4.0 / (…)</code> (one division) and <code>sum +=</code> (one addition): six floating-point operations, so \(F=6N\). The loop reads and writes no array, so the data moved between memory and the processor is negligible and the loop is limited by the arithmetic, in particular by the division and by the dependence of each addition on the previous sum. On this machine the one-thread loop with \(N=10^{9}\) takes about 1.0 s in the timing listing of the false-sharing section, which is 1.0 ns per iteration and 6 Gflop/s by this count of six operations. Because no iteration depends on another except through the sum, the work can be divided among threads without changing any single term.</p>
+<p><strong>Error.</strong> Let \(E_N=I-M_N\) be the error and \(M\) a bound with \(|f''(x)|\le M\) on \([a,b]=[0,1]\). The condition on the derivative is that \(f\) has a continuous second derivative. On the subinterval of width \(h\) centred at \(c\), Taylor's theorem with the integral remainder gives \(f(x)=f(c)+f'(c)(x-c)+R(x)\) with \(|R(x)|\le\tfrac12M(x-c)^2\). The linear term integrates to zero over the symmetric interval, so the integral over the subinterval differs from \(h f(c)\) by at most \(\tfrac12M\int_{-h/2}^{h/2}s^2\,ds=Mh^3/24\). Summing the \(N\) subintervals, with \(Nh=b-a\), gives the bound of <a href="https://openstax.org/books/calculus-volume-2/pages/3-6-numerical-integration">OpenStax <em>Calculus Volume 2</em></a>, Theorem 3.5 (eq. 3.12),</p>
+\[
+|E_N|\le\frac{M(b-a)h^2}{24}. \tag{11.1}
+\]
+<p>For \(f(x)=4/(1+x^2)\), the derivatives are \(f'(x)=-8x/(1+x^2)^2\), \(f''(x)=(24x^2-8)/(1+x^2)^3\) and \(f'''(x)=96x(1-x^2)/(1+x^2)^4\). The third derivative is positive on \((0,1)\), so \(f''\) increases from \(-8\) at \(x=0\) to \(2\) at \(x=1\), and \(M=\max|f''|=8\), attained at \(x=0\). Equation (11.1) gives \(|E_N|\le h^2/3\).</p>
+<p>The bound is not sharp. Apply the same Taylor expansion one order further: the integral over a subinterval equals \(hf(c)+\tfrac{h^3}{24}f''(c)+O(h^5)\). Summing, the error is \(\tfrac{h^2}{24}\,h\sum_i f''(c_i)+O(h^4)\), and the sum \(h\sum_i f''(c_i)\) is itself a midpoint sum for \(\int_0^1 f''\,dx=f'(1)-f'(0)\). For a function with four continuous derivatives this gives</p>
+\[
+I-M_N=\frac{h^2}{24}\bigl[f'(b)-f'(a)\bigr]+O(h^4). \tag{11.2}
+\]
+<p>Here \(f'(1)=-2\) and \(f'(0)=0\), so \(I-M_N=-h^2/12+O(h^4)\): the midpoint sum overestimates \(\pi\) by \(h^2/12\), which is one quarter of the bound \(h^2/3\). Applying the argument once more to the sum of \(f''\) gives the next term as \(-\tfrac{7h^4}{5760}[f'''(b)-f'''(a)]\); that quantity is zero here because \(f'''(0)=f'''(1)=0\). The listing evaluates \(M\) on a grid and prints the ratio \((M_N-\pi)/(h^2/12)\) for \(N=10,100,1000\), together with the check of (11.1). The program is serial and deterministic, so the check is exact.</p>
+<pre><code class="language-c" data-file="pi_error.c" data-build="gcc -O2 pi_error.c -o pi_error -lm" data-run="./pi_error">#include &lt;stdio.h&gt;
+#include &lt;math.h&gt;
+
+static double f(double x) { return 4.0 / (1.0 + x * x); }
+static double f2(double x) { double q = 1.0 + x * x; return (24.0 * x * x - 8.0) / (q * q * q); }
+
+static double midpoint(long n)
+{
+    double h = 1.0 / (double)n, sum = 0.0;
+    for (long i = 0; i &lt; n; i++)
+        sum += f((i + 0.5) * h);
+    return h * sum;
+}
+
+int main(void)
+{
+    const double pi = 3.14159265358979323846;
+    double m2 = 0.0, at = 0.0;
+    for (long k = 0; k &lt;= 1000000; k++) {
+        double x = k / 1000000.0;
+        if (fabs(f2(x)) &gt; m2) { m2 = fabs(f2(x)); at = x; }
+    }
+    printf("max |f''| on [0,1] = %.6f at x = %.6f\n", m2, at);
+    printf("%8s %14s %16s  %s\n", "N", "M_N - pi", "(M_N-pi)/(h^2/12)", "|error| &lt;= h^2/3");
+    for (long n = 10; n &lt;= 1000; n *= 10) {
+        double h = 1.0 / (double)n, e = midpoint(n) - pi;
+        printf("%8ld %14.6e %16.6f  %s\n", n, e, e / (h * h / 12.0),
+               fabs(e) &lt;= m2 * h * h / 24.0 ? "holds" : "VIOLATED");
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">max |f''| on [0,1] = 8.000000 at x = 0.000000
+       N       M_N - pi (M_N-pi)/(h^2/12)  |error| &lt;= h^2/3
+      10   8.333314e-04         0.999998  holds
+     100   8.333333e-06         1.000000  holds
+    1000   8.333333e-08         1.000000  holds</code></pre>
+<p>The ratio is 0.999998 at \(N=10\) and 1.000000 at \(N=100\) and \(N=1000\), as (11.2) predicts, and the bound holds with a factor of 4 to spare. The ratio does not stay at 1 for large \(N\). A separate serial computation of the same sum, with a script in Python, gives 1.00001 at \(N=10^4\) and 1.004 at \(N=10^5\), because the rounding error of the summation, about \(3.5\times10^{-14}\) at \(N=10^5\), becomes a visible fraction of \(h^2/12=8.3\times10^{-12}\).</p>
+<p><strong>Cost against accuracy.</strong> To make the truncation error \(h^2/12\) smaller than a tolerance \(\varepsilon\), \(N\) must exceed \(1/\sqrt{12\varepsilon}\): \(2.9\times10^{4}\) for \(\varepsilon=10^{-10}\) and \(9.1\times10^{6}\) for \(\varepsilon=10^{-15}\). A tenfold smaller error costs a factor \(\sqrt{10}=3.2\) more iterations. At \(N=10^{9}\) the truncation error is \(8.3\times10^{-20}\), about 5000 times smaller than the spacing of doubles near \(\pi\) (\(4.4\times10^{-16}\)). The benchmark value \(N=10^{8}\) or \(10^{9}\) is chosen to make the loop run for a measurable time. It does not improve the answer beyond \(N\approx10^{7}\); the digits of \(\pi\) that the program prints are limited by rounding. The same fact makes the problem a good test of parallel scaling and a poor model of scientific work: a scientific code increases \(N\) to improve the answer, and this loop stops improving long before it stops being slow.</p>
+
+<h2 id="spmd">The SPMD program: cyclic and block distribution of iterations <a class="timestamp" href="https://www.youtube.com/watch?v=Cz8KRZBbgpI&amp;t=653s">W4L1 10:53</a></h2>
+<p>The lecture's parallel program is a single program that every thread executes, with the work divided by the thread number and the team size. The lecture calls the pattern <em>single program, multiple data</em> (SPMD). Its structure has five steps. The program fixes the team size with <code>omp_set_num_threads</code>. Inside the region each thread reads its number \(\mathrm{id}\) and the team size \(n_{\text{thr}}\) (the slides write <code>numthrds</code> and <code>nthrds</code>). Thread 0 copies the team size to the shared variable <code>nthreads</code>, so that only one thread writes it. Each thread sums its own iterations into <code>sum[id]</code>, an array promoted from the scalar. After the region, one loop adds the partial sums, in thread order, and multiplies by \(h\). The last loop is serial: the lecture notes that the global sum is computed outside the parallel region.</p>
+<p><strong>Why the loop can be divided.</strong> Let \(R(i)\) be the set of memory units that iteration \(i\) reads and \(W(i)\) the set that it writes. Two iterations \(i\ne j\) are <em>independent</em> if \(W(i)\) is disjoint from \(R(j)\cup W(j)\) and \(W(j)\) is disjoint from \(R(i)\); independent iterations may run in any order or at the same time without changing the result, and a loop whose iterations are pairwise independent has no <em>loop-carried dependence</em>. In the \(\pi\) loop, iteration \(i\) reads \(i\), <code>step</code> and the variable <code>x</code>, and writes <code>x</code> and <code>sum</code>. The variable <code>x</code> is declared inside the region, so each thread has its own. The variable <code>sum</code> is read and written by every iteration, so no two iterations are independent as the serial program is written. The dependence is a <em>reduction</em>: the iterations combine their terms with one associative operation, addition, into one variable. Giving each thread a private partial sum removes the conflict: \(W(i)\) then contains only the partial sum of the thread that runs \(i\), and the \(p\) partial sums are combined once, after the join. The price is stated in the specification and appears in the listing below: addition of floating-point numbers is not associative in practice, so the combined value depends on how the terms were grouped.</p>
+<p><strong>Distributions.</strong> Let the iteration set be \(\{0,\dots,N-1\}\). A <em>distribution</em> is a function that assigns each iteration to one thread. The slide's first program uses the <em>cyclic</em> distribution: thread \(t\) executes the iterations \(i\equiv t\pmod{n_{\text{thr}}}\), starting at \(i=\mathrm{id}\) with step \(n_{\text{thr}}\), so the threads take turns. The slide's alternative uses the <em>block</em> distribution: with \(q=\lfloor N/n_{\text{thr}}\rfloor\), thread \(t\) executes \(i\in[tq,(t+1)q)\), and the last thread executes the remainder up to \(N\). If \(N=pq+r\) with \(0\le r\lt p\), then the iteration counts are \(q+1\) for \(r\) threads and \(q\) for the others in the cyclic case, and \(q\) for the first \(p-1\) threads and \(q+r\) for the last in the block case. The lecture says that, for this problem, the choice "does not make too much of a difference": both give the same answer. The listing below checks the counts and the answers for \(N=100003\), not a multiple of 4, with 4 threads and with each partial sum in its own 64-byte slot. Both sums are formed in the same way, in fixed thread order, so the printed values do not depend on the schedule, and the check is exact. The program stops with an error if the runtime gives fewer than 4 threads.</p>
+<pre><code class="language-c" data-file="pi_spmd.c" data-build="gcc -O2 -fopenmp pi_spmd.c -o pi_spmd -lm" data-run="./pi_spmd">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+#include &lt;omp.h&gt;
+
+#define NUM_THREADS 4
+#define PAD 8                              /* 8 doubles = 64 bytes per slot */
+
+static long num_steps = 100003;            /* not a multiple of NUM_THREADS */
+
+static double run(int block, long *count, int *nthreads)
+{
+    static double sum[NUM_THREADS * PAD];
+    double step = 1.0 / (double)num_steps;
+    omp_set_num_threads(NUM_THREADS);
+    #pragma omp parallel
+    {
+        int id = omp_get_thread_num();
+        int numthrds = omp_get_num_threads();
+        double x, acc = 0.0;
+        long n = 0;
+        if (id == 0) *nthreads = numthrds;
+        if (!block) {                      /* cyclic distribution */
+            for (long i = id; i &lt; num_steps; i += numthrds) {
+                x = (i + 0.5) * step;
+                acc += 4.0 / (1.0 + x * x);
+                n++;
+            }
+        } else {                           /* block distribution, remainder to the last thread */
+            long istart = id * (num_steps / numthrds);
+            long iend = (id == numthrds - 1) ? num_steps : (id + 1) * (num_steps / numthrds);
+            for (long i = istart; i &lt; iend; i++) {
+                x = (i + 0.5) * step;
+                acc += 4.0 / (1.0 + x * x);
+                n++;
+            }
+        }
+        sum[id * PAD] = acc;
+        count[id * PAD] = n;
+    }
+    double pi = 0.0;
+    for (int t = 0; t &lt; *nthreads; t++) pi += sum[t * PAD] * step;   /* serial, in thread order */
+    return pi;
+}
+
+int main(void)
+{
+    static long count[2][NUM_THREADS * PAD];
+    double pi[2];
+    int nthreads = 0;
+    const char *name[2] = {"cyclic", "block "};
+    for (int b = 0; b &lt; 2; b++) {
+        pi[b] = run(b, count[b], &amp;nthreads);
+        if (nthreads != NUM_THREADS) { printf("got %d threads\n", nthreads); return 1; }
+        double h = 1.0 / (double)num_steps;
+        printf("%s: iterations per thread", name[b]);
+        for (int t = 0; t &lt; nthreads; t++) printf(" %ld", count[b][t * PAD]);
+        printf("; pi = %.12f; (M-pi)/(h^2/12) = %.2f\n", pi[b], (pi[b] - M_PI) / (h * h / 12.0));
+    }
+    double ulp = nextafter(pi[0], 4.0) - pi[0];
+    printf("cyclic pi = %.17g\nblock  pi = %.17g\n", pi[0], pi[1]);
+    printf("same bits: %s; difference %.2e = %.1f ulp\n", pi[0] == pi[1] ? "yes" : "no",
+           fabs(pi[0] - pi[1]), fabs(pi[0] - pi[1]) / ulp);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">cyclic: iterations per thread 25001 25001 25001 25000; pi = 3.141592653598; (M-pi)/(h^2/12) = 1.00
+block : iterations per thread 25000 25000 25000 25003; pi = 3.141592653598; (M-pi)/(h^2/12) = 1.00
+cyclic pi = 3.1415926535981309
+block  pi = 3.14159265359813
+same bits: no; difference 8.88e-16 = 2.0 ulp</code></pre>
+<p>The counts are 25001, 25001, 25001, 25000 for the cyclic distribution and 25000, 25000, 25000, 25003 for the block distribution, as the formulas give. Both values of \(\pi\) agree with the prediction (11.2): \((M-\pi)/(h^2/12)=1.00\). The two sums are not equal: they differ by 2 units in the last place. The specification explains why (§1.3, p. 23): using different numbers of threads may give different numeric results because of changes in the association of numeric operations, and a serial reduction may associate additions differently from a parallel one. Here the number of threads is the same, but the two distributions give each thread different terms, so the partial sums differ. The result of a floating-point reduction therefore depends on the distribution and on \(p\). An exact comparison of a parallel result with a serial one is not a valid test of a parallel program; a comparison with a tolerance derived from the rounding error is.</p>
+<p><strong>Load balance.</strong> The distribution decides how the work is divided. A thread \(t\) with the set \(I_t\) of iterations spends \(w_t=\sum_{i\in I_t}c(i)\), where \(c(i)\) is the cost of iteration \(i\). The region ends at the join, so its duration is at least</p>
+\[
+T_{\text{region}}\ge\max_t w_t,\qquad E_{\text{dist}}=\frac{W}{p\,\max_t w_t},\quad W=\sum_{i=0}^{N-1}c(i). \tag{11.3}
+\]
+<p>The quantity \(E_{\text{dist}}\) is the efficiency of the distribution: it equals 1 exactly when every thread has the same load, and it is the largest speedup divided by \(p\) that the distribution allows on \(p\) equally fast processors. For the \(\pi\) loop, \(c(i)\) is constant, so the load is proportional to the iteration count, and the counts above give \(E_{\text{dist}}\ge1-p(p-1)/N\) in the block case and \(E_{\text{dist}}\ge1-p/N\) in the cyclic case; for \(N=10^8\) both are 1 to 7 digits. The distribution matters when \(c(i)\) varies. Take \(c(i)=i+1\), as in a loop whose inner loop runs from 0 to \(i\). The total is \(W=N(N+1)/2\). For \(p\) blocks of \(N/p\) iterations, the last block has the largest load, \(\tfrac{N^2}{2}\cdot\tfrac{2p-1}{p^2}\) for large \(N\), so</p>
+\[
+E_{\text{block}}\to\frac{p}{2p-1}\quad(N\to\infty),\qquad E_{\text{cyclic}}\ge1-O(p/N). \tag{11.4}
+\]
+<p>The block distribution wastes about half of the threads' time for large \(p\), because the last thread carries almost twice the average load. In the cyclic distribution thread \(t\) takes the iterations \(t,t+p,\dots\), and the loads of two threads differ by about \(N/p\) out of \(N^2/(2p)\), a relative difference of \(2/N\). The program below tests (11.4). Iteration \(i\) of its loop runs \(i+1\) steps of an integer recurrence that a compiler cannot replace by a formula, and the sum of the results is the same for every distribution, so the program compares the checksums. It prints the speedups measured with the block and the cyclic distribution beside the model values \(W/\max_t w_t\), computed exactly for \(N=40000\). The reference time \(T_1\) is the block program on one thread.</p>
+<pre><code class="language-c" data-file="triangle.c" data-build="gcc -O2 -fopenmp triangle.c -o triangle" data-run="./triangle" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+#define MAXT 16
+#define PAD 8
+#define N 40000L
+
+/* Iteration i costs i + 1 steps of a dependent integer recurrence. */
+static unsigned long work(long i)
+{
+    unsigned long acc = (unsigned long)i;
+    for (long j = 0; j &lt;= i; j++)
+        acc = acc * 6364136223846793005UL + (unsigned long)j;
+    return acc;
+}
+
+static double run(int p, int cyclic, unsigned long *check)
+{
+    static unsigned long part[MAXT * PAD];
+    double t0 = omp_get_wtime();
+    omp_set_num_threads(p);
+    #pragma omp parallel
+    {
+        int id = omp_get_thread_num();
+        int nt = omp_get_num_threads();
+        unsigned long local = 0;
+        if (cyclic) {
+            for (long i = id; i &lt; N; i += nt) local += work(i);
+        } else {
+            long istart = id * (N / nt);
+            long iend = (id == nt - 1) ? N : (id + 1) * (N / nt);
+            for (long i = istart; i &lt; iend; i++) local += work(i);
+        }
+        part[id * PAD] = local;
+    }
+    unsigned long total = 0;
+    for (int t = 0; t &lt; p; t++) total += part[t * PAD];
+    *check = total;
+    return omp_get_wtime() - t0;
+}
+
+/* Model: the region lasts as long as the most loaded thread, so S = W / max_t w_t. */
+static double model_speedup(int p, int cyclic)
+{
+    double w[MAXT] = {0.0}, total = 0.0, wmax = 0.0;
+    for (long i = 0; i &lt; N; i++) {
+        int t = cyclic ? (int)(i % p) : (int)(i / (N / p) &lt; p ? i / (N / p) : p - 1);
+        w[t] += (double)(i + 1);
+        total += (double)(i + 1);
+    }
+    for (int t = 0; t &lt; p; t++) if (w[t] &gt; wmax) wmax = w[t];
+    return total / wmax;
+}
+
+int main(void)
+{
+    unsigned long c1, c;
+    double t1 = 1e30, t;
+    for (int r = 0; r &lt; 3; r++) { t = run(1, 0, &amp;c1); if (t &lt; t1) t1 = t; }
+    printf("T_1 = %.3f s\n", t1);
+    printf("%3s %8s %8s %8s %8s %8s\n", "p", "S block", "model", "S cyclic", "model", "checks");
+    for (int p = 2; p &lt;= 8; p *= 2) {
+        double tb = 1e30, tc = 1e30;
+        int ok = 1;
+        for (int r = 0; r &lt; 5; r++) {
+            t = run(p, 0, &amp;c); ok &amp;= (c == c1); if (t &lt; tb) tb = t;
+            t = run(p, 1, &amp;c); ok &amp;= (c == c1); if (t &lt; tc) tc = t;
+        }
+        printf("%3d %8.2f %8.2f %8.2f %8.2f %8s\n", p, t1 / tb, model_speedup(p, 0),
+               t1 / tc, model_speedup(p, 1), ok ? "equal" : "DIFFER");
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">T_1 = 0.799 s
+  p  S block    model S cyclic    model   checks
+  2     1.36     1.33     1.97     2.00    equal
+  4     2.20     2.29     3.84     4.00    equal
+  8     4.18     4.27     6.47     8.00    equal</code></pre>
+<p>The model gives speedups of 1.33, 2.29 and 4.27 for the block distribution and 2.00, 4.00 and 8.00 for the cyclic distribution at \(p=2,4,8\); the model ratio of cyclic to block is 1.50, 1.75 and 1.88. The measured block speedups (1.36, 2.20, 4.18 in this sample) are within 4 % of the model. The measured cyclic speedups are 1.97 at \(p=2\), 3.84 at \(p=4\) and 6.47 at \(p=8\): the first two are within 4 % of the model, and the third is 19 % below 8.00. The measured ratio of cyclic to block speedup is 1.45, 1.75 and 1.55, against the model's 1.50, 1.75 and 1.88. In earlier runs of the same program the cyclic speedup was 2.11 at \(p=2\), 3.54 and 4.27 at \(p=4\), and 6.88 and 6.95 at \(p=8\); the values 2.11 and 4.27 exceed the model values 2.00 and 4.00, which a model with \(p\) equally fast processors and a reference run of the same speed cannot produce. The processor has cores of two speeds (section on the model), and the guest does not control on which core the one-thread reference runs. A reference run on an E-core, or on a P-core that shares its execution units with other work, is slower than the team's fastest threads, and every speedup measured against it is too large. The shortfall at \(p=8\) has the opposite cause. With equal shares the region waits for its slowest thread, and with 8 threads at least one thread runs on an E-core or shares a P-core; the section on false sharing measures the same effect for the \(\pi\) loop. The direction and the size of the effect agree with the model. The exact values depend on the placement of the threads, which this chapter does not control.</p>
+<p>The distribution also decides which threads touch neighbouring memory. The cyclic distribution assigns neighbouring iterations to different threads, which matters as soon as the iterations write to neighbouring array elements. The block distribution gives each thread a contiguous range. The section on false sharing returns to this point, and exercise 5 asks for the design choice. OpenMP has its own clauses for distributing loop iterations, and chapter 12 presents them.</p>
+
+<h2 id="speedup">Speedup, efficiency and Amdahl's law <a class="timestamp" href="https://www.youtube.com/watch?v=Cz8KRZBbgpI&amp;t=974s">W4L1 16:14</a></h2>
+<p>The lecture shows a table of measured times for its first SPMD program (cyclic distribution, array <code>sum[NUM_THREADS]</code>, <code>icpc -O2</code>): 1.86 s on 1 thread, 1.03 s on 2, 1.08 s on 3 and 0.97 s on 4. The slide's footnote gives the machine as a dual-core, four-hardware-thread Intel Core i5 at 1.7 GHz running Apple OS X 10.7.3. The slide states that the serial program ran in 1.83 s for \(10^{8}\) steps; the code printed on the same slide has <code>num_steps = 100000</code>, so the step count of the measurement is taken from the text of the slide, not from its code. The lecture notes that the speedup is not linear even for this "fairly embarrassingly parallel problem", advises timing a program several times, with an average of about five runs, and sets the explanation as a homework problem using Amdahl's law. The rest of this section builds the tools for that problem, and later sections test the candidate explanations.</p>
+<p><strong>Definitions.</strong> The lecture defines <em>speedup</em> as the ratio of the sequential time to the parallel time, \(S_p=T_1/T_p\) (the slides write \(S(P)\) and \(\mathrm{Time}_{\mathrm{seq}}(1)/\mathrm{Time}_{\mathrm{par}}(P)\)), perfect linear speedup as \(S_p=p\), and superlinear speedup as \(S_p\gt p\), which the lecture attributes to cache effects: the data of each thread may fit in the caches that \(p\) processors have in total although the data of the single thread did not. The efficiency \(E_p=S_p/p\) is the fraction of linear speedup. The lecture also writes the sequential time as the time to load the data, to compute \(N\) independent tasks and to consume the results, \(T_{\text{load}}+N\,T_{\text{task}}+T_{\text{consume}}\), and the parallel time as \(T_{\text{load}}+(N/p)\,T_{\text{task}}+T_{\text{consume}}\), with the remark that parallelism speeds up only the concurrent part.</p>
+<p><strong>Amdahl's law from its assumptions.</strong> Amdahl's 1967 paper (<a href="https://www3.cs.stonybrook.edu/~rezaul/Spring-2019/CSE613/reading/Amdahl-1967.pdf">AFIPS Conference Proceedings 30, pp. 483–485, in the 2007 IEEE SSCS News reprint</a>) contains no equation; the editors of the reprint state that it has no equations and a single figure. It argues that data-management housekeeping, which Amdahl puts at 40 % of the instructions executed in production runs, appears sequential; that this fraction might be halved in a dedicated environment but is very unlikely to be reduced by a factor of three; and that this overhead "alone would then place an upper limit on throughput of five to seven times the sequential processing rate". The formula that carries his name is a later formalization. It is derived here from three stated assumptions.</p>
+<ol>
+<li><strong>A1, fixed split.</strong> The one-thread time divides as \(T_1=T_s+T_\parallel\), where \(T_s=fT_1\) is the time of the part that no thread can share (the <em>serial fraction</em> is \(f\), \(0\le f\le1\)) and \(T_\parallel=(1-f)T_1\) is the time of the part that threads can share. The numbers \(f\) and \(T_1\) belong to a fixed problem size \(N\) and do not depend on \(p\).</li>
+<li><strong>A2, perfect division.</strong> On \(p\) threads, the sharable part takes \(T_\parallel/p\): the work divides into equal parts, and every thread proceeds at the speed of the single thread.</li>
+<li><strong>A3, no added cost.</strong> The serial part takes \(T_s\) as before, and creating, ending and synchronizing the threads costs nothing.</li>
+</ol>
+<p>Then</p>
+\[
+T_p=fT_1+\frac{(1-f)T_1}{p},\qquad
+S_p=\frac{1}{f+(1-f)/p},\qquad
+E_p=\frac{1}{1+(p-1)f}. \tag{11.5}
+\]
+<p>The slides write \(\alpha\) for \(f\). Three properties follow. First, \(S_p\le1/f\), because the denominator is at least \(f\); and \(S_p\le p\), because the denominator is at least \(1/p\). Second, \(S_p\) increases with \(p\), since \(dS_p/dp=(1-f)/\bigl(p^2(f+(1-f)/p)^2\bigr)\ge0\), and \(S_p\to1/f\) as \(p\to\infty\): the lecture's values are 10 for a program that is 90 % parallelizable and 1000 for \(f=0.001\). Third, the efficiency falls below one half when \(p\gt1+1/f\), and the speedup reaches half of its limit at \(p=(1-f)/f\): at \(p=999\) for \(f=0.001\). The program below tabulates (11.5) and applies it to the lecture's table. Amdahl's own figures follow from \(1/f\): for housekeeping reduced from 40 % to 20 % and to about 14 % (a factor of two and a factor of about three), \(1/f\) is 5 and 7.5, close to the "five to seven" of his text; this reading is made here and is not an equation of the paper. The program is deterministic, so the check is exact.</p>
+<pre><code class="language-python" data-file="amdahl.py" data-run="python3 amdahl.py">"""Amdahl's law from its three assumptions: tables, limits and a diagnostic."""
+from math import sqrt
+
+
+def speedup(f, p):
+    """S_p = T_1 / T_p with T_p = f T_1 + (1 - f) T_1 / p."""
+    return 1.0 / (f + (1.0 - f) / p)
+
+
+def serial_fraction(s, p):
+    """Solve S_p = 1 / (f + (1 - f) / p) for f, given a measured speedup s."""
+    return (1.0 / s - 1.0 / p) / (1.0 - 1.0 / p)
+
+
+ps = (2, 4, 8, 16, 64, 1024)
+print("S_p for serial fraction f; last columns: limit 1/f, p at half the limit, p at E_p = 1/2")
+print(f"{'f':&gt;6}" + "".join(f"{'p=' + str(p):&gt;8}" for p in ps) + f"{'1/f':&gt;8}{'(1-f)/f':&gt;9}{'1+1/f':&gt;7}")
+for f in (0.1, 0.01, 0.001):
+    row = "".join(f"{speedup(f, p):8.2f}" for p in ps)
+    print(f"{f:6.3f}{row}{1 / f:8.0f}{(1 - f) / f:9.0f}{1 + 1 / f:7.0f}")
+
+print("\nspeedup table of the lecture slide (T_1 = 1.86 s):")
+times = {1: 1.86, 2: 1.03, 3: 1.08, 4: 0.97}
+for p, t in times.items():
+    s = times[1] / t
+    line = f"p={p}: T={t:.2f} s  S={s:.2f}  E={s / p:.2f}"
+    if p &gt; 1:
+        line += f"  f_exp={serial_fraction(s, p):.3f}"
+    print(line)
+f2 = serial_fraction(times[1] / times[2], 2)
+print("two-core model T_p = f T_1 + (1-f) T_1 / min(p, 2), f from p = 2:",
+      " ".join(f"S_{p}={speedup(f2, min(p, 2)):.2f}" for p in (2, 3, 4)))
+
+print("\nbest team size p* = sqrt((1-f) T_1 / kappa) for kappa = 0.17 us per thread, f = 0:")
+for t1 in (1e-5, 1e-4, 1e-3, 1e-1):
+    print(f"T_1 = {t1:7.0e} s: p* = {sqrt(t1 / 0.17e-6):6.1f}")
+</code></pre>
+<pre><code class="output">S_p for serial fraction f; last columns: limit 1/f, p at half the limit, p at E_p = 1/2
+     f     p=2     p=4     p=8    p=16    p=64  p=1024     1/f  (1-f)/f  1+1/f
+ 0.100    1.82    3.08    4.71    6.40    8.77    9.91      10        9     11
+ 0.010    1.98    3.88    7.48   13.91   39.26   91.18     100       99    101
+ 0.001    2.00    3.99    7.94   15.76   60.21  506.18    1000      999   1001
+
+speedup table of the lecture slide (T_1 = 1.86 s):
+p=1: T=1.86 s  S=1.00  E=1.00
+p=2: T=1.03 s  S=1.81  E=0.90  f_exp=0.108
+p=3: T=1.08 s  S=1.72  E=0.57  f_exp=0.371
+p=4: T=0.97 s  S=1.92  E=0.48  f_exp=0.362
+two-core model T_p = f T_1 + (1-f) T_1 / min(p, 2), f from p = 2: S_2=1.81 S_3=1.81 S_4=1.81
+
+best team size p* = sqrt((1-f) T_1 / kappa) for kappa = 0.17 us per thread, f = 0:
+T_1 =   1e-05 s: p* =    7.7
+T_1 =   1e-04 s: p* =   24.3
+T_1 =   1e-03 s: p* =   76.7
+T_1 =   1e-01 s: p* =  767.0</code></pre>
+<p><strong>The lecture's table violates the model.</strong> Solve (11.5) for \(f\), given a measured speedup \(S\) on \(p\) threads:</p>
+\[
+f_{\exp}(p)=\frac{1/S_p-1/p}{1-1/p}. \tag{11.6}
+\]
+<p>If the model held, \(f_{\exp}\) would be the same for every \(p\). From the lecture's table it is 0.108 at \(p=2\), 0.371 at \(p=3\) and 0.362 at \(p=4\). A single \(f\) cannot fit these times; in particular \(S_3=1.72\) is below \(S_2=1.81\), which (11.5) forbids because \(S_p\) increases with \(p\). The program that produced the table has a serial part of one loop of at most four additions and the start and end of a region. These take microseconds against a run of 1.86 s, so an Amdahl serial fraction of 0.1 to 0.37 cannot be the explanation. The failing assumption is A2. The machine has two cores, so threads beyond two cannot add processing capacity. Replace \(p\) by \(\min(p,2)\) in the sharable part and fit \(f\) at \(p=2\): the model gives \(S=1.81\) for \(p=2,3,4\), against the measured 1.81, 1.72 and 1.92, within 6 %. The additional hardware threads give no gain on three threads and a gain of 6 % on four. This is the lecture's homework answered with a model that holds only for this table: the speedup is limited by the processing capacity of the machine, not by a serial fraction of the program. Whether the first SPMD program also loses time to the memory system is a separate question, and the section on false sharing tests it.</p>
+<p>The boundary of (11.5) is the three assumptions. A1 fixes the problem size; if the serial part does not grow with \(N\) while the parallel part does, a larger problem has a smaller \(f\), and the limit \(1/f\) is not a limit on what a larger problem can use. This chapter does not treat the scaled case. A2 fails when the number of threads exceeds the number of processors, when the loads differ (equation (11.3)), and when threads slow each other through shared resources. A3 fails by the amount of the next section.</p>
+
+<h2 id="overhead">The cost of a parallel region and the choice of the thread count <a class="timestamp" href="https://www.youtube.com/watch?v=Cz8KRZBbgpI&amp;t=1336s">W4L1 22:16</a></h2>
+<p>The lecture states that the serial part of the \(\pi\) program includes the initial setup, the creation of the threads, their destruction at the end of the region and the global sum, and that the overhead grows with the number of threads because time goes to thread management. It concludes that beyond a threshold the program slows down, and that a program started with 1000 threads "might get a time which is worse off than 1.86 seconds". The remedy it names is to tune the number of threads, either with <code>omp_set_num_threads</code> or, without recompiling, with <code>export OMP_NUM_THREADS</code>, after a timing study that also varies the problem size.</p>
+<p><strong>A model.</strong> Relax assumption A3 and let each thread add a cost \(\kappa\) to the region, for creating or waking it and for the barrier that ends the region. With \(f=0\) for clarity, \(T_p=T_1/p+\kappa p\), where \(T_1\) is the single-thread time of the loop. The derivative \(-T_1/p^2+\kappa\) vanishes at</p>
+\[
+p^{*}=\sqrt{\frac{(1-f)\,T_1}{\kappa}} \tag{11.7}
+\]
+<p>(with \(f\) restored), and the second derivative \(2T_1/p^3\) is positive, so \(p^*\) is the minimum of \(T_p\). The model has the same shape as the lecture's argument: the time falls, reaches a minimum and rises. It also has a break-even size: the region is worth executing on \(p\) threads only if \(T_1(1-1/p)\gt\kappa p\), which for \(p=8\) means \(T_1\gt 9.1\,\kappa\).</p>
+<p><strong>The cost, measured.</strong> The program below times regions that do almost nothing, one volatile write per thread to a private cache line, so that the compiler cannot remove them. It first prints the time of the first region of the process with the number of threads in its argument, then the time per region, averaged over 20 000 regions, for \(p=1,\dots,12\). The first line of its output, and the repetition in the shell session below, show the cost of creating the threads. The steady-state table shows the cost of reusing them.</p>
+<pre><code class="language-c" data-file="fork_cost.c" data-build="gcc -O2 -fopenmp fork_cost.c -o fork_cost" data-run="./fork_cost 12" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;omp.h&gt;
+
+#define REGIONS 20000
+
+static volatile int sink[1024 * 16];
+
+int main(int argc, char **argv)
+{
+    int pcold = argc &gt; 1 ? atoi(argv[1]) : 12;
+    double t0 = omp_get_wtime();
+    #pragma omp parallel num_threads(pcold)
+    { sink[omp_get_thread_num() * 16] = 1; }
+    printf("first region with %d threads: %.0f us\n", pcold, (omp_get_wtime() - t0) * 1e6);
+    if (argc &gt; 2) return 0;
+    printf("%4s %12s\n", "p", "us/region");
+    for (int p = 1; p &lt;= 12; p++) {
+        double best = 1e30;
+        for (int r = 0; r &lt; 5; r++) {
+            t0 = omp_get_wtime();
+            for (int k = 0; k &lt; REGIONS; k++) {
+                #pragma omp parallel num_threads(p)
+                { sink[omp_get_thread_num() * 16] = k; }
+            }
+            double t = (omp_get_wtime() - t0) / REGIONS;
+            if (t &lt; best) best = t;
+        }
+        printf("%4d %12.2f\n", p, best * 1e6);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">first region with 12 threads: 27783 us
+   p    us/region
+   1         0.16
+   2         0.37
+   3         0.69
+   4         0.55
+   5         0.65
+   6         0.80
+   7         0.84
+   8         1.03
+   9         1.17
+  10         1.38
+  11         4.77
+  12        18.64</code></pre>
+<p>For \(p\le9\) the cost per region grows from 0.2 µs at \(p=1\) to 1.2 µs at \(p=9\) in this sample, roughly \(\kappa\approx0.13\ \mu\mathrm{s}\) per thread; earlier runs gave 0.14 and 0.17 µs, and the programs and examples of this chapter use 0.17 µs. In this sample the cost at \(p=10\) (1.4 µs) still follows the trend, and the cost rises from \(p=11\): 4.8 and 19 µs at \(p=11\) and 12. In earlier runs it was 6.3, 9.1 and 47 µs at \(p=10,11,12\), and 1.3 to 1.7, 4.5 to 5.2 and 63 to 121 µs. The rise does not start at \(p=9\), the first team size at which two team threads must share one of the 8 cores, and the cost at \(p=9\) (1.2 µs) continues the trend of \(p\le8\). The hybrid layout of the processor therefore does not explain it. A hypothesis that fits is the occupation of all logical processors. When <code>OMP_WAIT_POLICY</code> is not set, a waiting thread of the libgomp runtime spins for 300 000 iterations before it sleeps (<a href="https://gcc.gnu.org/onlinedocs/libgomp/GOMP_005fSPINCOUNT.html">libgomp manual, GOMP_SPINCOUNT</a>). A team of \(p\) threads that runs regions one after another therefore keeps \(p\) logical processors busy. At \(p=10\) to 12, few or no logical processors remain for other work. That work includes the Windows host, which runs the guest's 12 processors on the same 12 hardware threads, and other processes of the guest and of the machine. Such work preempts a team thread, and the barrier at the end of the region then waits until that thread runs again. An extra cost of 19 µs per region on average over 20 000 regions (this sample) corresponds, for example, to a stall of 2 ms in 1 % of the regions. The hypothesis was not tested. It predicts that the rise moves one team size lower when a one-thread busy loop runs beside <code>fork_cost</code>, and that the rise changes with <code>OMP_WAIT_POLICY=passive</code>. The first region of the process cost 28 ms for 12 threads in this sample and between 6 and 23 ms in seven other runs. The measurements are consistent with a runtime that creates its threads once and keeps them for later regions, so the cost the lecture attributes to the destruction of threads at the end of each region is paid, here, by the first region only; the documentation of the runtime on thread pools was not consulted. Larger first regions were measured with the same program started as <code>./fork_cost 1000 x</code>, whose second argument stops it after the first region:</p>
+<pre><code class="language-bash">$ for k in 1 2 3 4; do ./fork_cost 1000 x; done
+first region with 1000 threads: 52787 us
+first region with 1000 threads: 51295 us
+first region with 1000 threads: 47640 us
+first region with 1000 threads: 37559 us
+</code></pre>
+<p>Creating 1000 threads costs 38 to 53 ms, 38 to 53 µs per thread, in these four runs, and 51 to 83 ms in four earlier runs; the value \(\kappa_c=50\ \mu\mathrm{s}\) is used below. The lecture's prediction can be tested with the \(\pi\) program of the next section. Its second argument selects a mode that runs once with a given team size, so that the creation of the threads is part of the measured time. The commands below use the <code>-O2</code> build, stride 8 and \(N=10^{9}\) of that program, three runs for each team size, each in a fresh process.</p>
+<pre><code class="language-bash">$ for p in 1 100 1000; do for k in 1 2 3; do ./pi_O2 8 once $p; done; done
+p =    1, one run: 1.101 s
+p =    1, one run: 1.104 s
+p =    1, one run: 1.137 s
+p =  100, one run: 0.259 s
+p =  100, one run: 0.269 s
+p =  100, one run: 0.320 s
+p = 1000, one run: 0.365 s
+p = 1000, one run: 0.289 s
+p = 1000, one run: 0.277 s
+</code></pre>
+
+<p>The runs take 1.10 to 1.14 s on one thread, 0.26 to 0.32 s on 100 threads and 0.28 to 0.37 s on 1000 threads. The lecture states its prediction for a run of 1.86 s, and it is not reproduced here: the runs with 1000 threads are 3.0 to 4.1 times faster than the runs with one thread. The mean time with 1000 threads (0.31 s) is 28 ms above the mean with 100 threads (0.28 s), of the order of the 45 ms that 900 additional threads at about 50 µs each would cost, and within the spread of the runs. A model that combines a capacity limit with a one-time creation cost \(\kappa_c\) per thread is \(T_p\approx T_1/C+\kappa_c p\) for \(p\) much larger than \(m\). Here \(C\) is the speed, in units of one thread, that an oversubscribed team reaches. The independent-copies measurement in the section on false sharing gives \(C_c=3.9\) for 8 copies and 4.9 for 12 copies of this loop, which are of the same size. With \(T_1=1.11\) s, the mean of the three one-thread runs of this session, and \(\kappa_c=50\ \mu\mathrm{s}\), the observed times give \(C=3.5\) to 4.4 for \(p=100\) and 3.5 to 4.9 for \(p=1000\). The single value \(C=4.2\) gives 0.27 s and 0.31 s, inside both observed ranges. The model also gives the threshold of the lecture's claim. A team of 1000 threads is slower than one thread only if \(T_1(1-1/C)\lt\kappa_c p\), that is \(T_1\lt0.05/0.76=0.066\) s. The claim holds for a loop shorter than about 0.07 s. It does not hold on this system for a run of the length the lecture uses. An earlier run of a variant of the program with \(N=10^{8}\) (\(T_1\) of 0.11 to 0.125 s, above the threshold) gave 0.060 to 0.072 s with 1000 threads, also not slower.</p>
+<p>Equation (11.7) and the steady-state cost \(\kappa=0.17\ \mu\mathrm{s}\) describe a program that creates its team once and then runs many regions on it. The cost of creating a thread, about 50 µs, is some 300 times larger and is paid once per thread. A program that creates a large team for one short region pays that cost, and a program that reuses the team does not.</p>
+<p>The model has a use that the measurement supports. For a short region the optimum is small: \(p^*=7.7\) for \(T_1=10\ \mu\mathrm{s}\), 24 for 100 µs and 77 for 1 ms with \(\kappa=0.17\ \mu\mathrm{s}\). A parallel region inside an inner loop of 10 µs iterations cannot use more than about 8 threads, and it needs \(T_1\gt1.5\ \mu\mathrm{s}\) to gain at all at \(p=8\). The decision of how many threads to use is therefore a property of the region's work, as the lecture says, and the way to set it is a measurement of the program at several team sizes. The procedure that follows from the models of this and the previous section is:</p>
+<ol>
+<li>Time the program on one thread, \(T_1\), with the repetition rule of the lecture (several runs, the minimum or the mean stated).</li>
+<li>Time it at team sizes \(p=2,4,\dots\) up to \(m\), by setting <code>OMP_NUM_THREADS</code> in the shell, which needs no recompilation, and compute \(S_p\) and \(E_p\).</li>
+<li>Compute \(f_{\exp}(p)\) with (11.6). A value that is flat in \(p\) indicates a serial part of the program. A value that rises with \(p\) indicates a failure of A2 or A3: a capacity limit, an imbalance, a memory effect or an overhead.</li>
+<li>Repeat the timing at another problem size \(N\). If \(E_p\) improves as \(N\) grows at fixed \(p\), the loss is an overhead that does not grow with \(N\), which (11.7) describes.</li>
+<li>Choose the smallest \(p\) whose \(E_p\) meets the requirement, not the \(p\) with the smallest \(T_p\), when the processors have other uses.</li>
+</ol>
+
+<h2 id="false-sharing">False sharing: cache-line arithmetic and a measurement</h2>
+<p>The first SPMD program stores the partial sums in the array <code>sum[NUM_THREADS]</code> and every iteration of every thread updates its own element. The race analysis above shows the program is correct: the elements are distinct memory units. The next question is whether the memory system treats them as independent.</p>
+<p><strong>Cache lines.</strong> Processors do not move single words between memory and the caches. They move <em>cache lines</em>, blocks of consecutive bytes. Drepper (<a href="https://akkadia.org/drepper/cpumemory.pdf">"What every programmer should know about memory", 2007</a>, §3.2, p. 15) writes that early caches used lines of 32 bytes and that "nowadays the norm is 64 bytes"; on this machine the guest reports a line size of 64 bytes (the session above). The address of a byte lies in line \(\lfloor a/b\rfloor\) with \(b=64\). A <code>double</code> or <code>long</code> occupies 8 bytes, so 8 of them fit in a line when the array starts at a multiple of 64. Take an array of 8-byte elements, aligned to 64 bytes, with element \(t\sigma\) used by thread \(t\), where \(\sigma\) is the <em>stride</em> in elements. The thread's element is at byte \(8t\sigma\) and lies in line</p>
+\[
+\ell(t)=\Bigl\lfloor\frac{8t\sigma}{64}\Bigr\rfloor=\Bigl\lfloor\frac{t\sigma}{8}\Bigr\rfloor. \tag{11.8}
+\]
+<p>Threads \(t\) and \(t'\) share a line exactly when \(\ell(t)=\ell(t')\). At \(\sigma=1\), threads 0 to 7 share line 0. At \(\sigma=2\) four threads share a line, at \(\sigma=4\) two threads, and at \(\sigma\ge8\) each thread has its own line. In general \(\min(p,8/\sigma)\) threads share a line for \(\sigma\le8\). The lecture's array <code>sum[2]</code>, with the team of 2 threads, is 16 bytes. An array of \(n\le8\) doubles whose address is a multiple of 8 starts at one of the 8 byte offsets \(0,8,\dots,56\) within a line, and it crosses into the next line exactly when the start offset plus \(8n\) exceeds 64, which happens for \(n-1\) of the 8 offsets. For \(n=2\) the two elements share a line for 7 of the 8 offsets, and for \(n=4\) all four elements share a line for 5 of the 8 (at least two of them always share a line). If the offsets are equally likely, the two elements of <code>sum[2]</code> therefore share a line with probability 7/8, and all four elements of <code>sum[4]</code> share one with probability 5/8; an array declared with <code>aligned(64)</code>, as in the programs below, always starts at offset 0.</p>
+<p><strong>Why sharing a line costs time.</strong> A core must hold a line in an exclusive state in its level-1 data cache before it can write to it. Drepper (§6.4.1, pp. 65–66) states that when several threads write to a line, a request for ownership is sent for each write in the worst case, and that a write becomes expensive although the threads use different memory locations. The effect is called <em>false sharing</em>: the program shares no data, and the hardware shares a line. It is a performance property and not a correctness property. The data race rules of the specification refer to memory units and do not mention lines. Drepper's test program, in which threads only increment a location 500 million times, took 390 %, 734 % and 1147 % of the time with one line per thread (he divides the time with one line by the time with separate lines) for 2, 3 and 4 threads, that is 3.9, 7.3 and 11.5 times as long, on a four-processor machine with Pentium 4 processors. The same test on a single-processor quad-core Core 2 machine showed a slight overhead that did not grow with the number of cores (§6.4.1, pp. 66–67). The size of the effect depends on the machine.</p>
+<p><strong>A dedicated measurement.</strong> The program below has each thread increment its own <code>volatile long</code> counter \(10^{8}\) times. The counters are \(\sigma\) elements apart in an array aligned to 64 bytes, and \(\sigma\) runs through 1, 2, 4, 8, 16. The <code>volatile</code> qualifier forces a load and a store in every iteration; it is not a synchronization mechanism, and here it only stops the compiler from keeping the counter in a register. The program prints the best of 5 times for 1, 2, 4 and 8 threads. In an ideal machine without sharing effects, a row would be flat, because each thread does the same work. The column "thr/line" is \(8/\sigma\), with a minimum of 1; the number of threads that really share a line is \(\min(p,8/\sigma)\).</p>
+<pre><code class="language-c" data-file="falseshare.c" data-build="gcc -O2 -fopenmp falseshare.c -o falseshare" data-run="./falseshare" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+#define MAXT 8
+#define MAXSTRIDE 16
+#define ITERS 100000000L
+#define REPS 5
+
+/* counter[id * stride]: element size 8 bytes, array aligned to a 64-byte line. */
+static volatile long counter[MAXT * MAXSTRIDE] __attribute__((aligned(64)));
+
+static double run(int p, int stride)
+{
+    double t0 = omp_get_wtime();
+    #pragma omp parallel num_threads(p)
+    {
+        int id = omp_get_thread_num();
+        for (long k = 0; k &lt; ITERS; k++)
+            counter[id * stride]++;      /* volatile: every increment reads and writes memory */
+    }
+    return omp_get_wtime() - t0;
+}
+
+int main(void)
+{
+    printf("seconds for %ld increments per thread (best of %d)\n", ITERS, REPS);
+    printf("%6s %9s", "stride", "thr/line");
+    for (int p = 1; p &lt;= 8; p *= 2) printf("   p=%-3d", p);
+    printf("\n");
+    for (int stride = 1; stride &lt;= MAXSTRIDE; stride *= 2) {
+        printf("%6d %9d", stride, stride &gt;= 8 ? 1 : 8 / stride);
+        for (int p = 1; p &lt;= 8; p *= 2) {
+            double best = 1e30;
+            for (int r = 0; r &lt; REPS; r++) { double t = run(p, stride); if (t &lt; best) best = t; }
+            printf(" %7.3f", best);
+        }
+        printf("\n");
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">seconds for 100000000 increments per thread (best of 5)
+stride  thr/line   p=1     p=2     p=4     p=8  
+     1         8   0.153   0.177   0.200   0.410
+     2         4   0.155   0.184   0.228   0.270
+     4         2   0.153   0.195   0.215   0.217
+     8         1   0.169   0.158   0.194   0.263
+    16         1   0.198   0.216   0.193   0.204</code></pre>
+<p>In the sample, the time for \(p=8\) falls as the number of threads per line falls from 8 to 2: 0.41 s at \(\sigma=1\) (8 threads in one line), 0.27 s at \(\sigma=2\) (4 threads) and 0.22 s at \(\sigma=4\) (2 threads). With one thread per line it is 0.26 s at \(\sigma=8\) and 0.20 s at \(\sigma=16\). The value at \(\sigma=8\) is above the value at \(\sigma=4\), against the prediction of (11.8), and is within the run-to-run variation described below. The single-thread column, 0.15 to 0.20 s, is the baseline. The one-line case is 2.0 times slower than the \(\sigma=16\) case at \(p=8\) (0.410 against 0.204 s); in three earlier runs, with other iteration counts and repetitions, the ratio of the one-line time to the one-line-per-thread time was 2.0 to 2.6. By (11.8) the time should not fall further beyond \(\sigma=8\). The sample shows 0.26 s at \(\sigma=8\) and 0.20 s at \(\sigma=16\), and earlier runs showed 0.19 and 0.22 s and 0.19 and 0.20 s: the difference between the two strides has no consistent sign and is within the noise of the machine. At \(p=4\) the effect is small: 0.20 s at \(\sigma=1\) against 0.19 s at \(\sigma=16\), a ratio of 1.04, and 1.1 to 1.35 in earlier runs. The effect is much smaller than the factors of 3.9 to 11.5 in Drepper's four-processor measurement. The machine here has one processor package with a shared last-level cache; the placement of the threads on its cores of two speeds is not controllable, and the size of the effect was not related to it. Exercise 6 repeats the measurement with 4-byte counters, where a line holds 16.</p>
+<p><strong>The \(\pi\) program with and without padding.</strong> The program below is the lecture's SPMD program with cyclic distribution for \(N=10^{9}\), with the stride of the partial-sum array as a command-line argument. Stride 1 is the lecture's array; stride 8 gives each thread's partial sum its own line. The shell commands build it twice, with <code>-O0</code> (no optimization, so that every access to <code>sum[id*stride]</code> goes to memory, as in the lecture's program before the compiler has transformed it) and with <code>-O2</code>. It runs each build at both strides for \(p=1,2,4,8,12,24\), where 24 is twice the number of logical processors. Each table gives the best time of 3 runs, the speedup \(S_p\) and the efficiency \(E_p\) against the same build at \(p=1\). The listing takes about two minutes. With a second argument the program times only one copy with one thread (used in the shell session below), and with the arguments <code>once P</code> it runs once with \(P\) threads, creation of the threads included (used in the previous section).</p>
+<pre><code class="language-c" data-file="pi_scaling.c" data-build="gcc -O0 -fopenmp pi_scaling.c -o pi_O0 &amp;&amp; gcc -O2 -fopenmp pi_scaling.c -o pi_O2" data-run="for b in ./pi_O0 ./pi_O2; do for s in 1 8; do echo &quot;== $b&quot;; $b $s; done; done" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;omp.h&gt;
+
+#define MAXT 2048
+#define MAXSTRIDE 8
+#define REPS 5
+
+static long num_steps = 1000000000;
+
+/* sum[id * stride]: stride 1 packs the slots of 8 threads into one 64-byte line,
+   stride 8 gives each thread its own line. The array is 64-byte aligned. */
+static double sum[MAXT * MAXSTRIDE] __attribute__((aligned(64)));
+
+static double run(int p, int stride, double *pi_out)
+{
+    double step = 1.0 / (double)num_steps;
+    double t0 = omp_get_wtime();
+    omp_set_num_threads(p);
+    #pragma omp parallel
+    {
+        int id = omp_get_thread_num();
+        int numthrds = omp_get_num_threads();
+        double x;
+        sum[id * stride] = 0.0;
+        for (long i = id; i &lt; num_steps; i += numthrds) {
+            x = (i + 0.5) * step;
+            sum[id * stride] += 4.0 / (1.0 + x * x);
+        }
+    }
+    double pi = 0.0;
+    for (int t = 0; t &lt; p; t++) pi += sum[t * stride] * step;
+    *pi_out = pi;
+    return omp_get_wtime() - t0;
+}
+
+int main(int argc, char **argv)
+{
+    int stride = argc &gt; 1 ? atoi(argv[1]) : 1;
+    int plist[] = {1, 2, 4, 8, 12, 24};
+    double t1 = 0.0, pi = 0.0;
+    if (argc &gt; 3) {                    /* ./pi_O2 8 once P: one run with P threads, thread creation included */
+        int p = atoi(argv[3]);
+        double t = run(p, stride, &amp;pi);
+        printf("p = %4d, one run: %.3f s\n", p, t);
+        return 0;
+    }
+    printf("stride %d (%d bytes between slots)\n", stride, stride * 8);
+    printf("%4s %8s %6s %6s\n", "p", "time s", "S_p", "E_p");
+    int np = argc &gt; 2 ? 1 : 6;          /* a second argument: time only p = 1 (one copy) */
+    for (int k = 0; k &lt; np; k++) {
+        int p = plist[k];
+        double best = 1e30;
+        for (int r = 0; r &lt; REPS; r++) {
+            double t = run(p, stride, &amp;pi);
+            if (t &lt; best) best = t;
+        }
+        if (p == 1) t1 = best;
+        printf("%4d %8.3f %6.2f %6.2f\n", p, best, t1 / best, t1 / best / p);
+    }
+    printf("pi = %.9f\n", pi);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">== ./pi_O0
+stride 1 (8 bytes between slots)
+   p   time s    S_p    E_p
+   1    1.953   1.00   1.00
+   2    1.508   1.30   0.65
+   4    1.551   1.26   0.31
+   8    2.037   0.96   0.12
+  12    1.528   1.28   0.11
+  24    0.974   2.01   0.08
+pi = 3.141592654
+== ./pi_O0
+stride 8 (64 bytes between slots)
+   p   time s    S_p    E_p
+   1    2.024   1.00   1.00
+   2    1.174   1.72   0.86
+   4    0.733   2.76   0.69
+   8    0.540   3.75   0.47
+  12    0.527   3.84   0.32
+  24    0.457   4.43   0.18
+pi = 3.141592654
+== ./pi_O2
+stride 1 (8 bytes between slots)
+   p   time s    S_p    E_p
+   1    0.980   1.00   1.00
+   2    0.515   1.90   0.95
+   4    0.282   3.48   0.87
+   8    0.261   3.76   0.47
+  12    0.258   3.80   0.32
+  24    0.242   4.05   0.17
+pi = 3.141592654
+== ./pi_O2
+stride 8 (64 bytes between slots)
+   p   time s    S_p    E_p
+   1    0.985   1.00   1.00
+   2    0.544   1.81   0.90
+   4    0.323   3.05   0.76
+   8    0.266   3.70   0.46
+  12    0.249   3.95   0.33
+  24    0.241   4.08   0.17
+pi = 3.141592654</code></pre>
+<p>Four observations follow from the sample. (1) At <code>-O0</code> the lecture's array, stride 1, nearly stops scaling: \(S_4=1.3\) and \(S_8=1.0\), against 2.8 and 3.8 with stride 8; the unpadded version is 2.1 times slower at \(p=4\) and 3.8 times slower at \(p=8\). This reproduces the shape of the lecture's table, in which three and four threads gain nothing over two. (2) At <code>-O2</code> stride 1 and stride 8 are within 15 % of each other at every \(p\). The largest difference, 0.282 s unpadded against 0.323 s padded at \(p=4\), has the padded version slower, which is the opposite of the direction of false sharing, and the times at \(p=1\), where no line is shared, differ by 0.5 %. These differences measure the variation of the machine. With optimization, gcc keeps <code>sum[id*stride]</code> in a register during the loop and stores it once, which removes the writes that cause the sharing. (This explanation of the compiler's action was inferred from the timings, not checked in the generated code.) The transformation is allowed because a program without a race has no other thread that may access the element during the loop. The lecture's measurement used <code>icpc -O2</code>; whether that compiler removed the sharing was not tested. Whether a loop of this form suffers from false sharing depends on the compiler's decisions, which the programmer does not see. (3) With padding and optimization, \(S_p\) is 1.81 at \(p=2\), 3.05 at \(p=4\), 3.70 at \(p=8\), 3.95 at \(p=12\) and 4.08 at \(p=24\); it does not reach \(p\) beyond \(p=2\); the last paragraph of this section explains why. (4) At <code>-O0</code> with stride 1 the time is not monotone in \(p\): \(p=24\) (0.97 s) is faster than \(p=12\) (1.53 s) and \(p=8\) (2.04 s). By (11.8) with \(\sigma=1\), the 8 slots of a team of 8 lie in one line and all 8 writers run at once. At \(p=12\) the slots fill one line of 8 and one line of 4. At \(p=24\) they fill three lines of 8, and only 12 of the 24 threads run at any moment, about 4 writers per line. The time falls in the same order. This hypothesis was not tested.</p>
+<p>Apply (11.6) to the padded <code>-O2</code> table. The experimental serial fraction is 0.10 at \(p=2\), 0.10 at \(p=4\), 0.17 at \(p=8\), 0.19 at \(p=12\) and 0.21 at \(p=24\). It stays near 0.1 up to \(p=4\) and then rises, so, as in the lecture's table, no single serial fraction fits, and the program has a serial part of a few microseconds. The failing assumption is again A2. The next measurement separates the machine from the program. It starts \(c\) independent copies of the single-thread loop at the same time, with no threads and no shared data, and takes the time of the slowest copy. The quantity \(C_c=c\,T_1/(\text{slowest time})\) is \(c\) times the speed of the slowest copy, in units of the speed of one copy that runs alone.</p>
+<pre><code class="language-bash">$ for c in 1 2 4 8 12; do for k in $(seq $c); do ./pi_O2 8 copy | awk '$1==1 {print $2}' &amp; done | sort -n | tail -1 | awk -v c=$c '{printf "copies %2d  slowest %.3f s\n", c, $1}'; done
+copies  1  slowest 1.002 s
+copies  2  slowest 1.156 s
+copies  4  slowest 1.335 s
+copies  8  slowest 2.046 s
+copies 12  slowest 2.446 s
+</code></pre>
+
+<p>Each copy reports its best of 5 repetitions. A repetition that runs after other copies have finished meets less contention, so \(C_c\) may be slightly too large.</p>
+<p>With \(T_1=1.002\) s from the one-copy line, \(C_c=1.73,\ 3.00,\ 3.92,\ 4.92\) for \(c=2,4,8,12\) copies, below \(c\) at every \(c\). Let \(v_k\) be the speed at which logical processor \(k\) runs this loop, relative to the one-copy run, and let \(v_{\min}\) be the smallest \(v_k\) among the processors in use. Then \(C_c=c\,v_{\min}\). \(C_c\) is not the total throughput of the machine, which is \(\sum_k v_k\). The threaded loop is limited by the same quantity. Its cyclic distribution gives every thread \(N/p\) iterations of equal cost, so by (11.3) the region ends when the slowest thread ends:</p>
+\[
+S_p=p\,v_{\min}(p)\le\sum_k v_k .
+\]
+<p>The padded <code>-O2</code> threaded loop (\(S_p=1.81,\ 3.05,\ 3.70\) and \(3.95\) at \(p=2,4,8,12\)) attains 104 %, 102 %, 94 % and 80 % of \(C_p\). The values above 100 % are the noise of the two measurements. The hybrid processor (section on the model) explains why \(p\,v_{\min}\) stops growing. From the copies, \(v_{\min}\) is 0.87 for 2 copies, 0.75 for 4, 0.49 for 8 and 0.41 for 12. The value below 1 at 2 copies shows that the machine was not otherwise idle. Four copies fit on the four P-cores. Their common speed of 0.75 is consistent with P-cores that run below the single-core turbo frequency when four are busy, or with the load of other jobs; neither was measured. From 5 copies on, at least one copy runs on an E-core, whose maximum turbo frequency is 0.75 of a P-core's (3.30 against 4.40 GHz), or shares a P-core with another copy. The slowest copy then runs at about half the speed of a lone copy, and \(p\,v_{\min}\) stays between 3.9 and 4.9 for \(p\) from 8 to 12. The speedup at \(p=24\) (4.08) is slightly larger than at \(p=12\) (3.95), a difference within the noise of this sample. In earlier runs the speedup at \(p=24\) was larger than at \(p=12\) by 0.1 to 0.5. A hypothesis for this difference is the following. The operating system time-slices 24 threads on 12 logical processors and moves them between processors. A processor that finishes its threads takes over threads that are still waiting, so the work per processor is no longer equal, and \(S_p\) moves from \(p\,v_{\min}\) toward \(\sum_k v_k\). This explanation fits the tables of this section for \(p\le8\), where the threaded loop attains 94 % to 104 % of \(C_p\). It does not account for \(p=12\), where the threaded loop attains 80 % of \(C_{12}\). The best-of-5 rule of the copies may overstate \(C_{12}\) (the caveat above); this chapter did not test it. The explanation does not rest on a measurement of placement, which the guest does not let this chapter control. A direct test records <code>omp_get_wtime()</code> at the end of each thread's loop. At \(p=8\) and \(p=12\) the explanation predicts two or three groups of finishing times, the slowest group about twice as long as the fastest. The speeds \(v_k\) depend on the loop: the integer recurrence of <code>triangle.c</code> reached \(S_8=6.47\) with the cyclic distribution in this sample (6.88 and 6.95 in earlier runs), against 3.70 for the \(\pi\) loop. \(C_c\) must therefore be measured for each loop. The plateau near 4 is a property of this loop on this machine, not of the machine alone.</p>
+
+<h2 id="limits">What the model establishes and what it does not</h2>
+<p>The table lists the statements of the lectures that this chapter tested, with the status that the tests gave them.</p>
+<div class="table-wrap"><table>
+<caption>Table 11.1. Statements of the lectures and their status in this chapter.</caption>
+<thead><tr><th scope="col">Statement of the lecture</th><th scope="col">Status</th><th scope="col">Evidence in this chapter</th></tr></thead>
+<tbody>
+<tr><td>The output order of a parallel hello-world program is not fixed.</td><td>Confirmed and quantified</td><td>\((2p)!/2^p\) schedules and \(C_p\) outputs; 10 of 14 outputs seen in 2000 runs at \(p=4\).</td></tr>
+<tr><td>The team size is set by the operating system through an environment variable.</td><td>Refined</td><td>The runtime sets it through <code>nthreads-var</code>; a call of <code>omp_set_num_threads</code> overrides the variable (specification §10.1.1, §18.2.1, §21.1.2; <code>team.c</code>).</td></tr>
+<tr><td>A system may give fewer threads than requested.</td><td>Refined</td><td>For an unnested region without an <code>if</code> clause: only if <code>dyn-var</code> is true, or if the request exceeds the available threads (implementation defined).</td></tr>
+<tr><td>Cyclic and block distribution make little difference.</td><td>True for equal iteration costs, false otherwise</td><td>\(E_{\text{block}}\to p/(2p-1)\) for cost \(i+1\); <code>triangle.c</code>; exercise 2.</td></tr>
+<tr><td>The non-linear speedup of the timing table follows from Amdahl's law: the initial setup, the creation and destruction of threads and the global sum are serial, and this serial part grows with the number of threads.</td><td>Not supported for this table</td><td>\(f_{\exp}\) is 0.108, 0.371, 0.362 and rises with \(p\); the program's serial part takes microseconds against 1.86 s. A two-core capacity limit, \(T_p=fT_1+(1-f)T_1/\min(p,2)\), fits all three times within 6 %.</td></tr>
+<tr><td>Homework: measure how your own \(\pi\) program scales with the number of threads and explain it with Amdahl's law.</td><td>Done on this chapter's machine; Amdahl's law alone does not explain it</td><td>\(f_{\exp}\) of the padded <code>-O2</code> program is 0.10 at \(p=2\) and 0.21 at \(p=24\); the threaded speedups are 94 % to 104 % of \(c\,v_{\min}\) from independent copies for \(p\le8\) (hybrid processor; section on false sharing).</td></tr>
+<tr><td>Cyclic and block distribution give the same answer.</td><td>Equal within rounding, not bit for bit</td><td>The two sums differ by 2 ulp for \(N=100003\), \(p=4\) (<code>pi_spmd.c</code>); OpenMP 5.2 §1.3, p. 23.</td></tr>
+<tr><td>Thread-management overhead grows with the team and 1000 threads may be slower than the serial program of 1.86 s.</td><td>Correct in form, not reproduced</td><td>Per-thread costs of 0.17 µs (reuse) and 50 µs (creation); 1000 threads ran 3.0 to 4.1 times faster than one thread at \(N=10^{9}\); the model puts the threshold at \(T_1\approx0.07\) s.</td></tr>
+<tr><td>Superlinear speedup comes from cache effects.</td><td>Not tested for caches; two earlier measurements exceeded \(S_p=p\)</td><td>Two earlier runs exceeded \(S_p=p\): <code>triangle.c</code>, cyclic distribution, 4.27 at \(p=4\) and 2.11 at \(p=2\). Its working set is a few registers, so caches cannot explain it. The section on distributions attributes it to a one-thread reference run on a slower core.</td></tr>
+</tbody></table></div>
+<p>The model of schedules and storage establishes four things. The set of possible outputs of a region is the set of interleavings, and a count (\((2p)!/2^p\) schedules, \(C_p\) outputs for the first program) shows why tests cannot cover it. A variable is shared or private by two rules that depend only on where it is declared. A data race is a pair of unordered conflicting accesses to one memory unit, and the specification gives a program with a race no defined result. The distribution of iterations decides the load of each thread, and (11.3) bounds the speedup that a distribution allows.</p>
+<p>The model leaves out most of what OpenMP offers. It has no synchronization construct, so it cannot express a program that needs an order between threads; chapter 12 adds them. It has no memory model beyond the definition of a race, so the claim that a race-free program behaves as if one of the schedules had run is not proved here; the specification's relaxed-consistency model, in which each thread may have its own temporary view of memory, is the subject of chapter 13. It assumes one level of parallelism and a symmetric machine, as the lecture does, and it does not treat non-uniform memory, affinity, or GPUs.</p>
+<p>The quantitative results have their own limits. Amdahl's law (11.5) holds under A1 to A3 and is violated by both tables of this chapter, because A2 fails. The lecture's machine has two cores. This chapter's machine has logical processors of different speeds, so a team with equal shares runs at \(p\) times the speed of its slowest thread. The overhead model (11.7) uses a cost per thread measured for a region that does no work, and it does not describe the run in which 1000 threads were created. The false-sharing measurements are one machine, one compiler and one session each, with other jobs on the machine. The sizes of the effects (2.0 to 2.6 times for the counters at \(p=8\), 3.8 times for the \(\pi\) program at <code>-O0</code>) are properties of this machine and of the build flags. Some explanations rest on the hybrid processor: the plateau of the speedup, and the speedups above \(p\) against the one-thread reference. One explanation rests on the full occupation of the logical processors: the rise of the region cost at \(p=10\) to 12. These explanations are consistent with the measurements. They were not tested by control of thread placement, which the WSL 2 guest does not allow.</p>
+<p>The \(\pi\) problem has a single reduction, so the structure of the partial sums is simple. The book's other running problem, the Jacobi iteration, updates large arrays in every sweep; the analysis of this chapter assumes that memory traffic is negligible and does not predict its speedup.</p>
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> In the model \(T_p=fT_1+(1-f)T_1/p+\kappa p\), find the team size \(p^*\) that minimizes \(T_p\) and the minimum time. Show that for \(f=0\) the minimum time is \(2\sqrt{\kappa T_1}\) and that at \(p^*\) the overhead \(\kappa p^*\) equals the compute time \(T_1/p^*\). For \(T_1=10\ \mu\mathrm{s}\) and \(\kappa=0.17\ \mu\mathrm{s}\), compute \(p^*\) and the speedup \(T_1/T_{p^*}\).</p>
+<details><summary>Solution</summary>
+<p>Differentiate: \(dT_p/dp=-(1-f)T_1/p^2+\kappa\). It is zero at \(p^*=\sqrt{(1-f)T_1/\kappa}\), and the second derivative \(2(1-f)T_1/p^3\) is positive for \(f\lt1\), so this is a minimum. Substituting, \((1-f)T_1/p^*=\sqrt{(1-f)T_1\kappa}\) and \(\kappa p^*=\sqrt{(1-f)T_1\kappa}\): the two terms are equal, and \(T_{p^*}=fT_1+2\sqrt{(1-f)\kappa T_1}\). For \(f=0\) the minimum is \(2\sqrt{\kappa T_1}\). With \(T_1=10\ \mu\mathrm{s}\) and \(\kappa=0.17\ \mu\mathrm{s}\): \(p^*=\sqrt{10/0.17}=7.7\), and \(T_{p^*}=2\sqrt{1.7}\ \mu\mathrm{s}=2.6\ \mu\mathrm{s}\), a speedup of \(10/2.6=3.8\). At the integer team sizes 7 and 8 the model gives \(10/7+0.17\times7=2.62\ \mu\mathrm{s}\) and \(10/8+0.17\times8=2.61\ \mu\mathrm{s}\), so the speedup is 3.8 for both. The speedup that this region can reach is far below \(p^*\), because half of the minimum time is overhead.</p>
+</details>
+<p><strong>Exercise 2 (compute).</strong> A loop has \(N=1000\) iterations of cost \(c(i)=i+1\), run by \(p=4\) threads. Compute the load \(w_t\) of every thread and the efficiency \(E_{\text{dist}}\) of (11.3) for the cyclic distribution and for the block distribution of the lecture. Compare the block value with \(p/(2p-1)\).</p>
+<details><summary>Solution</summary>
+<p>The total is \(W=1000\times1001/2=500\,500\). <em>Cyclic.</em> Thread \(t\) takes the iterations \(t,t+4,\dots,t+996\), 250 of them, with costs \(t+1,t+5,\dots,t+997\), an arithmetic series with sum \(250(2t+998)/2\): 124 750 for \(t=0\), 125 000, 125 250 and 125 500 for \(t=3\). The maximum is 125 500, so \(E_{\text{dist}}=500\,500/(4\times125\,500)=0.997\). <em>Block.</em> \(N/p=250\), so thread \(t\) takes \(i\in[250t,250t+250)\) with costs \(250t+1,\dots,250t+250\), sum \(250(500t+251)/2\): 31 375, 93 875, 156 375 and 218 875. They add to 500 500. The maximum is 218 875, so \(E_{\text{dist}}=500\,500/(4\times218\,875)=0.572\). The limit \(p/(2p-1)=4/7=0.571\). The block distribution allows a speedup of at most \(4\times0.572=2.29\), the model value that the program in the chapter prints for \(N=40000\), and the cyclic distribution allows 3.99.</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> A student claims: "If threads write only to distinct array elements, the program has no data race and its performance is not affected by the other threads." Use results of this chapter to show that the first half is true and the second half is false, for one program.</p>
+<details><summary>Solution</summary>
+<p>Take the \(\pi\) program with the partial-sum array at stride 1, compiled with <code>-O0</code>. Thread \(t\) writes only <code>sum[t]</code>, and the \(p\) elements are distinct memory units, so by the definition quoted from §1.4.1 no two threads write the same memory unit and there is no data race; the specification's rule that the update granularity is no larger than the base language requires (p. 27) means the adjacent <code>double</code> elements do not interfere as memory units. The program is nevertheless affected: in the sample, \(S_4=1.3\) against 2.8 for the same program with the elements 64 bytes apart, and at \(p=8\) the unpadded program is 3.8 times slower than the padded one. Both programs are correct and compute the same sum. The first half of the claim concerns memory units of the language, and the second half concerns cache lines of the hardware, which the language does not mention. The claim also fails differently at <code>-O2</code>, where the compiler removes the repeated writes and the two versions run within the variation of the machine (at most 15 % apart, with the padded version the slower at \(p=4\)), so the performance depends on the build as well.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> Take the speedups \(S_p=1.81,\ 3.05,\ 3.70\) of the padded <code>-O2</code> \(\pi\) program at \(p=2,4,8\), and the values \(C_c=1.73,\ 3.00,\ 3.92\) (\(c\) times the speed of the slowest copy) of \(c=2,4,8\) independent copies of its single-thread loop (values of the sample runs in the text). (a) Compute \(f_{\exp}\) at each \(p\) with (11.6). (b) Explain why the \(\pi\) program cannot have a serial fraction of that size. (c) State which assumption of Amdahl's law fails. Replace \(p\) by \(C_p\) in the sharable part of (11.5), with \(f\) of the order of the program's true serial fraction, and compare the model with the three speedups.</p>
+<details><summary>Solution</summary>
+<p>(a) \(f_{\exp}=(1/S-1/p)/(1-1/p)\): at \(p=2\), \((0.5525-0.5)/0.5=0.105\); at \(p=4\), \((0.3279-0.25)/0.75=0.104\); at \(p=8\), \((0.2703-0.125)/0.875=0.166\). (b) The serial part of the program is the final loop of at most 8 additions and the fork and join of the region, about a microsecond per thread (the section on overhead), against a run of about 1.0 s. The serial fraction is of order \(10^{-6}\), five orders below the fitted values, and the fitted values rise from \(p=4\) to \(p=8\), which a fixed \(f\) cannot do. (c) Assumption A2 fails: the sharable part does not divide by \(p\), because with equal shares the region runs at \(p\) times the speed of its slowest thread, and on this hybrid processor that speed falls as \(p\) grows. Replace \(p\) by the measured capacity: \(S_p=1/(f+(1-f)/C_p)\approx C_p\) for \(f\approx10^{-6}\). The model gives 1.73, 3.00 and 3.92 against the measured 1.81, 3.05 and 3.70, so the measured speedups are 104 %, 102 % and 94 % of the model, and no value is off by more than 6 %. The model explains the gap between \(S_p\) and \(p\) with one measured function \(C_p\). Its remaining error is of the size of the noise of the two measurements, which this exercise does not separate from effects of the team itself. The lecture's table has the same structure with \(C_p=\min(p,2)\).</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> A loop computes <code>b[i] = g(a[i])</code> for \(i=0,\dots,N-1\) with \(N=10^{8}\), where every call of <code>g</code> costs the same. Another loop computes <code>b[i] = h(a[i], i)</code> where the cost of <code>h</code> grows linearly with \(i\). Choose a distribution of iterations for each, and give the quantitative reasons. For the cyclic distribution with chunks of \(k\) consecutive iterations, find the smallest \(k\) at which neighbouring threads never write the same cache line of <code>b</code> (an array of doubles aligned to 64 bytes).</p>
+<details><summary>Solution</summary>
+<p>For the first loop all iterations cost the same, so (11.3) gives \(E_{\text{dist}}\ge1-p(p-1)/N\) for the block distribution, 1 to seven digits. The cyclic distribution with chunk 1 assigns neighbouring elements of <code>b</code> to different threads, so by (11.8) threads \(t\) and \(t+1\) write into one line for 8 consecutive elements: the false-sharing situation of the measurement. The block distribution has one boundary between two threads, so at most \(p-1\) lines are shared in total, a negligible fraction of \(N/8\) lines. Choose the block distribution. For the second loop the cost grows with \(i\), so the block distribution gives \(E_{\text{dist}}\to p/(2p-1)\), about 0.57 for \(p=4\) and 0.53 for \(p=8\); choose a cyclic distribution. A chunk of \(k\) consecutive iterations writes \(8k\) bytes of <code>b</code>. Chunks of whole lines never share a line when \(8k\) is a multiple of 64, that is, \(k\) is a multiple of 8, and the smallest such chunk is \(k=8\). A chunk of 8 doubles is one line, so no two threads write the same line; the loads of two threads differ by at most about \(kN\) out of \(N^2/(2p)\) each, a relative difference of about \(2kp/N=16p/N\), negligible for \(N=10^{8}\). Chapter 12, on parallel loops and their schedules, covers how OpenMP expresses such distributions.</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement).</strong> Change the program of the false-sharing section to use 4-byte counters (<code>volatile int</code>), strides \(\sigma=1,2,4,8,16,32\) elements, and \(p=8\). Predict, before running, how many threads share a line at each stride and which strides should give the same time. Run it and compare.</p>
+<details><summary>Solution</summary>
+<p>The change is three lines of <code>falseshare.c</code>: the declaration becomes <code>static volatile int counter[MAXT * MAXSTRIDE] __attribute__((aligned(64)));</code>, <code>MAXSTRIDE</code> becomes 32, and the label <code>stride &gt;= 8 ? 1 : 8 / stride</code> becomes <code>stride &gt;= 16 ? 1 : 16 / stride</code>. A line now holds 16 counters. Thread \(t\) uses byte \(4t\sigma\) and is in line \(\lfloor t\sigma/16\rfloor\). For \(p=8\): at \(\sigma=1\) the threads occupy bytes 0 to 31, all in line 0, so 8 threads share a line; at \(\sigma=2\) they occupy bytes 0 to 56, still line 0, so 8 threads share a line; at \(\sigma=4\) they occupy bytes 0 to 112, two lines with 4 threads each; at \(\sigma=8\), 2 threads per line; at \(\sigma=16\) and 32, one thread per line. The prediction is that \(\sigma=1\) and \(\sigma=2\) take the same time and are the slowest, then \(\sigma=4\), then \(\sigma=8\), and that \(\sigma=16\) and 32 are the fastest and equal. The run in the same session as the other timing samples gave, for \(p=8\): 0.466, 0.456, 0.418, 0.282, 0.162 and 0.159 s for \(\sigma=1,2,4,8,16,32\) (an earlier run gave 0.629, 0.608, 0.388, 0.330, 0.209 and 0.248 s). The order, the equality of \(\sigma=1\) and 2, and the equality of \(\sigma=16\) and 32 (2 % apart) agree with the prediction. The one-line case is 2.9 times slower than the one-line-per-thread case at \(\sigma=16\) (3.0 in the earlier run), larger than the 2.0 to 2.6 times for 8-byte counters in four runs; this chapter did not determine why.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li>Recordings: <a href="https://www.youtube.com/watch?v=DVQhXs8_o-A">W3L6, Introduction to Shared Memory Programming using OpenMP</a> (slides: the common core, solution stack, syntax, hello world, concurrency definitions, fork–join); <a href="https://www.youtube.com/watch?v=Cz8KRZBbgpI">W4L1, Distribution of work using multiple OpenMP Threads</a> (slides: thread creation, serial and SPMD \(\pi\) programs, block distribution, timing table, speedup, Amdahl's law), NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay, 2025.</li>
+<li>OpenMP Architecture Review Board, <a href="https://www.openmp.org/wp-content/uploads/OpenMP-API-Specification-5-2.pdf">OpenMP Application Programming Interface, Version 5.2 (November 2021)</a>. §1.3, pp. 23–24: fork–join execution, implicit barrier, nested regions, different numeric results with different numbers of threads; §1.4.1, p. 27: update granularity and the definition of a data race; §3.3, p. 69: <code>_OPENMP</code>; §4.3, p. 76: structured blocks; §5.1.1, pp. 97 and 99: predetermined and implicit data-sharing attributes; §10.1, p. 223: team creation, thread numbers; §10.1.1, pp. 226–227: Algorithm 2.1; §18.2.1–18.2.2, pp. 348–349: <code>omp_set_num_threads</code>, <code>omp_get_num_threads</code>; §18.10.1, pp. 413–414: <code>omp_get_wtime</code> (a per-thread time, not required to be consistent across threads); §21.1.2, p. 600: <code>OMP_NUM_THREADS</code>.</li>
+<li>G. M. Amdahl, <a href="https://www3.cs.stonybrook.edu/~rezaul/Spring-2019/CSE613/reading/Amdahl-1967.pdf">"Validity of the single processor approach to achieving large scale computing capabilities"</a>, AFIPS Conference Proceedings 30 (1967) 483–485, reprinted in IEEE SSCS News, Summer 2007. The argument from sequential housekeeping (40 % of instructions) and its limit of five to seven times; no equations.</li>
+<li>L. Dagum and R. Menon, <a href="https://doi.org/10.1109/99.660313">"OpenMP: an industry standard API for shared-memory programming"</a>, IEEE Computational Science &amp; Engineering 5(1) (1998) 46–55. Abstract only (directives and runtime routines for shared-memory parallelism in Fortran, C and C++; X3H5 lineage; coarse-grain parallelism).</li>
+<li>Intel, <a href="https://www.intel.com/content/www/us/en/products/sku/132222/intel-core-i512450h-processor-12m-cache-up-to-4-40-ghz/specifications.html">Intel Core i5-12450H processor specifications (ARK)</a>, retrieved 2026-10-26. 4 performance cores with 2 threads each, 4 efficient cores with 1 thread each, 12 threads; maximum turbo frequency 4.40 GHz (P-core) and 3.30 GHz (E-core).</li>
+<li>GNU Project, <a href="https://gcc.gnu.org/onlinedocs/libgomp/GOMP_005fSPINCOUNT.html">libgomp manual, GOMP_SPINCOUNT</a>. A waiting thread spins 300 000 times when <code>OMP_WAIT_POLICY</code> is undefined; with more threads than CPUs the counts are 1000 (active policy) and 100 (undefined policy).</li>
+<li>R. Menon, <a href="https://cug.org/5-publications/proceedings_attendee_lists/1998CD/S98PROC/AUTHORS/MENON/SLIDES.PDF">OpenMP Application Program Interface, slides</a>, Cray User Group 1998. Slide 5: Fortran 1.0 specification October 1997 and C/C++ 1.0 August 1998.</li>
+<li>OpenStax, <a href="https://openstax.org/books/calculus-volume-2/pages/3-6-numerical-integration"><em>Calculus Volume 2</em>, §3.6 Numerical Integration</a>, Theorem 3.5, eq. 3.12: the error bound of the midpoint rule, \(M(b-a)^3/(24n^2)\).</li>
+<li>U. Drepper, <a href="https://akkadia.org/drepper/cpumemory.pdf">"What every programmer should know about memory"</a> (2007). §3.2, p. 15: cache lines of 64 bytes; §6.4.1, pp. 65–67: false sharing, the measured time ratios of 390 %, 734 % and 1147 % (one line against one line per thread, 2, 3 and 4 threads) on four Pentium 4 processors, and the absence of a growing penalty on a quad-core Core 2.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.html">Previous available chapter</a><a href="index.html">Lecture index</a><span>Further chapters pending</span></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>
