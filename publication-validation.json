@@ -1,82 +1,93 @@
 {
-  "checked_at_utc": "2026-10-27T14:08:54.460926+00:00",
+  "checked_at_utc": "2026-10-27T18:18:48.731628+00:00",
   "status": "passed",
-  "tested_commit": "f0599fadc4ff5c4a3a45cc364a93005f7ae11cd6",
+  "tested_commit": "40d178485d4568231e615fef7845e552161a4eef",
   "live_url": "https://az9713.github.io/nptel-high-performance-scientific-computing-notes/",
-  "scope": "Actual served-file byte agreement and focused live reader controls; does not close scientific-review gaps",
-  "public_files_checked": 50,
+  "scope": "Actual served-file byte agreement and focused live reader controls; not a scientific review",
+  "public_files_checked": 54,
   "all_served_bytes_match_git": true,
   "mismatched_files": [],
   "browser": [
     {
+      "mathErrors": 0,
+      "mathNodes": 0,
+      "overflow": false,
+      "controls": true,
       "file": "index.html",
       "viewport": 1280,
-      "status": "passed",
-      "overflow": false,
-      "controls": true,
-      "mathErrors": 0,
-      "mathNodes": 0
+      "status": "passed"
     },
     {
+      "mathErrors": 0,
+      "mathNodes": 0,
+      "overflow": false,
+      "controls": true,
       "file": "index.html",
       "viewport": 390,
-      "status": "passed",
-      "overflow": false,
-      "controls": true,
-      "mathErrors": 0,
-      "mathNodes": 0
+      "status": "passed"
     },
     {
-      "file": "chapter-09-parallel-computing-numerical-models-and-cost.html",
+      "mathErrors": 0,
+      "mathNodes": 406,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.html",
       "viewport": 1280,
-      "status": "passed",
-      "overflow": false,
-      "controls": true,
-      "mathErrors": 0,
-      "mathNodes": 844
+      "status": "passed"
     },
     {
-      "file": "chapter-09-parallel-computing-numerical-models-and-cost.html",
+      "mathErrors": 0,
+      "mathNodes": 406,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.html",
       "viewport": 390,
-      "status": "passed",
-      "overflow": false,
-      "controls": true,
-      "mathErrors": 0,
-      "mathNodes": 844
+      "status": "passed"
     },
     {
+      "mathErrors": 0,
+      "mathNodes": 0,
+      "overflow": false,
+      "controls": true,
       "file": "code-lab.html",
       "viewport": 1280,
-      "status": "passed",
-      "overflow": false,
-      "controls": true,
-      "mathErrors": 0,
-      "mathNodes": 0
+      "status": "passed"
     },
     {
-      "file": "code-lab.html",
-      "viewport": 390,
-      "status": "passed",
+      "mathErrors": 0,
+      "mathNodes": 0,
       "overflow": false,
       "controls": true,
-      "mathErrors": 0,
-      "mathNodes": 0
+      "file": "code-lab.html",
+      "viewport": 390,
+      "status": "passed"
     }
   ],
-  "readme_preview": {
-    "image_loaded": true,
-    "links_to_live_book": true
-  },
   "served_files": [
+    {
+      "file": ".gitattributes",
+      "bytes_match_git": true,
+      "sha256": "8d300b4e4ee00127ac2af6b9b0733e2b10ac2636e608e75ce49581b93f17a9d4"
+    },
+    {
+      "file": ".gitignore",
+      "bytes_match_git": true,
+      "sha256": "4cad133d4f0a6cf4bba15f1b8bbae48d6a55f20b94f75487c51a93cc6a5af59f"
+    },
+    {
+      "file": ".nojekyll",
+      "bytes_match_git": true,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
     {
       "file": "README.md",
       "bytes_match_git": true,
-      "sha256": "c9da63fc1cbb4071ef298f1f3a055ca675c73299b94e123751fb2f0cd24cc7b0"
+      "sha256": "d4aa8e9cbc6580c5b7d5504f2e6571bd7d7005df0e0e59d4fcea1d8fc390c745"
     },
     {
       "file": "WORKFLOW.md",
       "bytes_match_git": true,
-      "sha256": "ff25c6f7d5f55b6ac0228c8901ec3c3508666b98ad8c03294a9b4deef415d710"
+      "sha256": "d29b93f61fa68897cb752b756c70e9520189fee8c1279e8e1bf0eba06fd6c867"
     },
     {
       "file": "assets/book.css",
@@ -141,12 +152,12 @@
     {
       "file": "chapter-03-linux-file-system-permissions-ownership.html",
       "bytes_match_git": true,
-      "sha256": "6216528c3df0353a34b1047f7421903435a9c89b12447e74b0d8260c0ecf04d4"
+      "sha256": "86b54310bfdbb67dba152738e377562e8ab880cf631bfc25f8f183f7f3e329d5"
     },
     {
       "file": "chapter-03-linux-file-system-permissions-ownership.meta.json",
       "bytes_match_git": true,
-      "sha256": "a7d59a10cfb11f3fd25f4dfdfbd160b3f904254ec1735ecf9f9023505245a7c2"
+      "sha256": "b353485fe4206b66822b9a75c2d220dec9df5e4d703c772ecd9446a131d463ea"
     },
     {
       "file": "chapter-04-processes-text-memory-and-networking.html",
@@ -201,37 +212,37 @@
     {
       "file": "chapter-09-parallel-computing-numerical-models-and-cost.html",
       "bytes_match_git": true,
-      "sha256": "9bcfd3184cece0baaf0fe8eca9ff38196c2c312eb1efe744ce186906d6ec1ccf"
+      "sha256": "a101f99be9fe51ef7f06e56c8ba981c93dc8b8bec91d5581fc59855dabb686d2"
     },
     {
       "file": "chapter-09-parallel-computing-numerical-models-and-cost.meta.json",
       "bytes_match_git": true,
-      "sha256": "7da4b47205a94de0d0c2c914558549cdeab616a92420ea7f3487a734826a5db4"
+      "sha256": "968fc796779f6900dbe4d596b1321ed4e437aa496c7e5b651ec7ed62a4013954"
     },
     {
       "file": "chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.html",
       "bytes_match_git": true,
-      "sha256": "aa7de45a5aeea2de8ee161b2b80bae0997a0f17b1974eba2a27914baddbf291c"
+      "sha256": "abb7e40e4bb4a7b2c1d144f45948d22d00490a411e8820880e50350ba2b61607"
     },
     {
       "file": "chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.meta.json",
       "bytes_match_git": true,
-      "sha256": "936e106c0757cf82b1079203f39bc6a26b7922247c30196cb3f67d5ecdef6973"
+      "sha256": "aa66a350c042686e00fba7be0483b50c9ebe7e9babe1f6831c4734be7c68b9af"
     },
     {
       "file": "chapter-11-openmp-threads-and-work-distribution.html",
       "bytes_match_git": true,
-      "sha256": "fe17f080e81ff91d46f1a8b6c153cf8cdfa7ae943bba67d740c07fe41e82ba68"
+      "sha256": "6df24192f016801fcb3eeca4ee816d01a742626a953483ad31143ad3df79b517"
     },
     {
       "file": "chapter-11-openmp-threads-and-work-distribution.meta.json",
       "bytes_match_git": true,
-      "sha256": "96def1b5dbf207091c1f410dcd967559bf9c4cc8942dbb2e501b69a1c78aaa5d"
+      "sha256": "4a3c9914440aaba5d5428bfb5c3d4d235bf0ec98d4b6289131b2995dd65017c5"
     },
     {
       "file": "chapter-code-validation.json",
       "bytes_match_git": true,
-      "sha256": "f0864ce01f28ed110bbfb95a24d8a319c012ba5222950f370a3bdc7bfc1861b4"
+      "sha256": "1132387815de47c01692b09235af89a0356fa8a7962ddebbbf9c024b325f29cf"
     },
     {
       "file": "code-lab.html",
@@ -246,57 +257,62 @@
     {
       "file": "completion.json",
       "bytes_match_git": true,
-      "sha256": "3210147f1d6ad2f12c346fa27533ac2bca6cf0a864653d0f8e0285dbf1c76974"
+      "sha256": "e92cfc13d60241b65e28a050f8ed84b22f45d51e9121a309d74a05bc31fc7d85"
     },
     {
       "file": "editorial-review-summary.json",
       "bytes_match_git": true,
-      "sha256": "32587f4e3f601ecd64cda754ea8a2da45e3a46fc91ffcfcb476d626b747acf71"
+      "sha256": "842aac604a1d772d68a2bdbd9b84e5b409f13cdc8c357eba8879aae0ebb088b1"
     },
     {
       "file": "index.html",
       "bytes_match_git": true,
-      "sha256": "9bb4fee9ab6811b8804e31f4a34044d328f2cde72420407e885da9c5be7dd42c"
+      "sha256": "f5ecb20f9b0c37f4fce226064c1a1f255bd53bd11c69fac8df304bc352084782"
     },
     {
       "file": "package-validation.json",
       "bytes_match_git": true,
-      "sha256": "b67475a9c6dddeddf12ddaab12a97af908e14a633a9ff496bd93d86f1296f324"
+      "sha256": "66a840998aee1154d8372090bb93e6cd7710347fbff7fee7acc912095ea03165"
+    },
+    {
+      "file": "publication-validation.json",
+      "bytes_match_git": true,
+      "sha256": "2417cfe0472c804d46b58d39792c10a4c6b685d57fe2a60f2ee6d759df27da34"
     },
     {
       "file": "reader-validation.json",
       "bytes_match_git": true,
-      "sha256": "eca6b29b2320349359cf0ae6394e663b50e50ef1368cd3ac1819a56a3d6d0efb"
+      "sha256": "c4c39c54c89888e50b0cfab8baa09db09f63170613dc61a7ef0ebc8f4415fc44"
     },
     {
       "file": "references.html",
       "bytes_match_git": true,
-      "sha256": "62959c48e35277b164478bbc6150eceab5f4cef3b371ff5d45ad03cc08decee6"
+      "sha256": "a8a68b1a82ee61f095421088edf718bf6ff55ea7f44f0417bd38fc209cdea52c"
     },
     {
       "file": "source-free-validation.json",
       "bytes_match_git": true,
-      "sha256": "ac22167a54eb945d0a9107b3c2fc861ce8034009b798e741933a5bddc9a5d3c1"
+      "sha256": "6e6c8002536c475d27c9884796a5ec819a3f27a42a47223ae582a974ab5fdb6d"
     },
     {
       "file": "source-manifest.json",
       "bytes_match_git": true,
-      "sha256": "ccc79f591db8d7a8be44dd00f32f9d57d1e4bc4d7ef112acefe2633cba016197"
+      "sha256": "c9ddbdc93c79038539a40dcc0f96292b3d1918cbde9b2e7bb770e4573182fa6e"
     },
     {
       "file": "source-map.html",
       "bytes_match_git": true,
-      "sha256": "35fd213144d6dc9a95e3ea87d2f82572c76cf2dde53788df4ae12fe66e1c46de"
+      "sha256": "8a07cabdc861b2f17904efc5225bcab07ef9e305b4cb6a07a56a16b6f8fa4744"
     },
     {
       "file": "source-map.json",
       "bytes_match_git": true,
-      "sha256": "e4dc9881e7a18ed23de69e00068b9ae0ff798586e095de9e671551c65d817260"
+      "sha256": "1332b2817f3038e8bafe72706058c239d1a56f47e1659c5a53ee0f3a592ef938"
     },
     {
       "file": "source-validation-summary.json",
       "bytes_match_git": true,
-      "sha256": "a52b17b74b0584dfead2f37223ac1ceb297606d863847c3aa5010a079a86bf98"
+      "sha256": "474defb30d4063898e8ad8b13649993b68ad79dac7f425da8af7f807b01eaf2e"
     },
     {
       "file": "tools/build_book.py",
