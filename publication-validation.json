@@ -1,7 +1,7 @@
 {
-  "checked_at_utc": "2026-10-27T18:18:48.731628+00:00",
+  "checked_at_utc": "2026-10-27T19:11:18.791008+00:00",
   "status": "passed",
-  "tested_commit": "40d178485d4568231e615fef7845e552161a4eef",
+  "tested_commit": "6aef1c5e75690d9e210184a197ac0e9a9ab1e640",
   "live_url": "https://az9713.github.io/nptel-high-performance-scientific-computing-notes/",
   "scope": "Actual served-file byte agreement and focused live reader controls; not a scientific review",
   "public_files_checked": 54,
@@ -142,7 +142,7 @@
     {
       "file": "chapter-02-operating-systems-and-linux-kernel.html",
       "bytes_match_git": true,
-      "sha256": "5086ea5d9da35d9209cad7513ef8908125e96b959ed20b88e7984ff434421c5f"
+      "sha256": "3d9c6066afeb02ec56893cfe31371f3e3a13507da7b93a48ad90cb8d50c74485"
     },
     {
       "file": "chapter-02-operating-systems-and-linux-kernel.meta.json",
@@ -152,7 +152,7 @@
     {
       "file": "chapter-03-linux-file-system-permissions-ownership.html",
       "bytes_match_git": true,
-      "sha256": "86b54310bfdbb67dba152738e377562e8ab880cf631bfc25f8f183f7f3e329d5"
+      "sha256": "698b9c2a23782814a91bfd3a5f67dedec2c8220e961e3b9a6d39b6c639ba0294"
     },
     {
       "file": "chapter-03-linux-file-system-permissions-ownership.meta.json",
@@ -202,7 +202,7 @@
     {
       "file": "chapter-08-concurrency-and-synchronization.html",
       "bytes_match_git": true,
-      "sha256": "5e8616b97e78996b7aa9700621aaf28bfa72c2d267e406fd15239d72ce521b12"
+      "sha256": "abb20f7902351d15f870ca7225dcb2fdfedc62a67561baace4a44623e946e744"
     },
     {
       "file": "chapter-08-concurrency-and-synchronization.meta.json",
@@ -242,7 +242,7 @@
     {
       "file": "chapter-code-validation.json",
       "bytes_match_git": true,
-      "sha256": "1132387815de47c01692b09235af89a0356fa8a7962ddebbbf9c024b325f29cf"
+      "sha256": "4e80dff049d14520915c3489e8d6f3f98ae9f94c3f229e175352001ab9714c5d"
     },
     {
       "file": "code-lab.html",
@@ -257,12 +257,12 @@
     {
       "file": "completion.json",
       "bytes_match_git": true,
-      "sha256": "e92cfc13d60241b65e28a050f8ed84b22f45d51e9121a309d74a05bc31fc7d85"
+      "sha256": "e57f9b8fb126cbedfbf8ab9e528b510210ad31ecda0003fc36e78c9daa4f2aec"
     },
     {
       "file": "editorial-review-summary.json",
       "bytes_match_git": true,
-      "sha256": "842aac604a1d772d68a2bdbd9b84e5b409f13cdc8c357eba8879aae0ebb088b1"
+      "sha256": "a272448cd7d32610e4928d10b628be6cfbfdf81ee7ab27ebe476e79b17f1eac1"
     },
     {
       "file": "index.html",
@@ -272,17 +272,17 @@
     {
       "file": "package-validation.json",
       "bytes_match_git": true,
-      "sha256": "66a840998aee1154d8372090bb93e6cd7710347fbff7fee7acc912095ea03165"
+      "sha256": "7e7ef8646d442c7d2afcab2cb8cbffe6e505a352d26c7b8fefde418994decf48"
     },
     {
       "file": "publication-validation.json",
       "bytes_match_git": true,
-      "sha256": "2417cfe0472c804d46b58d39792c10a4c6b685d57fe2a60f2ee6d759df27da34"
+      "sha256": "f5673c70fbd7979ab26823a6041f1a645c0c328662b400b082ea51e98f394d78"
     },
     {
       "file": "reader-validation.json",
       "bytes_match_git": true,
-      "sha256": "c4c39c54c89888e50b0cfab8baa09db09f63170613dc61a7ef0ebc8f4415fc44"
+      "sha256": "942d7afb7aee7b37eeb7dfbe6c0f66cadafa1c6f6ab52ef62c2afd38e935c66f"
     },
     {
       "file": "references.html",
@@ -292,7 +292,7 @@
     {
       "file": "source-free-validation.json",
       "bytes_match_git": true,
-      "sha256": "6e6c8002536c475d27c9884796a5ec819a3f27a42a47223ae582a974ab5fdb6d"
+      "sha256": "600594cb70b3e164e986a99f39ef6d72024319c8d8e0cce62e07be3a3b380d72"
     },
     {
       "file": "source-manifest.json",
@@ -312,7 +312,7 @@
     {
       "file": "source-validation-summary.json",
       "bytes_match_git": true,
-      "sha256": "474defb30d4063898e8ad8b13649993b68ad79dac7f425da8af7f807b01eaf2e"
+      "sha256": "505d990314165cbb4a0d0e2d95868b70f9b1768e40dbbaec22f0d18551f8fea1"
     },
     {
       "file": "tools/build_book.py",
