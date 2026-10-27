@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="20fed3dd02c0eeda5d6b6f0e701dea5f35e694395df359864c0bcdf4ded80223"><title>What high performance scientific computing is for · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>What high performance scientific computing is for</h1>
+<p class="lead">A steady heat-conduction problem on a \(1000\times1000\) grid has \(n=10^{6}\) unknowns, the size that the lecture calls the smallest of practical interest. Solved by dense Gaussian elimination, it needs \(6.7\times10^{17}\) floating-point operations and 8 TB of storage. That is 7.7 days at the lecture's rate of \(10^{12}\) operations per second, and 0.55 s of arithmetic at the Linpack rate of the fastest machine on the June 2024 TOP500 list, \(1.206\times10^{18}\) operations per second. Solved by banded elimination, the same problem needs \(2\times10^{12}\) operations and 16 GB. Solved by conjugate gradients, it needs about \(9\times10^{10}\) operations and 40 MB. The operation counts of the dense and the conjugate-gradient solver differ by a factor of \(7\times10^{6}\). The rates of the lecture's machine and of that list-leading machine differ by a factor of \(1.2\times10^{6}\). The lecture concludes that direct methods make even the fastest machine useless for the simplest problems. This chapter tests that conclusion with exact operation counts, finds that it fails at \(n=10^{6}\) and holds for dense elimination from \(n=3.4\times10^{7}\), where the matrix no longer fits in memory; one day of arithmetic alone would allow \(n=5.4\times10^{7}\), so storage binds first. At \(n=10^{9}\) both limits fail: the matrix needs 8 EB, 850 times the memory, and the arithmetic needs 17.5 years, 6400 times the one-day budget. It also checks the lecture's historical and machine facts against the sources: of 17 statements, 4 are corrected, 1 is not supported and 1 is only partly supported (Table 1.3).</p>
+<p class="source-note">Grounded in one recording of the NPTEL course <em>High Performance Scientific Computing</em> (Prof. Shivasubramanian Gopalakrishnan, IIT Bombay): <a href="https://www.youtube.com/watch?v=yX0KfCorP6s">W0L0, Introduction to High Performance Scientific Computing</a>. <strong>Lecture material:</strong> theory, experiment and computation as the three supports of science; the conversion of partial differential equations into algebraic equations; four historical contributors (Turing, von Neumann, Krylov, Galerkin); the operation count of Gaussian elimination and the example of \(10^{6}\) unknowns; the unit flop/s; the claim that Krylov methods reduce the cost from \(O(n^3)\) to \(O(n\log n)\); the Difference Engine and ENIAC; the TOP500 growth chart; the Frontier machine. <strong>Research extensions:</strong> the TOP500 list pages for June 1993, June 1997, June 2000, June 2010, June 2022, June 2023, November 2023, June 2024, November 2024 and June 2026, and the TOP500 page of the Frontier system (system data, the problem size of the Linpack run, and the definition of the Linpack rate); the HPL benchmark source (flop count and residual test); the HPCG list of June 2024; the OLCF Frontier user guide (node architecture); Demmel's CS267 notes for lectures 15 and 16 (1996, file lecture24.html) (cost table for Poisson solvers); Shewchuk's conjugate-gradient notes (cost of conjugate gradients); Hestenes and Stiefel (1952); Turing (1936); the title pages of von Neumann's 1945 report; MacTutor biographies of Krylov and Galerkin and the English Wikipedia articles on both; the Science Museum Group page on the Difference Engine; Weik (1961) on ENIAC; Moore (1965); Dennard et al. (1974); the U.S. Energy Information Administration figure for household electricity. <strong>Original teaching constructions:</strong> the feasibility model of this chapter; the exact flop-count program; the budget table; the discretization and iteration-count checks; the decomposition of the Frontier core count; the doubling-time computations; the laptop measurements; the claims table; the six exercises.</p>
+
+<h2 id="model">The objects of the chapter and the running case</h2>
+<p>A computation in this chapter is a triple: a problem, an algorithm and a machine. The chapter asks when the triple is feasible, and how the answer changes when the algorithm or the machine changes.</p>
+<p><strong>Problem.</strong> The running case is the steady heat (Poisson) equation \(-\Delta u=f\) on the unit square with \(u=0\) on the boundary, discretized on a grid of \(N\) interior points per side. The grid spacing is \(h=1/(N+1)\). There are \(n=N^2\) unknown values of \(u\), one per interior grid point, and the discretization gives a linear system \(A\mathbf{u}=\mathbf{b}\) with an \(n\times n\) matrix \(A\). The symbol \(n\) is both the number of unknowns and the order of \(A\). The symbol \(f\) is the source term of the PDE; it is not the serial fraction of the later chapters. This is the book's running problem; chapter 9 derives its discretization error and the Jacobi iteration at full depth.</p>
+<p><strong>Algorithm.</strong> A <em>flop</em> is one floating-point operation: one addition, subtraction, multiplication or division of two 64-bit floating-point numbers. This chapter counts a multiplication and an addition as two flop even where hardware fuses them into one instruction. The work \(W\) of an algorithm on a problem is the number of flop it performs. The storage \(M\) is the number of bytes it must hold, at 8 bytes per 64-bit number. Four algorithms for \(A\mathbf{u}=\mathbf{b}\) are compared: <em>dense LU</em>, Gaussian elimination that treats \(A\) as a full matrix; <em>band LU</em>, Gaussian elimination that stores and updates only the entries within \(N\) positions of the diagonal, which is where the nonzeros and the fill-in lie when the grid points are numbered row by row (<em>fill-in</em> is a zero entry that becomes nonzero during elimination); <em>Jacobi</em>, the simplest iteration; and <em>CG</em>, the conjugate-gradient method. Each is defined, and its \(W\) and \(M\) derived, in the sections where the lecture introduces it or the lecture's claim about it is tested.</p>
+<p><strong>Machine.</strong> A machine has a rate \(R\) in flop per second, written flop/s, and a memory capacity \(M_{\text{mach}}\) in bytes. The TOP500 is a list of the 500 machines with the highest measured rate, published every six months. Two rates appear in it. \(R_{\text{peak}}\) is the theoretical maximum, computed from the number of arithmetic units, the clock and the flop per unit per cycle; chapter 6 derives it. \(R_{\max}\) is the highest rate measured while the machine runs the Linpack benchmark, defined in the section on flop/s. The later chapters of this book call a node's peak rate \(P_{\text{peak}}\); it is the same quantity as \(R_{\text{peak}}\) for one node.</p>
+<p><strong>Cost and feasibility.</strong> The time of the computation is modeled by
+\[ T=\frac{W}{R}. \tag{1.1} \]
+Equation (1.1) assumes three things. First, arithmetic is the only cost: memory traffic, communication and start-up cost nothing. Second, the machine sustains the rate \(R\) throughout. Third, no processing element is idle. Chapters 6 to 10 and 16 replace these assumptions with measured and modeled costs, and the section on flop/s shows one case in which the second assumption is off by a factor of about 86. A job is <em>feasible within a time budget</em> \(T_b\) on a machine if \(W/R\le T_b\) and \(M\le M_{\text{mach}}\). A day is \(T_b=86\,400\) s. Electrical energy is \(E=Pt\) for power \(P\) and duration \(t\).</p>
+<p><strong>The machine used for the measurements.</strong> All measurements in the chapter come from one laptop with an Intel Core i5-12450H processor: 4 performance cores with 2 hardware threads each and 4 efficient cores with 1 thread each, so 8 cores and 12 logical processors. The Windows 11 host runs a WSL 2 Ubuntu 24.04 guest, which reports 6 cores with 2 threads each; that view is synthetic. The guest sees 15 GB of memory. Programs are built with gcc 13.3 and run with NumPy 1.26.4. Other processes shared the machine during the runs, so the timings vary from run to run; the text gives ranges over seven runs, and a listing under a timing is checked only by its return code. The printed output of such a listing is one sample run.</p>
+<pre><code class="language-bash">$ gcc --version | head -1
+gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+$ nproc
+12
+</code></pre>
+
+
+<h2 id="third-leg">Theory, experiment and computation: from a partial differential equation to a linear system <a class="timestamp" href="https://www.youtube.com/watch?v=yX0KfCorP6s&amp;t=17s">W0L0 0:17</a></h2>
+<p>The lecture describes two older ways in which science advances and one newer way. In the first, observations suggest a law, and the law is then stated as a theory. In the second, a hypothesis is stated first and an experiment tests it. The lecture's examples of experiments are the Large Hadron Collider, built to test the hypothesized Higgs boson, and a water-tunnel test of the drag on a torpedo. The newer way is computation: a virtual experiment in which the laws are stated, run on a computer, and observed. The anecdotes that illustrate the first way (Archimedes and the crown, Newton and the apple) are illustrations in the lecture, and this chapter uses none of them as evidence.</p>
+<p>The lecture's central claim about computation is that the laws of physics are usually partial differential equations (PDEs), that these usually have no closed-form solution, and that a computer cannot work on a PDE directly. The PDE must first be converted into algebraic equations. The following construction shows the conversion for the running case and fixes what the machine receives.</p>
+<p>Let \(u(x,y)\) be smooth, and let \(h\gt0\). The Taylor expansions of \(u(x\pm h,y)\) about \((x,y)\) add to
+\[ u(x+h,y)+u(x-h,y)-2u(x,y)=h^2u_{xx}(x,y)+\tfrac{1}{12}h^4u_{xxxx}(x,y)+\cdots, \]
+because the odd-order terms cancel. The same holds in the \(y\) direction. Adding the two results and rearranging gives the five-point approximation of the Laplacian
+\[ -\Delta u(x,y)=\frac{4u(x,y)-u(x-h,y)-u(x+h,y)-u(x,y-h)-u(x,y+h)}{h^2}+O(h^2). \tag{1.2} \]
+The term \(O(h^2)\), the <em>truncation error</em> of the stencil, has the leading part \(-\tfrac{1}{12}h^2(u_{xxxx}+u_{yyyy})\). Now let the unknown \(u_{i,j}\) stand for the value of \(u\) at the grid point \((ih,jh)\), for \(1\le i,j\le N\). Drop the \(O(h^2)\) term, set the left side equal to \(f(ih,jh)\), and treat any neighbor outside the grid as a boundary value, which is zero. The result is one linear equation per grid point,
+\[ 4u_{i,j}-u_{i-1,j}-u_{i+1,j}-u_{i,j-1}-u_{i,j+1}=h^2f(ih,jh), \]
+so \(N^2\) equations in \(N^2\) unknowns: the system \(A\mathbf{u}=\mathbf{b}\) of the model section. Each row of \(A\) has at most five nonzero entries. The count of nonzeros follows from the grid: there are \(N^2\) diagonal entries, and the \(N(N-1)\) horizontal and \(N(N-1)\) vertical pairs of neighboring points each contribute two off-diagonal entries, so \(A\) has \(N^2+4N(N-1)=5N^2-4N\) nonzeros among \(N^4\) entries. A matrix with so few nonzeros is <em>sparse</em>. Sparsity is the property that the later sections exploit.</p>
+<p>The truncation error of the stencil is not yet the error of the computed solution. That the computed \(u_{i,j}\) differ from the exact solution by \(O(h^2)\) needs a stability argument, which chapter 9 gives. The next listing tests the claim on one case and counts the nonzeros. Input: the grid sizes \(N=7,15,31\), so \(h=1/8,1/16,1/32\). Method: the program builds the matrix \(A\) with Kronecker products, chooses the exact solution \(u(x,y)=\sin\pi x\,\sin\pi y\), computes the matching source \(f=2\pi^2\sin\pi x\,\sin\pi y\), solves the system with the dense LAPACK solver of NumPy, and compares the result with the exact values at the grid points. Output: the number of nonzeros against \(5N^2-4N\), the largest error, and the ratio of the error to the error on the previous, coarser grid. Assumption: the solution is smooth. The run checks the nonzero count exactly and shows the rate of decrease of the error.</p>
+<pre><code class="language-python" data-file="poisson_check.py" data-run="python3 poisson_check.py">"""Check the 5-point discretization of -Laplace(u) = f on the unit square: nonzero count and error against a known solution."""
+import math
+import numpy as np
+
+def matrix(N):
+    """Dense 5-point matrix: 4 on the diagonal, -1 to each grid neighbour (row-major ordering)."""
+    T = 2.0 * np.eye(N) - np.eye(N, k=1) - np.eye(N, k=-1)
+    return np.kron(np.eye(N), T) + np.kron(T, np.eye(N))
+
+def apply(N, u):
+    """Matrix-free A u for u of shape (N, N)."""
+    p = np.zeros((N + 2, N + 2)); p[1:-1, 1:-1] = u
+    return 4.0 * u - p[:-2, 1:-1] - p[2:, 1:-1] - p[1:-1, :-2] - p[1:-1, 2:]
+
+def rhs(N):
+    h = 1.0 / (N + 1)
+    x = np.arange(1, N + 1) * h
+    X, Y = np.meshgrid(x, x, indexing="ij")
+    exact = np.sin(math.pi * X) * np.sin(math.pi * Y)
+    return h * h * 2.0 * math.pi ** 2 * exact, exact
+
+print("N   nnz  5N^2-4N  max error   error ratio to previous N")
+prev = None
+for N in (7, 15, 31):
+    A = matrix(N); b, exact = rhs(N)
+    u = np.linalg.solve(A, b.ravel()).reshape(N, N)
+    err = np.max(np.abs(u - exact))
+    print(f"{N:&lt;3} {np.count_nonzero(A):&lt;5} {5*N*N - 4*N:&lt;8} {err:.3e}  {'' if prev is None else f'{prev / err:.2f}'}")
+    prev = err
+</code></pre>
+<pre><code class="output">N   nnz  5N^2-4N  max error   error ratio to previous N
+7   217   217      1.295e-02  
+15  1065  1065     3.219e-03  4.02
+31  4681  4681     8.036e-04  4.01
+</code></pre>
+<p>The nonzero counts equal \(5N^2-4N\) for all three grids. The largest error is \(1.295\times10^{-2}\), \(3.219\times10^{-3}\) and \(8.036\times10^{-4}\), and each halving of \(h\) divides it by 4.02 and then 4.01. An error proportional to \(h^2\) divides by 4 when \(h\) halves, so the data agree with second-order accuracy. The test has limits. It uses one smooth solution on one square domain, so it does not show the order for a source with a singularity or for a domain with a re-entrant corner, where solutions are known to be less smooth. It also uses a source built from a known solution, which is the opposite of the situation that the lecture describes: for the unit square with a smooth source the solution has a series form, so the lecture's statement that PDEs usually lack closed forms applies to equations with nonlinear terms, variable coefficients or complicated geometry, which this model problem does not have. The model problem serves as a case whose cost can be counted exactly.</p>
+<p>The size of the system follows from the resolution that the application needs. A grid with \(N\) points per side resolves features of size about \(1/N\) of the domain. The case \(n=10^{6}\) needs \(N=1000\) in two dimensions, or \(N=100\) in three. The lecture's board lists the range of unknowns as \(10^{6}\) to \(10^{12}\); in three dimensions \(n=10^{12}\) means \(N=10^{4}\), and in two dimensions it means \(N=10^{6}\). The count of unknowns, and with it the cost of the solution, grows as a power of the resolution. That growth is the reason that the lecture turns next to the cost of solving \(A\mathbf{u}=\mathbf{b}\).</p>
+
+
+<h2 id="people">Four contributors and what the sources record <a class="timestamp" href="https://www.youtube.com/watch?v=yX0KfCorP6s&amp;t=395s">W0L0 6:35</a></h2>
+<p>The lecture names four people and says that the selection is not exhaustive. Each stands for one stage of the path from a physical law to a number: a model of computation (Turing), an organization of a machine (von Neumann), a family of solvers (Krylov) and a family of discretizations (Galerkin). For each person this section gives the lecture's statement, what the sources opened for this chapter record, and the consequence. Where the two disagree, the chapter follows the source and says so.</p>
+<p><strong>Turing.</strong> The lecture says that Turing proposed an abstract computer in which one bit of information enters a black box, is modified by operations, and leaves as output; and that this model underlies general-purpose computing. Turing's paper, <em>On computable numbers, with an application to the Entscheidungsproblem</em>, was received on 28 May 1936 and read on 12 November 1936 (<a href="https://www.cs.virginia.edu/~robins/Turing_Paper_1936.pdf">Proc. London Math. Soc. s2-42, pp. 230–265, copy read from p. 230</a>). Its machine has a tape divided into sections, called squares, each able to bear a symbol, and the machine acts on the scanned symbol. The introduction states that the paper gives arguments for the claim that the computable numbers include all numbers that could naturally be regarded as computable. The lecture's one-bit description fits a single step of that machine more than the whole model. The consequence for this chapter is a limit, not a quantity. The model defines what can be computed. It assigns no cost to a computation. The time \(T=W/R\) of equation (1.1) is a different object: it describes a physical machine and depends on how fast that machine executes operations.</p>
+<p><strong>von Neumann.</strong> The lecture says that von Neumann designed some of the first general-purpose computers on the architecture that bears his name, that this architecture lets the Turing model run on hardware, and that this work was done about 80 years ago. The title page of the <em>First Draft of a Report on the EDVAC</em> carries the date 30 June 1945, names a contract between the United States Army Ordnance Department and the University of Pennsylvania, and appears in a reprint with an introduction by Godfrey (<a href="https://web.mit.edu/STS.035/www/PDFs/edvac.pdf">IEEE Annals of the History of Computing 15(4), 1993, from p. 27</a>). Only the first two pages of this scanned copy were read, because the file has no text layer. The date and the contract are therefore the only facts that the chapter takes from it. The report describes a proposed machine, the EDVAC, so the chapter does not decide whether it was among the first general-purpose computers; that needs sources that were not opened. The separation of a processor from a memory, which the lecture attributes to this architecture, returns in chapters 7 and 10, because the cost of moving data between the two is the first assumption of equation (1.1) that fails.</p>
+<p><strong>Krylov</strong> (<a class="timestamp" href="https://www.youtube.com/watch?v=yX0KfCorP6s&amp;t=595s">W0L0 9:55</a>). The lecture calls Alexei Krylov a decorated military officer at the end of the 19th century, credits him with iterative solvers for linear systems that reduce the cost from \(O(n^3)\) to \(O(n\log n)\), and says that these methods were developed at the turn of the century. The MacTutor biography of <a href="https://mathshistory.st-andrews.ac.uk/Biographies/Krylov_Aleksei/">Aleksei Krylov (1863–1945)</a> records that his father was a retired artillery officer; that Krylov taught at the naval academy for about fifty years and trained a school of shipbuilders; that he received a gold medal of the Royal Institution of Naval Architects for work on the oscillation of ships; and that on 3 January 1900 he was a Captain of the Admiralty when he was made acting superintendent of the Towing Tank, and that in January 1908 he was a General and was appointed Chief Naval Ship Construction Inspector. The description as a decorated officer agrees with MacTutor; his service was naval. The English Wikipedia article on <a href="https://en.wikipedia.org/wiki/Aleksey_Krylov">Aleksey Krylov</a> records the Imperial Russian Navy as his branch, and a paper of 1931 on the characteristic polynomial of a matrix, in which the work is counted as a number of multiplications (Izvestiya Akademii Nauk SSSR 7(4), pp. 491–539, cited there; the original was not opened). So Krylov was a naval engineer and mathematician, the date of his best-known mathematical paper is 1931, and the paper treats an eigenvalue problem, not the solution of \(A\mathbf{u}=\mathbf{b}\).</p>
+<p>The link to linear systems is the subspace that bears his name. For a matrix \(A\) and a vector \(\mathbf{r}\), the <em>Krylov subspace</em> of order \(m\) is \(\mathcal{K}_m(A,\mathbf{r})=\operatorname{span}\{\mathbf{r},A\mathbf{r},\dots,A^{m-1}\mathbf{r}\}\). A <em>Krylov method</em> looks for an approximate solution of \(A\mathbf{u}=\mathbf{b}\) inside such a subspace. The earliest source opened here that gives a Krylov-subspace solver is Hestenes and Stiefel (<a href="https://nvlpubs.nist.gov/nistpubs/jres/049/jresv49n6p409_A1b.pdf">J. Res. Nat. Bur. Standards 49(6), December 1952, pp. 409–436</a>). Their abstract describes an iterative algorithm for \(n\) equations in \(n\) unknowns whose solution is obtained in \(n\) steps, and shows that it is a special case of a general method that includes Gaussian elimination. Their introduction states that C. Lanczos had recently developed a closely related method. The date of the Krylov solvers in the sources opened is therefore 1952, not the turn of the century. A further fact bears on the lecture's use of the word iterative. Shewchuk (<a href="https://www.cs.cmu.edu/~quake-papers/painless-conjugate-gradient.pdf">notes on the conjugate-gradient method, 1994, p. 33</a>) states that the mathematical community discarded conjugate gradients during the 1960s, because rounding errors destroy the finite termination in \(n\) steps, and that interest returned when evidence appeared in the 1970s that the method works well as an iterative procedure that stops long before \(n\) steps. The cost claim \(O(n\log n)\) is tested in its own section below.</p>
+<p><strong>Galerkin</strong> (<a class="timestamp" href="https://www.youtube.com/watch?v=yX0KfCorP6s&amp;t=1021s">W0L0 17:01</a>). The lecture calls Boris Galerkin an admiral of the Soviet Navy and credits him with a family of techniques that convert PDEs into algebraic equations. The MacTutor biography of <a href="https://mathshistory.st-andrews.ac.uk/Biographies/Galerkin/">Boris Galerkin (1871–1945)</a> describes a Soviet mathematician and engineer, born in Polotsk, who worked as an engineer at a locomotive plant and a boiler plant and taught at the Petersburg Technological Institute, and whose method of approximate integration of differential equations the biography dates to 1915. The page records no rank. English Wikipedia, a secondary source, records that in 1939 Galerkin became head of the structural mechanics department of the Navy's Higher Engineering-Technical School (VITU) with the rank of lieutenant general, without earlier military service. No source opened records the rank of admiral, so the chapter does not repeat it. The method itself can be stated for the model problem. Choose \(n\) basis functions \(\phi_1,\dots,\phi_n\) that vanish on the boundary and seek \(u_h=\sum_j u_j\phi_j\). Require that the residual \(-\Delta u_h-f\) is orthogonal to every basis function: \(\int(-\Delta u_h-f)\,\phi_i=0\) for \(i=1,\dots,n\). Integration by parts turns this into \(\sum_j\bigl(\int\nabla\phi_i\cdot\nabla\phi_j\bigr)u_j=\int f\phi_i\), which is again a linear system \(K\mathbf{u}=\mathbf{b}\), sparse when each \(\phi_i\) is nonzero on a small region. This is the standard definition; no textbook was opened for it. The finite-difference system of the running case was not derived as a Galerkin system, but its matrix equals the Galerkin matrix of piecewise-linear basis functions on the grid triangulated by one diagonal per square, with a different right side (a standard result; no finite-element text was opened for it). The cost analysis of the next sections applies to both.</p>
+
+
+<h2 id="direct-cost">The cost of a direct solve <a class="timestamp" href="https://www.youtube.com/watch?v=yX0KfCorP6s&amp;t=631s">W0L0 10:31</a></h2>
+<p>The lecture writes the solution of \(A\mathbf{u}=\mathbf{b}\) as \(\mathbf{u}=A^{-1}\mathbf{b}\), transforms a \(3\times3\) matrix to upper triangular form on the board, and states that the number of operations of such a direct method is of order \(n^3\). For \(n=3\) it gives about \(3^3=27\) operations. For a million unknowns it gives \(10^{18}\) operations, which at \(10^{12}\) flop/s is \(10^{6}\) seconds to solution, a time that the lecture calls inordinately large. The board shows the entries \(10^{12}\) to \(10^{15}\) for the rates of large machines and \(10^{6}\) to \(10^{12}\) for the numbers of unknowns. A <em>direct method</em> is an algorithm that produces the solution, apart from rounding error, after a fixed finite number of operations.</p>
+<p>The order \(n^3\) hides a constant, and for the lecture's argument the constant matters. The derivation below gives the exact count for Gaussian elimination. The factorization \(A=LU\), with \(L\) unit lower triangular and \(U\) upper triangular, proceeds in \(n-1\) steps. At step \(k\), let \(m=n-k\) be the number of rows below row \(k\). The method forms \(m\) multipliers \(\ell_{ik}=a_{ik}/a_{kk}\), which costs \(m\) divisions, and then updates the \(m\times m\) block of remaining entries by \(a_{ij}\leftarrow a_{ij}-\ell_{ik}a_{kj}\), which costs one multiplication and one subtraction per entry, \(2m^2\) flop. The sum over the steps is
+\[ W_{LU}(n)=\sum_{m=1}^{n-1}\bigl(m+2m^2\bigr)=\frac{n(n-1)}{2}+\frac{(n-1)n(2n-1)}{3}=\frac{n(n-1)(4n+1)}{6}=\tfrac{2}{3}n^3+O(n^2). \tag{1.3} \]
+Given \(L\) and \(U\), the solution of \(LU\mathbf{u}=\mathbf{b}\) takes a forward substitution with \(n(n-1)\) flop and a backward substitution with \(n(n-1)+n\) flop, in total \(2n^2-n\). Partial pivoting, the choice of the largest available entry as the pivot, adds comparisons and row exchanges, which are not flop, and leaves the leading term unchanged. The Linpack benchmark of the TOP500 relies on this fact: the <a href="https://www.top500.org/project/linpack/">TOP500 description of the benchmark</a> requires an algorithm that conforms to LU factorization with partial pivoting and states that the operation count must be \(\tfrac23n^3+O(n^2)\) double-precision operations. The reference implementation HPL computes its reported rate from \(\tfrac23n^3+\tfrac32n^2\) (<a href="https://www.netlib.org/benchmark/hpl/hpl-2.3.tar.gz">HPL 2.3, <code>testing/ptest/HPL_pdtest.c</code>, lines 231–233</a>). The lecture's route through the explicit inverse \(A^{-1}\) is not the algorithm that the benchmark uses; the chapter does not state the cost of forming an inverse, because no source for it was opened.</p>
+<p>The next listing counts. Input: the sizes \(n=3,10,100,300\). Method: every addition, subtraction, multiplication and division of the program passes through one of four functions that increment a counter, so the count is exact and independent of the compiler. The program factorizes a diagonally dominant matrix, which needs no pivoting, solves one system with the factors, and multiplies two matrices with the textbook triple loop. Output: the counted flop of each task, the closed form (1.3), and the ratio of the factorization count to \(\tfrac23n^3\). The run checks (1.3) exactly.</p>
+<pre><code class="language-c" data-file="flopcount.c" data-build="gcc -O2 flopcount.c -o flopcount" data-run="./flopcount">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+/* Every floating-point +, -, *, / goes through one of these four counters. */
+static unsigned long long flops = 0;
+static double add(double a, double b) { flops++; return a + b; }
+static double sub(double a, double b) { flops++; return a - b; }
+static double mul(double a, double b) { flops++; return a * b; }
+static double dvd(double a, double b) { flops++; return a / b; }
+
+/* LU factorization without pivoting, in place: A = L U, unit lower L. */
+static void lu(int n, double *a) {
+    for (int k = 0; k &lt; n - 1; k++)
+        for (int i = k + 1; i &lt; n; i++) {
+            a[i*n + k] = dvd(a[i*n + k], a[k*n + k]);
+            for (int j = k + 1; j &lt; n; j++)
+                a[i*n + j] = sub(a[i*n + j], mul(a[i*n + k], a[k*n + j]));
+        }
+}
+
+/* Forward and back substitution for L U x = b, in place in b. */
+static void lu_solve(int n, const double *a, double *b) {
+    for (int i = 1; i &lt; n; i++)
+        for (int j = 0; j &lt; i; j++) b[i] = sub(b[i], mul(a[i*n + j], b[j]));
+    for (int i = n - 1; i &gt;= 0; i--) {
+        for (int j = i + 1; j &lt; n; j++) b[i] = sub(b[i], mul(a[i*n + j], b[j]));
+        b[i] = dvd(b[i], a[i*n + i]);
+    }
+}
+
+/* C = A B, all n x n. */
+static void matmul(int n, const double *a, const double *b, double *c) {
+    for (int i = 0; i &lt; n; i++)
+        for (int j = 0; j &lt; n; j++) {
+            double s = 0.0;
+            for (int k = 0; k &lt; n; k++) s = add(s, mul(a[i*n + k], b[k*n + j]));
+            c[i*n + j] = s;
+        }
+}
+
+int main(void) {
+    int sizes[] = {3, 10, 100, 300};
+    printf("%5s %12s %12s %12s %12s %10s\n", "n", "LU counted", "formula", "solve cnt", "matmul cnt", "LU/(2n^3/3)");
+    for (int s = 0; s &lt; 4; s++) {
+        int n = sizes[s];
+        double *a = malloc(sizeof(double) * n * n), *b = malloc(sizeof(double) * n * n);
+        double *c = malloc(sizeof(double) * n * n), *x = malloc(sizeof(double) * n);
+        for (int i = 0; i &lt; n; i++) {
+            x[i] = 1.0;
+            for (int j = 0; j &lt; n; j++) a[i*n + j] = b[i*n + j] = (i == j) ? n + 1.0 : 1.0 / (1 + i + j);
+        }
+        flops = 0; lu(n, a);               unsigned long long f_lu = flops;
+        flops = 0; lu_solve(n, a, x);      unsigned long long f_sv = flops;
+        flops = 0; matmul(n, b, b, c);     unsigned long long f_mm = flops;
+        unsigned long long formula = (unsigned long long)n * (n - 1) * (4ULL * n + 1) / 6;
+        printf("%5d %12llu %12llu %12llu %12llu %10.4f\n", n, f_lu, formula, f_sv, f_mm,
+               (double)f_lu / (2.0 * n * n * n / 3.0));
+        free(a); free(b); free(c); free(x);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">    n   LU counted      formula    solve cnt   matmul cnt LU/(2n^3/3)
+    3           13           13           15           54     0.7222
+   10          615          615          190         2000     0.9225
+  100       661650       661650        19900      2000000     0.9925
+  300     17954950     17954950       179700     54000000     0.9975
+</code></pre>
+<p>The counted factorization work equals the closed form for all four sizes: 13, 615, 661&nbsp;650 and 17&nbsp;954&nbsp;950 flop. The ratio of the count to \(\tfrac23n^3\) is 0.722 at \(n=3\), 0.9925 at \(n=100\) and 0.9975 at \(n=300\), so the leading term describes the count to within 1 % from \(n=100\) on. The solve counts equal \(2n^2-n\) (15 at \(n=3\), 190 at \(n=10\)), and the matrix product counts \(2n^3\). For the lecture's example, the factorization of a \(3\times3\) matrix takes 13 flop and the two substitutions take 15, together 28, close to the lecture's 27; the agreement is a coincidence of small numbers, because the count of the factorization alone is a factor of 2.1 below \(3^3\). The lecture's order-of-magnitude statement is correct, and the exact leading constant is \(2/3\).</p>
+<p>Apply the count to the lecture's example. For \(n=10^{6}\), equation (1.3) gives \(W_{LU}=\tfrac23\times10^{18}=6.7\times10^{17}\) flop. At \(R=10^{12}\) flop/s, equation (1.1) gives \(T=6.7\times10^{5}\) s, which is 7.7 days; the lecture's \(10^{18}\) flop give \(10^{6}\) s, or 11.6 days. The two figures agree to the precision of an order-of-magnitude argument. The storage of a dense matrix of order \(n\) is
+\[ M_{\text{dense}}=8n^2\ \text{bytes}, \tag{1.4} \]
+which is \(8\times10^{12}\) B, or 8 TB, for \(n=10^{6}\), and \(8\times10^{18}\) B, or 8 EB, for \(n=10^{9}\). The lecture does not mention storage.</p>
+<p>The matrix of the running case is not dense, and elimination can use that. With the grid points numbered row by row, the entry \(a_{ij}\) of \(A\) is nonzero only if the points \(i\) and \(j\) are neighbors, so the nonzeros lie within \(N\) positions of the diagonal. Elimination without pivoting creates no nonzero outside that band. (Demmel's CS267 notes for lectures 15 and 16 states this for the model problem: <a href="https://people.eecs.berkeley.edu/~demmel/cs267/lecture24/lecture24.html">entries more than \(N\) positions from the diagonal never fill in</a>.) At each of the \(n\) steps, only the \(N\times N\) block below and to the right of the pivot is updated, at \(2N^2\) flop, so
+\[ W_{\text{band}}\approx 2nN^2=2N^4,\qquad M_{\text{band}}\approx 8n(2N+1)\ \text{bytes}. \tag{1.5} \]
+For \(N=1000\), this is \(2\times10^{12}\) flop and 16 GB, against \(6.7\times10^{17}\) flop and 8 TB for dense elimination. The factor between the two is \(3.3\times10^{5}\) in operations and \(5\times10^{2}\) in storage. The factor of \(3.3\times10^{5}\) in operations that the structure of the matrix gives is 0.28 of the factor of \(1.2\times10^{6}\) between a machine of \(10^{12}\) flop/s and the June 2024 list leader.</p>
+
+
+<h2 id="flops">Flop/s, Rpeak, Rmax, and what the TOP500 measures <a class="timestamp" href="https://www.youtube.com/watch?v=yX0KfCorP6s&amp;t=846s">W0L0 14:06</a></h2>
+<p>The lecture defines the unit of machine speed as FLOPS, floating-point operations per second, where one operation is one addition, subtraction, multiplication or division, and says that large machines perform \(10^{12}\) to \(10^{15}\) of them per second. This book writes <em>flop</em> for a count of operations and <em>flop/s</em> for a rate, because the capital-letter form of the lecture serves both meanings. The prefixes are \(\mathrm{G}=10^{9}\), \(\mathrm{T}=10^{12}\), \(\mathrm{P}=10^{15}\) and \(\mathrm{E}=10^{18}\), so 1 Gflop/s is \(10^{9}\) flop/s and 1 Eflop/s is \(10^{18}\) flop/s. The lecture does not say how a rate is measured. The measurement defines the number, and the TOP500 list, which the lecture shows later, uses one specific measurement.</p>
+<p>The <a href="https://www.top500.org/project/linpack/">TOP500 description of the Linpack benchmark</a> states the procedure. The benchmark solves a dense system of linear equations. The submitter may scale the size \(n\) of the system and optimize the software for the machine. The algorithm must be LU factorization with partial pivoting, with an operation count of \(\tfrac23n^3+O(n^2)\); this excludes fast matrix multiplication, lower-precision solves followed by iterative refinement, and software emulation of floating point. The rate at the best problem size \(N_{\max}\) is \(R_{\max}\). The problem size at which half of \(R_{\max}\) is reached is \(N_{1/2}\). The theoretical peak \(R_{\text{peak}}\) is listed beside it. The description adds that the number does not reflect the overall performance of a system, that it reflects the performance of a dedicated system for solving a dense system of linear equations, and that, because the problem is very regular, the achieved performance is quite high. Two consequences follow for this chapter. First, \(R_{\max}\) is measured on the algorithm that the lecture calls intractable for large \(n\): the list ranks machines by dense Gaussian elimination, with the size chosen to suit the machine. Second, a time estimate \(W/R_{\max}\) for any other algorithm assumes that the machine runs that algorithm as fast as it runs dense elimination.</p>
+<p>Table 1.1 gives the entries of the TOP500 list for four dates: the first list of the series (June 1993), a list near the lecture's \(10^{15}\) flop/s (June 2010), the lists that match the lecture's Frontier slide (June 2023, November 2023 and June 2024 all give 8&nbsp;699&nbsp;904 cores; the chapter uses June 2024, the last list on which Frontier ranked first) and the most recent list at the time of writing (June 2026). All values are those printed on the TOP500 list pages of the dates shown. The last column is the Rmax of the machine at rank 500, the last machine of the list.</p>
+<div class="table-wrap"><table>
+<caption>Table 1.1. TOP500 entries at rank 1 and rank 500, with the Rmax/Rpeak ratio at rank 1. Source: the TOP500 list pages for the dates shown.</caption>
+<thead><tr><th scope="col">List</th><th scope="col">Rank 1 system</th><th scope="col">Cores</th><th scope="col">\(R_{\max}\) (flop/s)</th><th scope="col">\(R_{\text{peak}}\) (flop/s)</th><th scope="col">\(R_{\max}/R_{\text{peak}}\)</th><th scope="col">Power (kW)</th><th scope="col">Rank 500, \(R_{\max}\) (flop/s)</th></tr></thead>
+<tbody>
+<tr><td><a href="https://www.top500.org/lists/top500/1993/06/">June 1993</a></td><td>CM-5/1024, Los Alamos</td><td>1&nbsp;024</td><td>\(5.970\times10^{10}\)</td><td>\(1.310\times10^{11}\)</td><td>0.456</td><td>not listed</td><td>\(4.2\times10^{8}\)</td></tr>
+<tr><td><a href="https://www.top500.org/lists/top500/2010/06/">June 2010</a></td><td>Jaguar, Oak Ridge</td><td>224&nbsp;162</td><td>\(1.759\times10^{15}\)</td><td>\(2.331\times10^{15}\)</td><td>0.755</td><td>6&nbsp;950</td><td>\(2.467\times10^{13}\)</td></tr>
+<tr><td><a href="https://www.top500.org/lists/top500/2024/06/">June 2024</a></td><td>Frontier, Oak Ridge</td><td>8&nbsp;699&nbsp;904</td><td>\(1.206\times10^{18}\)</td><td>\(1.7148\times10^{18}\)</td><td>0.703</td><td>22&nbsp;786</td><td>\(2.13\times10^{15}\)</td></tr>
+<tr><td><a href="https://www.top500.org/lists/top500/2026/06/">June 2026</a></td><td>LineShine, Shenzhen</td><td>13&nbsp;789&nbsp;440</td><td>\(2.1984\times10^{18}\)</td><td>\(2.7358\times10^{18}\)</td><td>0.804</td><td>42&nbsp;220</td><td>\(2.66\times10^{15}\)</td></tr>
+</tbody></table></div>
+<p>The ratio \(R_{\max}/R_{\text{peak}}\) at rank 1 rises from 0.456 to 0.804 over the 33 years, so in the four entries of Table 1.1 a dense factorization sustains between 46 % and 80 % of the peak of the leading machine. The rank-500 column shows the spread of the list: the last machine of June 2024 has an Rmax of \(2.13\times10^{15}\) flop/s, which is \(1.8\times10^{-3}\) of the leader, and the last machine of June 1993 has \(4.2\times10^{8}\), which is \(7.0\times10^{-3}\) of the leader.</p>
+<p>The list contains a second benchmark that tests the other kind of algorithm. The TOP500 reports the High-Performance Conjugate Gradient (HPCG) benchmark beside the Linpack rate and describes it as a complement to the Linpack measurement (<a href="https://www.top500.org/lists/hpcg/2024/06/">HPCG list, June 2024</a>). On that list Frontier reaches \(1.4054\times10^{16}\) flop/s on HPCG against \(R_{\max}=1.206\times10^{18}\) flop/s on Linpack, which is 1.17 % of \(R_{\max}\); Fugaku reaches \(1.60045\times10^{16}\) flop/s against \(4.4201\times10^{17}\), which is 3.6 %. A conjugate-gradient solver on the same machine thus runs about 86 times more slowly than dense elimination at the Linpack rate, for Frontier. The estimates \(W/R_{\max}\) of the budget table below therefore describe the iterative methods too optimistically by about two orders of magnitude. The ratio is a property of the algorithm's memory traffic, which chapter 10 models with the roofline.</p>
+<h3 id="laptop">Measured throughput of three programs on this laptop</h3>
+<p>The rate of a machine for one program depends on how the program is written. The next listing shows this on the laptop of the model section. Input: two \(1024\times1024\) matrices. Method: the program multiplies them with the textbook triple loop in one thread, and with a version whose loops work on tiles of 64 by 256 by 512 entries, which reuses data held in cache (chapter 7), run with 1, 4, 8 and 12 threads. It reports the rate \(2n^3/t\) with the best of 2 or 3 repetitions, and it returns an error code if a tiled result differs from the naive result by more than \(10^{-10}\) in any entry. The listing is a timing, so the run is checked by its return code, and the printed output is one sample run. The code is not a tuned library, and the chapter does not claim that it approaches the peak of the processor.</p>
+<pre><code class="language-c" data-file="matmul_bench.c" data-build="gcc -O3 -march=native -fopenmp matmul_bench.c -o matmul_bench -lm" data-run="./matmul_bench" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+#include &lt;omp.h&gt;
+
+#define BI 64
+#define BK 256
+#define BJ 512
+#define MIN(a, b) ((a) &lt; (b) ? (a) : (b))
+
+/* C = A B for n x n row-major matrices; i-j-k loops, no blocking. */
+static void naive(int n, const double *a, const double *b, double *c) {
+    for (int i = 0; i &lt; n; i++)
+        for (int j = 0; j &lt; n; j++) {
+            double s = 0.0;
+            for (int k = 0; k &lt; n; k++) s += a[(size_t)i*n + k] * b[(size_t)k*n + j];
+            c[(size_t)i*n + j] = s;
+        }
+}
+
+/* Same product with tiles of BI x BK x BJ and the row blocks shared among threads. */
+static void blocked(int n, const double *a, const double *b, double *c) {
+    for (size_t t = 0; t &lt; (size_t)n * n; t++) c[t] = 0.0;
+    #pragma omp parallel for schedule(static)
+    for (int ii = 0; ii &lt; n; ii += BI)
+        for (int kk = 0; kk &lt; n; kk += BK)
+            for (int jj = 0; jj &lt; n; jj += BJ)
+                for (int i = ii; i &lt; MIN(ii + BI, n); i++)
+                    for (int k = kk; k &lt; MIN(kk + BK, n); k++) {
+                        double aik = a[(size_t)i*n + k];
+                        for (int j = jj; j &lt; MIN(jj + BJ, n); j++)
+                            c[(size_t)i*n + j] += aik * b[(size_t)k*n + j];
+                    }
+}
+
+static double best_time(void (*f)(int, const double *, const double *, double *),
+                        int n, const double *a, const double *b, double *c, int reps) {
+    double best = 1e30;
+    for (int r = 0; r &lt; reps; r++) {
+        double t0 = omp_get_wtime(); f(n, a, b, c); double t = omp_get_wtime() - t0;
+        if (t &lt; best) best = t;
+    }
+    return best;
+}
+
+int main(void) {
+    int n = 1024;
+    double *a = malloc(sizeof(double) * n * n), *b = malloc(sizeof(double) * n * n);
+    double *c0 = malloc(sizeof(double) * n * n), *c1 = malloc(sizeof(double) * n * n);
+    for (int i = 0; i &lt; n; i++)
+        for (int j = 0; j &lt; n; j++) { a[(size_t)i*n + j] = 1.0 / (1 + i + j); b[(size_t)i*n + j] = (i == j) ? 2.0 : 0.5 / (1 + i + 2*j); }
+    double flop = 2.0 * n * n * n;
+    double t = best_time(naive, n, a, b, c0, 2);
+    printf("n = %d, flop = %.3e\n", n, flop);
+    printf("naive i-j-k, 1 thread      : %7.3f s  %7.2f Gflop/s\n", t, flop / t / 1e9);
+    int threads[] = {1, 4, 8, 12};
+    int bad = 0;
+    for (int q = 0; q &lt; 4; q++) {
+        omp_set_num_threads(threads[q]);
+        t = best_time(blocked, n, a, b, c1, 3);
+        double maxdiff = 0.0;
+        for (size_t s = 0; s &lt; (size_t)n * n; s++) maxdiff = fmax(maxdiff, fabs(c1[s] - c0[s]));
+        if (maxdiff &gt; 1e-10) bad = 1;
+        printf("blocked, %2d thread(s)      : %7.3f s  %7.2f Gflop/s  max|diff| %.1e\n", threads[q], t, flop / t / 1e9, maxdiff);
+    }
+    return bad;
+}
+</code></pre>
+<pre><code class="output">n = 1024, flop = 2.147e+09
+naive i-j-k, 1 thread      :   3.112 s     0.69 Gflop/s
+blocked,  1 thread(s)      :   0.250 s     8.59 Gflop/s  max|diff| 1.1e-16
+blocked,  4 thread(s)      :   0.105 s    20.55 Gflop/s  max|diff| 1.1e-16
+blocked,  8 thread(s)      :   0.087 s    24.69 Gflop/s  max|diff| 1.1e-16
+blocked, 12 thread(s)      :   0.084 s    25.51 Gflop/s  max|diff| 1.1e-16
+</code></pre>
+<p>The listing was run seven times; the printed output is the fourth run, and the ranges below cover all seven. The naive loop reached 0.38 to 1.21 Gflop/s. The tiled loop reached 4.7 to 11.0 Gflop/s in one thread, 11.5 to 36.8 in 4 threads, 20.6 to 41.4 in 8 threads and 20.7 to 40.4 in 12 threads. The lowest values of every row come from one run during which other processes were using the machine heavily; the other six runs lie between 0.69 and 1.21 Gflop/s (naive) and between 8.6 and 11.0 (tiled, one thread). The results agree to \(1.1\times10^{-16}\) in every run. The same product, with the same number of flop, on the same machine, therefore ran at rates that differ, within one run, by a factor of 31 to 54 between the slowest and the fastest variant (37 in the printed run). The tiled loop in one thread was 9 to 12 times faster than the naive loop in the same run, a gain that comes from the order of memory accesses, and the fastest multi-thread variant was 3.0 to 4.4 times faster than the tiled loop in one thread. In four of the seven runs the 12-thread rate is below the 8-thread rate, and the ranges for 4, 8 and 12 threads overlap, so these runs do not establish a gain beyond 4 threads on this shared, hybrid machine (in the printed run, 8 threads were 1.20 times faster than 4). A rate is therefore a property of a machine together with an implementation, which is why the Linpack rule fixes the algorithm and a peak figure fixes none.</p>
+<p>The second measurement follows the Linpack procedure in miniature. Input: random systems of order 500, 1000 and 2000. Method: NumPy's <code>solve</code>, which calls the LAPACK routine for LU factorization with partial pivoting; the program reports \((\tfrac23n^3+\tfrac32n^2)/t\), the count of HPL, and the scaled residual of the HPL test, \(\lVert A\mathbf{x}-\mathbf{b}\rVert_\infty/\bigl(\epsilon_{\text{mach}}(\lVert A\rVert_\infty\lVert\mathbf{x}\rVert_\infty+\lVert\mathbf{b}\rVert_\infty)n\bigr)\), with \(\epsilon_{\text{mach}}\) the machine epsilon (the spacing of 64-bit floating-point numbers just above 1); it returns an error code if the residual is 16 or more, which is the threshold of the HPL input file (<a href="https://www.netlib.org/benchmark/hpl/hpl-2.3.tar.gz">HPL 2.3, <code>testing/ptest/HPL_pdtest.c</code> lines 393–406 and <code>testing/ptest/HPL.dat</code>, threshold 16.0</a>). It also times NumPy's matrix product for the orders up to 1000. LAPACK is a library of dense factorization and solution routines, and it is built on the BLAS (basic linear algebra subprograms), a library of vector and matrix kernels with a reference implementation and many optimized ones. Which BLAS library NumPy uses decides what the numbers mean, so the next session shows it.</p>
+<pre><code class="language-bash">$ lscpu | grep -E "Model name|Thread|Core|Socket"
+Model name:                           12th Gen Intel(R) Core(TM) i5-12450H
+Thread(s) per core:                   2
+Core(s) per socket:                   6
+Socket(s):                            1
+$ update-alternatives --display libblas.so.3-x86_64-linux-gnu | head -3
+libblas.so.3-x86_64-linux-gnu - auto mode
+  link best version is /usr/lib/x86_64-linux-gnu/blas/libblas.so.3
+  link currently points to /usr/lib/x86_64-linux-gnu/blas/libblas.so.3
+$ ldd $(python3 -c "import numpy.core._multiarray_umath as m; print(m.__file__)") | grep -i blas
+        libblas.so.3 =&gt; /lib/x86_64-linux-gnu/libblas.so.3 (0x000077c8c1fbb000)
+$ dpkg -s libblas3 | grep -E "^(Package|Version|Description)"
+Package: libblas3
+Version: 3.12.0-3build1.1
+Description: Basic Linear Algebra Reference implementations, shared library
+</code></pre>
+<p>NumPy calls the reference BLAS of the Debian package <code>libblas3</code> 3.12.0, a plain implementation, and not an optimized library such as OpenBLAS. The numbers of the next listing are therefore the rates of a single-thread reference implementation.</p>
+<pre><code class="language-python" data-file="solve_bench.py" data-run="python3 solve_bench.py" data-check="returncode">"""Time a dense LU solve and a matrix product with NumPy and report Gflop/s with the HPL flop count."""
+import sys
+import time
+import numpy as np
+
+EPS = np.finfo(float).eps
+rng = np.random.default_rng(1)
+print("NumPy", np.__version__)
+print(f"{'n':&gt;6} {'solve s':&gt;9} {'Gflop/s':&gt;9} {'HPL residual':&gt;13}   {'matmul s':&gt;9} {'Gflop/s':&gt;9}")
+bad = 0
+for n in (500, 1000, 2000):
+    A = rng.standard_normal((n, n)); b = rng.standard_normal(n)
+    times = []
+    for _ in range(2):
+        t0 = time.perf_counter(); x = np.linalg.solve(A, b); times.append(time.perf_counter() - t0)
+    best = min(times)
+    resid = (np.linalg.norm(A @ x - b, np.inf)
+             / (EPS * (np.linalg.norm(A, np.inf) * np.linalg.norm(x, np.inf) + np.linalg.norm(b, np.inf)) * n))
+    if resid &gt;= 16.0:
+        bad = 1
+    flop_solve = 2.0 / 3.0 * n**3 + 1.5 * n**2
+    if n &lt;= 1000:
+        times = []
+        for _ in range(2):
+            t0 = time.perf_counter(); A @ A; times.append(time.perf_counter() - t0)
+        tm = min(times); mm = f"{tm:&gt;9.3f} {2.0 * n**3 / tm / 1e9:&gt;9.2f}"
+    else:
+        mm = f"{'':&gt;9} {'':&gt;9}"
+    print(f"{n:&gt;6} {best:&gt;9.3f} {flop_solve / best / 1e9:&gt;9.2f} {resid:&gt;13.3f}   {mm}")
+sys.exit(bad)
+</code></pre>
+<pre><code class="output">NumPy 1.26.4
+     n   solve s   Gflop/s  HPL residual    matmul s   Gflop/s
+   500     0.022      3.78         0.004       0.054      4.65
+  1000     0.173      3.87         0.004       0.640      3.12
+  2000     1.443      3.70         0.003                      
+</code></pre>
+<p>Over the same seven runs the solve rate was between 2.9 and 4.2 Gflop/s for the three sizes (3.6 to 4.1 Gflop/s at \(n=2000\)), with a scaled residual of 0.003 to 0.004, far below the threshold of 16. The matrix product through NumPy reached 1.2 to 5.3 Gflop/s. The solve rate of this section is a throughput of one-thread reference LU on this machine. It is not an \(R_{\max}\), because it does not use the benchmark code, the tuned libraries or the cores that an HPL run uses. Against Table 1.1: the best tiled product rate of 41.4 Gflop/s is 0.69 of the June 1993 rank-1 \(R_{\max}\) and 99 times its rank-500 value; the solve rates of 2.9 to 4.2 Gflop/s are 7 to 10 times the June 1993 rank-500 value; and the June 2024 leader's \(R_{\max}\) is \(2.9\times10^{7}\) times the best tiled rate and \(2.9\times10^{8}\) times the best solve rate. A laptop that solves a dense system of order 2000 in 1.3 to 1.5 s could not store the matrix of the lecture's example: 8 TB against 15 GB, a ratio of 530.</p>
+
+
+<h2 id="iterative">Iterative methods and the claim of \(O(n\log n)\) <a class="timestamp" href="https://www.youtube.com/watch?v=yX0KfCorP6s&amp;t=957s">W0L0 15:57</a></h2>
+<p>The lecture's remedy for the cost of direct solvers is the iterative method: guess a solution, improve the guess, and stop when it is good enough. The board shows the cost falling from \(O(n^3)\) to \(O(n\log n)\), labeled with the name Krylov and the words subspace solvers. The lecture adds that without iterative methods, modern computers could not produce meaningful results for problems of this size. An <em>iterative method</em> produces a sequence of approximations that converge to the solution; the number of iterations needed depends on the matrix and on the accuracy required. This section derives the cost of two iterative methods on the running case and tests the lecture's formula against the table of a numerical-analysis course.</p>
+<p><strong>Jacobi.</strong> The Jacobi method updates every unknown from the values of its four neighbors at the previous sweep: \(u_{i,j}\leftarrow\tfrac14\bigl(b_{i,j}+u_{i-1,j}+u_{i+1,j}+u_{i,j-1}+u_{i,j+1}\bigr)\). A sweep costs 5 flop per unknown, four additions and one multiplication, so \(5n\) flop. The error of the iterate shrinks by a factor \(\rho\) per sweep, and for the model problem \(\rho=\cos\bigl(\pi/(N+1)\bigr)\) (stated in <a href="https://people.eecs.berkeley.edu/~demmel/cs267/lecture24/lecture24.html">Demmel's CS267 notes for lectures 15 and 16</a>; chapter 9 derives it). Since \(\rho\approx1-\pi^2/\bigl(2(N+1)^2\bigr)\), reducing the error by a factor \(\varepsilon\) takes
+\[ k_{\text{Jacobi}}=\frac{\ln\varepsilon}{\ln\rho}\approx\frac{2(N+1)^2}{\pi^2}\ln\frac1\varepsilon \tag{1.6} \]
+sweeps. The total work \(5nk\) grows as \(nN^2=n^2\). Jacobi needs \(O(n^2)\) flop, one power of \(n\) fewer than dense elimination and the same order as band elimination.</p>
+<p><strong>Conjugate gradients.</strong> The conjugate-gradient method (CG) applies to a symmetric positive definite matrix, a class that contains the matrix \(A\) of the running case. After \(k\) iterations it holds the approximation inside the Krylov subspace \(\mathcal{K}_k(A,\mathbf{b})\) for which the error in the energy norm \(\lVert\mathbf{e}\rVert_A=\sqrt{\mathbf{e}^{T}A\mathbf{e}}\) is smallest (Shewchuk, p. 33, and Hestenes and Stiefel). One iteration costs one product of \(A\) with a vector, two inner products and three vector updates. For the five-point matrix this is about \(20n\) flop. Shewchuk (Section 10, p. 37) shows that reducing the error norm by a factor \(\varepsilon\) takes at most
+\[ k_{\text{CG}}\le\Bigl\lceil\tfrac12\sqrt{\kappa}\,\ln\frac2\varepsilon\Bigr\rceil \tag{1.7} \]
+iterations, where \(\kappa=\lambda_{\max}/\lambda_{\min}\) is the ratio of the largest to the smallest eigenvalue of \(A\), the <em>condition number</em>. The eigenvalues of the five-point matrix are \(4-2\cos(i\pi h)-2\cos(j\pi h)\) for \(1\le i,j\le N\) (chapter 9 derives this), so \(\kappa=\cot^2\bigl(\pi h/2\bigr)\approx\bigl(2(N+1)/\pi\bigr)^2\) and \(\sqrt\kappa\approx0.64\,(N+1)\). The iteration count of CG therefore grows in proportion to \(N=\sqrt n\), the work is \(20n\cdot O(N)=O(n^{3/2})\), and the storage is five vectors, \(40n\) bytes. Shewchuk states the general result on p. 38: CG needs \(O(m\sqrt\kappa)\) operations for a matrix with \(m\) nonzeros; for finite-difference and finite-element problems \(\kappa\in O(n^{2/d})\) in \(d\) dimensions, so CG costs \(O(n^{3/2})\) in two dimensions and \(O(n^{4/3})\) in three.</p>
+<p>The next listing counts iterations. Input: the source term \(f=1\), for which \(\mathbf{b}\) is not an eigenvector of \(A\) (a source proportional to an eigenvector would let CG finish in one iteration, which hides the dependence on \(N\)); grid sizes \(N=8,16,32\) for Jacobi and \(N=16,32,64,128\) for CG. Method: the <em>residual</em> of an approximation \(\mathbf{u}\) is \(\mathbf{r}=\mathbf{b}-A\mathbf{u}\). Both iterations start from zero and stop when the residual norm falls below \(10^{-6}\) times the norm of \(\mathbf{b}\), and the CG code applies \(A\) without storing it. Output: the iteration counts, their ratio to \(N^2\) (Jacobi) or \(N\) (CG), and the predictions of (1.6) and (1.7) with \(\varepsilon=10^{-6}\). The predictions bound a norm of the error, and the program stops on the norm of the residual, so the comparison is indicative.</p>
+<pre><code class="language-python" data-file="iterations.py" data-run="python3 iterations.py">"""Count Jacobi and conjugate-gradient iterations for the 5-point Poisson system on an N x N grid."""
+import math
+import numpy as np
+
+TOL = 1e-6
+
+def apply(N, u):
+    """Matrix-free A u for u of shape (N, N): 4 on the diagonal, -1 to each grid neighbour."""
+    p = np.zeros((N + 2, N + 2)); p[1:-1, 1:-1] = u
+    return 4.0 * u - p[:-2, 1:-1] - p[2:, 1:-1] - p[1:-1, :-2] - p[1:-1, 2:]
+
+def source_one(N):
+    """Right-hand side of -Laplace(u) = 1, scaled by h^2. It is not an eigenvector of A."""
+    return np.full((N, N), (1.0 / (N + 1)) ** 2)
+
+def jacobi_iterations(N):
+    b = source_one(N); u = np.zeros((N, N)); nb = np.linalg.norm(b); k = 0
+    while np.linalg.norm(b - apply(N, u)) &gt; TOL * nb:
+        u = u + (b - apply(N, u)) / 4.0; k += 1
+    return k
+
+def cg_iterations(N):
+    b = source_one(N); u = np.zeros((N, N)); r = b.copy(); p = r.copy()
+    rr = np.sum(r * r); nb = math.sqrt(rr); k = 0
+    while math.sqrt(rr) &gt; TOL * nb:
+        Ap = apply(N, p); alpha = rr / np.sum(p * Ap)
+        u += alpha * p; r -= alpha * Ap
+        rr_new = np.sum(r * r); p = r + (rr_new / rr) * p; rr = rr_new; k += 1
+    return k
+
+print("Stopping rule: residual norm below 1e-6 times the norm of the right-hand side, source term 1.")
+print("Jacobi: N   iterations  iterations/N^2  ln(tol)/ln(rho)")
+for N in (8, 16, 32):
+    k = jacobi_iterations(N)
+    print(f"        {N:&lt;3} {k:&lt;11} {k / N**2:&lt;15.3f} {math.log(TOL) / math.log(math.cos(math.pi / (N + 1))):.0f}")
+print("CG:     N   iterations  iterations/N    bound 0.5*sqrt(kappa)*ln(2/tol)")
+for N in (16, 32, 64, 128):
+    k = cg_iterations(N)
+    kappa = 1.0 / math.tan(math.pi / (2 * (N + 1))) ** 2
+    print(f"        {N:&lt;3} {k:&lt;11} {k / N:&lt;15.3f} {0.5 * math.sqrt(kappa) * math.log(2.0 / TOL):.0f}")
+</code></pre>
+<pre><code class="output">Stopping rule: residual norm below 1e-6 times the norm of the right-hand side, source term 1.
+Jacobi: N   iterations  iterations/N^2  ln(tol)/ln(rho)
+        8   221         3.453           222
+        16  796         3.109           804
+        32  3005        2.935           3044
+CG:     N   iterations  iterations/N    bound 0.5*sqrt(kappa)*ln(2/tol)
+        16  25          1.562           78
+        32  51          1.594           152
+        64  101         1.578           300
+        128 204         1.594           596
+</code></pre>
+<p>Jacobi needed 221, 796 and 3005 sweeps, against the predictions 222, 804 and 3044 of (1.6); the largest difference is 1.3 %. The ratio of the count to \(N^2\) is 3.45, 3.11 and 2.94, which decreases toward the limit \(2\ln(10^{6})/\pi^2=2.80\) of (1.6). CG needed 25, 51, 101 and 204 iterations. Each doubling of \(N\) multiplies the count by 2.04, 1.98 and 2.02, and the ratio to \(N\) stays between 1.56 and 1.59. The bound (1.7) is 3.1, 3.0, 3.0 and 2.9 times the observed count, as an upper bound should be. For \(N=128\) the iteration counts of Jacobi (extrapolated by (1.6)) and CG are about \(4.7\times10^{4}\) and 204, so CG needs about 230 times fewer iterations than Jacobi and about 4 times as many flop per iteration as one Jacobi sweep. These measurements show the exponents for one family of matrices. They do not show how many iterations a matrix with a different spectrum, an unsymmetric matrix or a matrix from another PDE needs.</p>
+<p>The lecture's formula can now be compared with the literature. Demmel's CS267 notes for lectures 15 and 16 tabulates the cost of solving the discrete Poisson equation by several methods. His symbol \(N\) denotes the number of unknowns; Table 1.2 writes it as \(n\) to match this chapter. Entries are orders of magnitude of the serial time and the storage.</p>
+<div class="table-wrap"><table>
+<caption>Table 1.2. Order of the serial cost and the storage of solvers for the discrete Poisson equation in two dimensions, with \(n\) unknowns. Selected rows and columns. Source: Demmel, CS267 notes for lectures 15 and 16 (1996), file lecture24.html (the symbol \(N\) there is \(n\) here).</caption>
+<thead><tr><th scope="col">Method</th><th scope="col">Type</th><th scope="col">Serial time</th><th scope="col">Storage</th></tr></thead>
+<tbody>
+<tr><td>Dense LU</td><td>direct</td><td>\(n^3\)</td><td>\(n^2\)</td></tr>
+<tr><td>Band LU</td><td>direct</td><td>\(n^2\)</td><td>\(n^{3/2}\)</td></tr>
+<tr><td>Jacobi</td><td>iterative</td><td>\(n^2\)</td><td>\(n\)</td></tr>
+<tr><td>Sparse LU</td><td>direct</td><td>\(n^{3/2}\)</td><td>\(n\log n\)</td></tr>
+<tr><td>Conjugate gradients</td><td>iterative</td><td>\(n^{3/2}\)</td><td>\(n\)</td></tr>
+<tr><td>Successive overrelaxation</td><td>iterative</td><td>\(n^{3/2}\)</td><td>\(n\)</td></tr>
+<tr><td>FFT-based solver</td><td>direct</td><td>\(n\log n\)</td><td>\(n\)</td></tr>
+<tr><td>Multigrid</td><td>iterative</td><td>\(n\)</td><td>\(n\)</td></tr>
+</tbody></table></div>
+<p>Successive overrelaxation and multigrid, which the table also lists, are further iterative methods that this chapter names and does not derive. The table confirms the entries derived above for dense LU, band LU, Jacobi and conjugate gradients. It shows that \(O(n\log n)\) is the cost of the FFT-based direct solver (FFT is the fast Fourier transform), not of a Krylov method, and that conjugate gradients reduce the dense cost from \(n^3\) to \(n^{3/2}\). Relative to band elimination, which is already a direct method specialized to this matrix, conjugate gradients gain a factor of \(n^{1/2}\), which is \(10^3\) at \(n=10^6\) in order of magnitude and 22 in the exact flop counts of the listing below. Demmel adds that the FFT-based and multigrid methods work only on equations quite similar to Poisson's equation, while the other methods solve more general systems. The lecture's claim that Krylov solvers give \(O(n\log n)\) is therefore not supported by the table for the model problem, and the right figure for conjugate gradients on this problem is \(O(n^{3/2})\). The lecture's qualitative point holds: iterative methods lower the exponent of \(n\), and the lower exponent decides which problems a given machine can solve. The conclusions are limited to the model problem; the iteration count of conjugate gradients on a harder matrix depends on its condition number, as (1.7) shows.</p>
+<p>The next listing combines the derived costs. It evaluates them for the lecture's case \(N=1000\) and for \(n\approx10^{9}\) (\(N=31\,623\)), at two rates: \(10^{12}\) flop/s, the rate of the lecture's example, and \(1.206\times10^{18}\) flop/s, the Rmax of the leader of the June 2024 list. Inputs: the formulas (1.3) to (1.7) with \(\varepsilon=10^{-6}\), with the constants 5 flop per unknown per Jacobi sweep and 20 per unknown per CG iteration. Output: flop, storage and time, by equation (1.1). Assumptions: the rate is the same for every method (the previous section showed that for CG it is about 86 times too high on Frontier), and nothing but arithmetic costs time. The program also estimates the memory of the leader and the largest dense system that fits in it, from the node architecture described in the section on Frontier below; the chapter repeats the derivation there.</p>
+<pre><code class="language-python" data-file="budget.py" data-run="python3 budget.py">"""Flop, memory and time budget for the 5-point Poisson problem on an N x N grid (n = N*N unknowns)."""
+import math
+
+R_LECTURE = 1.0e12      # flop/s, the rate used in the lecture's example
+R_FRONTIER = 1.206e18   # flop/s, Rmax of Frontier, TOP500 list of June 2024
+R_HPCG = 1.4054e16      # flop/s, HPCG rate of Frontier, HPCG list of June 2024
+TOL = 1.0e-6            # factor by which the iterative methods reduce the error
+
+def dense_lu(N):
+    n = N * N
+    return 2.0 / 3.0 * n**3, 8.0 * n * n
+
+def band_lu(N):
+    n = N * N
+    return 2.0 * n * N**2, 8.0 * n * (2 * N + 1)
+
+def jacobi(N):
+    n = N * N
+    rho = math.cos(math.pi / (N + 1))
+    k = math.ceil(math.log(TOL) / math.log(rho))
+    return 5.0 * n * k, 16.0 * n
+
+def cg(N):
+    n = N * N
+    kappa = 1.0 / math.tan(math.pi / (2 * (N + 1))) ** 2
+    k = math.ceil(0.5 * math.sqrt(kappa) * math.log(2.0 / TOL))
+    return 20.0 * n * k, 40.0 * n
+
+def fmt_time(s):
+    for unit, size in (("yr", 3.156e7), ("d", 86400.0), ("h", 3600.0), ("min", 60.0)):
+        if s &gt;= size:
+            return f"{s / size:.3g} {unit}"
+    return f"{s:.3g} s" if s &gt;= 1e-3 else f"{s * 1e3:.3g} ms"
+
+def fmt_bytes(b):
+    for unit, size in (("EB", 1e18), ("PB", 1e15), ("TB", 1e12), ("GB", 1e9), ("MB", 1e6)):
+        if b &gt;= size:
+            return f"{b / size:.3g} {unit}"
+    return f"{b:.3g} B"
+
+print(f"lecture: n = 1e6, n^3 = 1e18 operations at 1e12 flop/s -&gt; {fmt_time(1e18 / R_LECTURE)}")
+print()
+for N in (1000, 31623):
+    print(f"N = {N}, n = {N * N:.3e} unknowns")
+    print(f"{'method':&lt;10}{'flop':&gt;11}{'memory':&gt;10}{'at 1e12':&gt;14}{'at Frontier':&gt;14}")
+    for name, f in (("dense LU", dense_lu), ("band LU", band_lu), ("Jacobi", jacobi), ("CG", cg)):
+        w, mem = f(N)
+        print(f"{name:&lt;10}{w:&gt;11.3e}{fmt_bytes(mem):&gt;10}{fmt_time(w / R_LECTURE):&gt;14}{fmt_time(w / R_FRONTIER):&gt;14}")
+    print()
+
+# Frontier, June 2024 list: 8,699,904 cores / 944 cores per node = 9,216 nodes; per node 512 GB DDR4 + 8 x 64 GB HBM2E.
+nodes = 8699904 // 944
+memory = nodes * (512 + 8 * 64) * 1e9
+n_max = math.sqrt(memory / 8.0)
+w_max = 2.0 / 3.0 * n_max**3
+print(f"Frontier memory estimate {fmt_bytes(memory)}; largest dense system n = {n_max:.3e}")
+print(f"dense LU at that n: {w_max:.3e} flop, {fmt_time(w_max / R_FRONTIER)} at Rmax")
+w_cg = cg(31623)[0]
+print(f"CG at n = 1e9 at the HPCG rate of Frontier: {fmt_time(w_cg / R_HPCG)}; band LU at Rmax: {fmt_time(band_lu(31623)[0] / R_FRONTIER)}")
+w_big, m_big = cg(10**6)
+print(f"CG at n = 1e12 (N = 1e6): {w_big:.3e} flop, {fmt_bytes(m_big)}; {fmt_time(w_big / R_HPCG)} at the HPCG rate")
+n_time = (1.5 * R_FRONTIER * 86400) ** (1.0 / 3.0)
+print(f"largest dense n solvable in one day at Rmax: {n_time:.3e}; by memory: {n_max:.3e}")
+w_b, m_b = band_lu(10**6)
+print(f"band LU at n = 1e12 (N = 1e6): {w_b:.3e} flop, {fmt_bytes(m_b)} ({m_b / memory:.0f} times the estimated memory); {fmt_time(w_b / R_FRONTIER)} at Rmax")
+print(f"band LU at n = 1e9 uses {band_lu(31623)[1] / memory * 100:.1f} % of the estimated memory")
+</code></pre>
+<pre><code class="output">lecture: n = 1e6, n^3 = 1e18 operations at 1e12 flop/s -&gt; 11.6 d
+
+N = 1000, n = 1.000e+06 unknowns
+method           flop    memory       at 1e12   at Frontier
+dense LU    6.667e+17      8 TB        7.72 d       0.553 s
+band LU     2.000e+12     16 GB           2 s    0.00166 ms
+Jacobi      1.403e+13     16 MB          14 s     0.0116 ms
+CG          9.246e+10     40 MB      0.0925 s   7.67e-05 ms
+
+N = 31623, n = 1.000e+09 unknowns
+method           flop    memory       at 1e12   at Frontier
+dense LU    6.667e+26      8 EB   2.11e+07 yr       17.5 yr
+band LU     2.000e+18    506 TB        23.1 d        1.66 s
+Jacobi      1.400e+19     16 GB         162 d        11.6 s
+CG          2.921e+15     40 GB      48.7 min     0.00242 s
+
+Frontier memory estimate 9.44 PB; largest dense system n = 3.435e+07
+dense LU at that n: 2.701e+22 flop, 6.22 h at Rmax
+CG at n = 1e9 at the HPCG rate of Frontier: 0.208 s; band LU at Rmax: 1.66 s
+CG at n = 1e12 (N = 1e6): 9.237e+19 flop, 40 TB; 1.83 h at the HPCG rate
+largest dense n solvable in one day at Rmax: 5.387e+07; by memory: 3.435e+07
+band LU at n = 1e12 (N = 1e6): 2.000e+24 flop, 16 EB (1695 times the estimated memory); 19.2 d at Rmax
+band LU at n = 1e9 uses 5.4 % of the estimated memory
+</code></pre>
+<p>At \(n=10^{6}\), dense LU needs \(6.667\times10^{17}\) flop and 8 TB, band LU \(2.000\times10^{12}\) flop and 16 GB, Jacobi \(1.403\times10^{13}\) flop and 16 MB, and CG \(9.246\times10^{10}\) flop and 40 MB. At the lecture's rate the times are 7.72 days, 2 s, 14 s and 0.0925 s. At \(n\approx10^{9}\) the same methods need \(6.667\times10^{26}\) flop with 8 EB, \(2.000\times10^{18}\) flop with 506 TB, \(1.400\times10^{19}\) flop with 16 GB and \(2.921\times10^{15}\) flop with 40 GB. Going from \(n=10^{6}\) to \(n=10^{9}\), the work of dense LU grows by \(10^{9}\), that of band LU by \(10^{6}\), and that of CG by \(3.2\times10^{4}\), the factors that the exponents 3, 2 and 3/2 predict (\(10^{3\cdot3}\), \(10^{3\cdot2}\) and \(10^{3\cdot1.5}\) for a thousandfold increase of \(n\)). The listing's last lines give numbers used in the section on Frontier: a dense system that fills the estimated memory of Frontier has \(n=3.435\times10^{7}\), and dense LU on it takes \(2.70\times10^{22}\) flop, 6.22 hours at the Rmax of the list; CG at \(n=10^{9}\) takes 0.208 s at the HPCG rate, and at \(n=10^{12}\) it takes 1.83 hours.</p>
+
+
+<h2 id="early-machines">The Difference Engine and ENIAC <a class="timestamp" href="https://www.youtube.com/watch?v=yX0KfCorP6s&amp;t=1119s">W0L0 18:39</a></h2>
+<p>The lecture turns to the first computing machines. It says that a search for the first computer returns Babbage's Difference Engine, a machine with a specific purpose: to find the coefficients of the polynomial fitted to a set of data. It then names ENIAC as the first large-scale general-purpose computer, built from vacuum tubes, housed in a large room and consuming much power. The lecture states that ENIAC performed about 300 floating-point operations per second and that it was used to compute artillery firing tables, which, according to the lecture, required the full three-dimensional Navier–Stokes equations. The sources opened support the purpose and the scale of these machines, correct the purpose of the Difference Engine, refine the rate of ENIAC, and do not support the claim about the Navier–Stokes equations.</p>
+<p><strong>The Difference Engine.</strong> The <a href="https://www.sciencemuseum.org.uk/objects-and-stories/charles-babbages-difference-engines-and-science-museum">Science Museum Group page on Babbage's Difference Engines</a> describes Difference Engine No. 1 as a machine built to calculate a series of numerical values and to print the results automatically, not to perform everyday arithmetic. It states that Babbage used the principle of finite differences, which needs only addition and subtraction and which human computers used to prepare mathematical tables. The page records that a portion of the engine, one seventh of the complete design, was completed in 1832, that work stopped in 1833, and that the Treasury had spent £17&nbsp;500. The machine therefore tabulated the values of a given polynomial. It did not compute the coefficients of a polynomial from data, which is the lecture's description.</p>
+<p>The method of finite differences shows why addition suffices. For a function \(p\) tabulated at equally spaced points, the <em>first difference</em> is \(\Delta p(x)=p(x+1)-p(x)\), the second difference is \(\Delta^2p(x)=\Delta p(x+1)-\Delta p(x)\), and so on. For a polynomial of degree \(d\), the difference \(\Delta^dp\) is a constant. Each new table entry then follows from the previous entries by \(d\) additions: \(p(x+1)=p(x)+\Delta p(x)\), \(\Delta p(x+1)=\Delta p(x)+\Delta^2p(x)\), up to the constant. As an example, take \(p(x)=x^2+x+41\) (the polynomial is this chapter's example, not Babbage's). The values for \(x=0,\dots,5\) are 41, 43, 47, 53, 61, 71; the first differences are 2, 4, 6, 8, 10; the second difference is 2 throughout. The next entry is \(71+(10+2)=83\), which equals \(6^2+6+41\). A degree-2 table needs 2 additions per entry and no multiplication. The cost of an operation, which equation (1.1) treats as uniform, was in 1832 a mechanical design problem, and Babbage chose a method that avoided the costly operation.</p>
+<p><strong>ENIAC.</strong> Weik's survey, <a href="https://ftp.arl.army.mil/~mike/comphist/eniac-story.html"><em>The ENIAC Story</em> (Ordnance Ballistic Research Laboratories, 1961)</a>, expands the name as electronic numerical integrator and computer. (The slide of the lecture shows only the name ENIAC and the number 300.) It records that the machine was formally dedicated at the Moore School of the University of Pennsylvania on 15 February 1946; that it had thirty units weighing more than thirty tons; that its 19&nbsp;000 vacuum tubes, 1&nbsp;500 relays and other components consumed almost 200 kilowatts; and that it was developed by Army Ordnance to compute ballistic firing tables, which the Ballistic Research Laboratory at Aberdeen prepared. The lecture's statements about the purpose, the vacuum tubes and the power are consistent with Weik.</p>
+<p>Weik also gives the timing, which fixes the rate of the machine. ENIAC's twenty accumulators, its arithmetic and storage units, each held a 10-digit decimal number. The cycling unit emitted pulses at 10-microsecond intervals, and one addition took 200 microseconds. A multiplication of two 10-digit numbers took 2.6 milliseconds. Division and square-root extraction took 25 milliseconds on average for a 10-digit number. The rates are therefore \(1/200\ \mu\mathrm{s}=5000\) additions per second, \(1/2.6\ \mathrm{ms}=385\) multiplications per second and \(1/25\ \mathrm{ms}=40\) divisions per second. The lecture's 300 operations per second lies between the division rate and the multiplication rate and is within a factor of 1.3 of the multiplication rate, so it is correct as an order of magnitude. Weik describes decimal numbers of 10 digits and does not describe a floating-point format. The operations of ENIAC are therefore not flop in the sense of the model section, which counts operations on 64-bit floating-point numbers. The comparison of ENIAC with a modern machine, made in the next section, compares different operations and is meaningful only to within an order of magnitude.</p>
+<p><strong>The firing tables.</strong> The lecture's account of the problem is accurate in structure. A soldier at the front can measure the distance and elevation of the target and the wind and temperature, and can set only two angles, so the calculation must be done before the soldier needs it and handed over as a table that the soldier reads. This is the earliest instance in the lecture of a pattern that recurs through the book: a large precomputation, whose cost is paid once, serves many later uses. The cost of such a table, in the model of this chapter, is the product of the numbers of tabulated values of each input, multiplied by the work \(W_{\text{traj}}\) of one trajectory. As an illustration with assumed numbers, four inputs with 10 values each and \(W_{\text{traj}}=10^{3}\) multiplications make \(10^{7}\) multiplications, which is \(10^{7}/385=2.6\times10^{4}\) s, or 7.2 hours, at the multiplication rate of ENIAC computed above. The numbers are assumptions chosen to show the arithmetic; they are not data about the tables of the Ballistic Research Laboratory. The lecture's physical claim, that each entry required the full three-dimensional Navier–Stokes equations, has no support in Weik. His account describes the earlier differential analyzer, a machine with ten integrating units at Aberdeen, failing during a long "trajectory run", and it describes ENIAC's early problems as numerical solutions in fields such as atomic energy and ballistic trajectories. A trajectory is computed by integrating the motion of one projectile. Weik does not mention the Navier–Stokes equations, and the chapter does not repeat the claim.</p>
+
+
+<h2 id="growth">Growth of computing power: the data, Moore's observation and Dennard scaling <a class="timestamp" href="https://www.youtube.com/watch?v=yX0KfCorP6s&amp;t=1401s">W0L0 23:21</a></h2>
+<p>The lecture states that computing power grew exponentially in the decades after ENIAC and shows two charts. The first plots, for the years 1930 to 2010 on a logarithmic axis, the rate of the fastest machines in operations per second. The second, which the lecture says comes from top500.org, plots three curves from about 1993 to 2020: the fastest machine (the lecture says red), the 500th fastest (yellow) and the sum over the 500 machines (blue). The lecture adds that the list appears every six months. The charts are images owned by their authors, so this chapter does not redraw them. It uses the list values of Table 1.1 and of the program below instead.</p>
+<p>An exponential growth law has a <em>doubling time</em> \(T_2\). For a quantity that has the value \(v_0\) at time \(t_0\) and \(v_1\) at time \(t_1\), and that grows at a constant exponential rate, the doubling time is
+\[ T_2=\frac{t_1-t_0}{\log_2(v_1/v_0)}. \tag{1.8} \]
+The following listing computes (1.8) for the values of Table 1.1, for four more rank-1 entries of other lists, and for ENIAC. Inputs: the Rmax of rank 1 and of rank 500 at the dates of the TOP500 list pages opened for this chapter (June of 1993, 1997, 2000, 2010, 2022, 2024, 2026, and November 2024), with a June list dated as the year plus 0.5 and the November 2024 list as 2024.9, and the ENIAC rates of the previous section with the date 15 February 1946. Output: the growth factor and \(T_2\) for the whole period, for three sub-periods, and for ENIAC; the Rmax per listed core; and the power arithmetic that the next paragraphs explain. The numbers are arithmetic on the sourced values, so the run is checked exactly.</p>
+<pre><code class="language-python" data-file="growth.py" data-run="python3 growth.py">"""Doubling times from dated TOP500 values, and the power-density arithmetic of constant-field scaling."""
+import math
+
+# (list date as a decimal year, system, Rmax in flop/s). Source: TOP500 list pages, rank 1.
+FIRST = [(1993.5, "CM-5/1024", 59.70e9), (1997.5, "ASCI Red", 1.068e12), (2000.5, "ASCI Red", 2.379e12),
+         (2010.5, "Jaguar", 1.759e15), (2022.5, "Frontier", 1.102e18), (2024.5, "Frontier", 1.206e18),
+         (2024.9, "El Capitan", 1.742e18), (2026.5, "LineShine", 2.1984e18)]
+# Rank 500, same sources.
+LAST = [(1993.5, 0.42e9), (2010.5, 24.67e12), (2024.5, 2.13e15), (2026.5, 2.66e15)]
+
+def doubling_years(t0, v0, t1, v1):
+    """T2 = (t1 - t0) / log2(v1 / v0)."""
+    return (t1 - t0) / math.log2(v1 / v0)
+
+def fit_doubling_years(points):
+    xs = [p[0] for p in points]; ys = [math.log2(p[-1]) for p in points]
+    mx = sum(xs) / len(xs); my = sum(ys) / len(ys)
+    slope = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
+    return 1.0 / slope
+
+def value(points, year):
+    return [p[-1] for p in points if p[0] == year][0]
+
+print("Rank 1, June 1993 -&gt; June 2024: x%.3g, doubling time %.2f years" %
+      (value(FIRST, 2024.5) / value(FIRST, 1993.5), doubling_years(1993.5, value(FIRST, 1993.5), 2024.5, value(FIRST, 2024.5))))
+print("Rank 500, June 1993 -&gt; June 2024: x%.3g, doubling time %.2f years" %
+      (value(LAST, 2024.5) / value(LAST, 1993.5), doubling_years(1993.5, value(LAST, 1993.5), 2024.5, value(LAST, 2024.5))))
+print("Least-squares fit of log2 Rmax of rank 1, 8 points 1993-2026: doubling time %.2f years" % fit_doubling_years(FIRST))
+print()
+print("Doubling time by period (years)")
+for label, pts, spans in (("rank 1  ", FIRST, ((1993.5, 2010.5), (2010.5, 2022.5), (2022.5, 2026.5))),
+                          ("rank 500", LAST, ((1993.5, 2010.5), (2010.5, 2024.5), (2024.5, 2026.5)))):
+    for a, b in spans:
+        print("  %s %.1f -&gt; %.1f: x%-9.3g doubling time %.2f" %
+              (label, a, b, value(pts, b) / value(pts, a), doubling_years(a, value(pts, a), b, value(pts, b))))
+print()
+# ENIAC, dedicated 15 February 1946: one 10-digit multiplication in 2.6 ms, one addition in 200 us (Weik 1961).
+eniac_mul, eniac_add = 1 / 2.6e-3, 1 / 200e-6
+print("ENIAC: %.0f multiplications/s, %.0f additions/s" % (eniac_mul, eniac_add))
+for label, rate in (("multiplication rate", eniac_mul), ("lecture value 300", 300.0)):
+    r = value(FIRST, 2024.5) / rate
+    print("ENIAC (%s) -&gt; Frontier June 2024: x%.2e, doubling time %.2f years" %
+          (label, r, doubling_years(1946.12, rate, 2024.5, value(FIRST, 2024.5))))
+print()
+print("Rmax per listed core (flop/s): CM-5 1993 %.3g, Jaguar 2010 %.3g, Frontier 2024 %.3g" %
+      (59.70e9 / 1024, 1.759e15 / 224162, 1.206e18 / 8699904))
+print("Jaguar 2010 -&gt; Frontier 2024: Rmax x%.0f, cores x%.1f, clock 2.6 GHz -&gt; 2.0 GHz" %
+      (1.206e18 / 1.759e15, 8699904 / 224162))
+print()
+s = math.sqrt(2.0)
+print("Per generation, linear scale factor 1/s, s = sqrt(2). Switching power of one circuit = C V^2 f_clk.")
+print(f"{'case':&lt;28}{'V':&gt;6}{'C':&gt;6}{'f_clk':&gt;7}{'P/circuit':&gt;11}{'circuits/area':&gt;15}{'P/area':&gt;8}")
+for name, v, f_clk in (("constant field (Dennard)", 1 / s, s), ("V fixed, f_clk x s", 1.0, s),
+                       ("V fixed, f_clk fixed", 1.0, 1.0)):
+    c = 1 / s; p = c * v * v * f_clk; dens = s * s
+    print(f"{name:&lt;28}{v:&gt;6.3f}{c:&gt;6.3f}{f_clk:&gt;7.3f}{p:&gt;11.3f}{dens:&gt;15.3f}{p * dens:&gt;8.3f}")
+print("Moore (1965): a factor 2 per year for 10 years is %d; 65000 / %d = %.0f components in 1965" % (2 ** 10, 2 ** 10, 65000 / 2 ** 10))
+print("2^16 = %d" % 2 ** 16)
+</code></pre>
+<pre><code class="output">Rank 1, June 1993 -&gt; June 2024: x2.02e+07, doubling time 1.28 years
+Rank 500, June 1993 -&gt; June 2024: x5.07e+06, doubling time 1.39 years
+Least-squares fit of log2 Rmax of rank 1, 8 points 1993-2026: doubling time 1.29 years
+
+Doubling time by period (years)
+  rank 1   1993.5 -&gt; 2010.5: x2.95e+04  doubling time 1.15
+  rank 1   2010.5 -&gt; 2022.5: x626       doubling time 1.29
+  rank 1   2022.5 -&gt; 2026.5: x1.99      doubling time 4.01
+  rank 500 1993.5 -&gt; 2010.5: x5.87e+04  doubling time 1.07
+  rank 500 2010.5 -&gt; 2024.5: x86.3      doubling time 2.18
+  rank 500 2024.5 -&gt; 2026.5: x1.25      doubling time 6.24
+
+ENIAC: 385 multiplications/s, 5000 additions/s
+ENIAC (multiplication rate) -&gt; Frontier June 2024: x3.14e+15, doubling time 1.52 years
+ENIAC (lecture value 300) -&gt; Frontier June 2024: x4.02e+15, doubling time 1.51 years
+
+Rmax per listed core (flop/s): CM-5 1993 5.83e+07, Jaguar 2010 7.85e+09, Frontier 2024 1.39e+11
+Jaguar 2010 -&gt; Frontier 2024: Rmax x686, cores x38.8, clock 2.6 GHz -&gt; 2.0 GHz
+
+Per generation, linear scale factor 1/s, s = sqrt(2). Switching power of one circuit = C V^2 f_clk.
+case                             V     C  f_clk  P/circuit  circuits/area  P/area
+constant field (Dennard)     0.707 0.707  1.414      0.500          2.000   1.000
+V fixed, f_clk x s           1.000 0.707  1.414      1.000          2.000   2.000
+V fixed, f_clk fixed         1.000 0.707  1.000      0.707          2.000   1.414
+Moore (1965): a factor 2 per year for 10 years is 1024; 65000 / 1024 = 63 components in 1965
+2^16 = 65536
+</code></pre>
+<p>From June 1993 to June 2024 the Rmax of rank 1 grew by a factor of \(2.02\times10^{7}\), a doubling time of 1.28 years, or 15 months. The Rmax of rank 500 grew by \(5.07\times10^{6}\), a doubling time of 1.39 years. A least-squares line through the eight rank-1 points gives 1.29 years. From ENIAC at 385 multiplications per second to Frontier in June 2024 the factor is \(3.1\times10^{15}\) and \(T_2=1.52\) years; with the lecture's 300 operations per second the factor is \(4.0\times10^{15}\) and \(T_2=1.51\) years. The statement that the growth is exponential is therefore supported within each period, and the lecture's chart agrees with the list values. The two ENIAC figures compare different operations and cover 78 years, so the difference between 1.52 and 1.28 years is not a measurement of a change in the growth rate.</p>
+<p>The sub-periods show that the rate is not constant. The doubling time of rank 1 is 1.15 years from 1993 to 2010, 1.29 years from 2010 to 2022, and 4.01 years from June 2022 to June 2026, where the Rmax rose by a factor of 1.99. The doubling time of rank 500 is 1.07 years from 1993 to 2010, 2.18 years from 2010 to 2024, and 6.24 years from 2024 to 2026. The last intervals contain two list entries each, so they show a slower rise and do not fix its rate. The lecture, which shows the chart only up to 2020, does not mention a slowdown. The data of this chapter show that the rate of the TOP500 leader slowed after 2022 and that the rate of the last machine of the list slowed after 2010; they do not show the cause.</p>
+<p><strong>Moore's observation.</strong> The quantity that doubled in the first, best-known statement is not an operation rate. Moore (<a href="https://www.cs.utexas.edu/~fussell/courses/cs352h/papers/moore.pdf">Electronics, 19 April 1965, pp. 114–117, read in the reprint of Proc. IEEE 86(1), 1998, pp. 82–85</a>) writes that the complexity for minimum component costs, the number of components per integrated circuit at which the cost per component is lowest, had increased at roughly a factor of two per year, that this rate could be expected to continue for at least ten years, and that the number of components per circuit at minimum cost would then be 65&nbsp;000 in 1975. A factor of two per year for ten years is \(2^{10}=1024\), so the statement implies about 63 components per circuit in 1965. Components per circuit is the count of transistors and similar parts. A machine's rate in flop/s also depends on how fast the components switch and on how many can operate at once. Dennard et al. addressed that.</p>
+<p><strong>Dennard scaling.</strong> Dennard and co-authors (<a href="https://www.nationalacademies.org/read/12980/chapter/13">IEEE J. Solid-State Circuits 9(5), 1974, pp. 256–268, read in the National Academies reprint of 2011 and in a scanned copy</a>) state the rules by which a MOSFET switch, the basic transistor of digital circuits, is reduced in size. Each linear dimension and the voltage are divided by a factor \(s\gt1\) (Dennard et al. write \(\kappa\); this chapter writes \(s\), because \(\kappa\) is the condition number of the section on iterative methods), and the doping concentration of the substrate is multiplied by \(s\). Their Table I lists the results: the capacitance and the delay of a circuit fall by \(s\), the power dissipation of a circuit falls by \(s^2\), and the power density stays constant. The text states the consequence: even if many more circuits are placed on a chip, the cooling problem is essentially unchanged. The same result follows from the switching power of one circuit, \(P=CV^2f_{\text{clk}}\), where \(C\) is its capacitance, \(V\) the supply voltage and \(f_{\text{clk}}\) the clock frequency, if every circuit switches once per cycle. The capacitance of a circuit is \(C=\epsilon_{\text{ox}}A_{\text{g}}/t_{\text{ox}}\), with gate area \(A_{\text{g}}\), insulator thickness \(t_{\text{ox}}\) and permittivity \(\epsilon_{\text{ox}}\), so it falls by \(s^2/s\), that is by \(s\); the frequency is the inverse of the delay and rises by \(s\). The circuits per unit of chip area rise by \(s^2\). Then
+\[ \frac{P_{\text{new}}}{P_{\text{old}}}=\frac1s\cdot\frac1{s^2}\cdot s=\frac1{s^2}, \qquad \frac{\text{power per unit area, new}}{\text{power per unit area, old}}=\frac1{s^2}\cdot s^2=1. \tag{1.9} \]
+The last table of the listing above evaluates (1.9) for one generation, \(s=\sqrt2\), which halves the area of a circuit. With the voltage scaled as Dennard prescribes, the power per area is 1.000 of its old value. With the voltage held fixed and the frequency raised by \(s\), it is 2.000. With both held fixed, it is 1.414. A chip can dissipate only a limited power per area, so a designer who cannot lower the voltage must give up the rise of the frequency, the use of all circuits at once, or both. Dennard et al. also state that the subthreshold behavior of the device, the current that flows when the switch is nominally off, does not scale as desired. The sources opened do not show when or whether that stopped the lowering of the voltage; chapters 9 and 31 treat the end of Dennard scaling and its consequences at the depth that the question needs.</p>
+<p>The list data fit the consequence. Between June 2010 and June 2024, the Rmax of rank 1 rose by a factor of 686, the number of listed cores by 38.8, and the clock frequency named in the entry of the leader fell from 2.6 GHz (Jaguar, Opteron) to 2.0 GHz (Frontier, EPYC). The Rmax per listed core rose from \(7.85\times10^{9}\) to \(1.39\times10^{11}\) flop/s, a factor of 17.7; the later count of cores includes the compute units of the graphics processors, as the section on Frontier shows, so this factor combines more work per cycle with a different kind of core. The data show that the rise of the leader's rate after 2010 came from more processing elements, of a different kind in 2024, with a clock that did not rise. They do not separate the effect of power limits from that of other causes. The consequence for this book is stated and not proved here: a machine of \(10^{18}\) flop/s is a machine of millions of processing elements, and the programs of chapters 11 to 26 exist to use them.</p>
+
+
+<h2 id="frontier">Frontier and the one-day budget <a class="timestamp" href="https://www.youtube.com/watch?v=yX0KfCorP6s&amp;t=1481s">W0L0 24:41</a></h2>
+<p>The lecture ends with the machine that it calls the fastest in the world, Frontier at Oak Ridge National Laboratory in Tennessee. The lecture states that it performs 1.7 exaflops, that is \(1.7\times10^{18}\) floating-point operations per second; that it consumes about 23 megawatts, "the size of a small town"; and that it has about 8.7 million CPU cores built from 64-core AMD EPYC processors. The lecture concludes that even this machine could not solve the simplest problems if direct methods were the only choice, and asks what problems can be solved efficiently on machines of this size. The slide reads: Peak FLOPs 1.7 ExaFlops (Peak); Power Consumed 23 MW; Cores 8,699,904, AMD EPYC 64C 2GHz.</p>
+<p>The slide matches three TOP500 lists. The lists of <a href="https://www.top500.org/lists/top500/2023/06/">June 2023</a>, <a href="https://www.top500.org/lists/top500/2023/11/">November 2023</a> and <a href="https://www.top500.org/lists/top500/2024/06/">June 2024</a> all give Frontier 8&nbsp;699&nbsp;904 cores. They differ in Rmax and Rpeak, and the slide's rounded figures (1.7 exaflops of peak, 23 MW) fit all three. The chapter uses June 2024, the last list on which Frontier ranked first: \(R_{\max}=1206\) PFlop/s, \(R_{\text{peak}}=1714.81\) PFlop/s and 22&nbsp;786 kW. The two earlier lists give \(R_{\max}=1194\) PFlop/s, \(R_{\text{peak}}=1679.82\) PFlop/s and 22&nbsp;703 kW, so \(R_{\max}/R_{\text{peak}}=0.711\) on them. The slide's 1.7 exaflops is \(R_{\text{peak}}\), and the slide says so in parentheses. The list's own ranking figure, the Linpack \(R_{\max}\), is \(1.206\times10^{18}\) flop/s on the June 2024 list, which is 0.703 of the slide's figure. A time estimate for Frontier that divides a work count by the quoted \(1.7\times10^{18}\) flop/s is therefore too short by a factor of 1.4, even before any algorithm runs below its Linpack rate.</p>
+<p>The statement that the 8.7 million cores are CPU cores can be tested against the architecture of the machine. The <a href="https://docs.olcf.ornl.gov/systems/frontier_user_guide.html">OLCF Frontier user guide</a> describes a compute node as one 64-core AMD EPYC processor and four AMD MI250X accelerators, each with two graphics compute dies that the guide treats as eight separate GPUs, and states that each GPU contains 110 compute units. It also gives 512 GB of DDR4 memory per node and 64 GB of high-bandwidth memory per GPU. A node thus has \(64+8\times110=944\) processing elements. Dividing the listed core counts by 944 gives whole numbers of nodes for three lists: 9&nbsp;248 for June 2022 (8&nbsp;730&nbsp;112 cores), 9&nbsp;216 for June 2024 and 9&nbsp;604 for November 2024 (9&nbsp;066&nbsp;176 cores). The exact divisibility supports the reading that the list counts the 64 CPU cores and the 880 GPU compute units of each node. The program below carries out the arithmetic. Its inputs are the sourced constants named in its first lines and the household figure of the U.S. Energy Information Administration, which reports 10&nbsp;791 kWh as the average annual electricity purchase of a residential customer in 2022 (<a href="https://www.eia.gov/tools/faqs/faq.php?id=97&amp;t=3">EIA frequently asked questions</a>). It prints the ratios, the decomposition of the core count, the power and energy figures, and the comparison of the problem size \(N_{\max}\) of the Linpack run (24&nbsp;837&nbsp;120, from the TOP500 system page of Frontier) with the memory; the run is checked exactly.</p>
+<pre><code class="language-python" data-file="frontier.py" data-run="python3 frontier.py">"""Frontier, June 2024 TOP500 list: ratios, the decomposition of the core count, and the energy of one day."""
+
+RMAX, RPEAK, CORES, POWER_KW = 1206.0e15, 1714.81e15, 8699904, 22786.0   # TOP500, June 2024
+HPCG = 14054.0e12                                                         # HPCG list, June 2024
+NODE_CPU_CORES, GPUS_PER_NODE, CUS_PER_GPU = 64, 8, 110                   # OLCF Frontier user guide
+HOUSEHOLD_KWH_PER_YEAR = 10791.0                                          # EIA, mean US residential customer, 2022
+
+print("Rmax/Rpeak %.3f; HPCG/Rmax %.4f; Rmax/HPCG %.1f" % (RMAX / RPEAK, HPCG / RMAX, RMAX / HPCG))
+per_node = NODE_CPU_CORES + GPUS_PER_NODE * CUS_PER_GPU
+print("cores per node = %d + %d*%d = %d" % (NODE_CPU_CORES, GPUS_PER_NODE, CUS_PER_GPU, per_node))
+for name, cores in (("June 2022", 8730112), ("June 2024", 8699904), ("November 2024", 9066176)):
+    print("  %-14s %d cores / %d = %.3f nodes" % (name, cores, per_node, cores / per_node))
+nodes = CORES // per_node
+cpu = nodes * NODE_CPU_CORES
+print("June 2024: %d nodes, %d CPU cores (%.1f%% of the listed cores), %d GPU compute units" %
+      (nodes, cpu, 100.0 * cpu / CORES, CORES - cpu))
+print("Rpeak per listed core %.3g flop/s" % (RPEAK / CORES))
+print()
+household_kw = HOUSEHOLD_KWH_PER_YEAR / 8760.0
+print("Mean household power %.3f kW; Frontier power %.0f kW = %.0f households" %
+      (household_kw, POWER_KW, POWER_KW / household_kw))
+print("Energy of one day at %.0f kW: %.0f MWh = %.2f household-years" %
+      (POWER_KW, POWER_KW * 24 / 1000.0, POWER_KW * 24 / HOUSEHOLD_KWH_PER_YEAR))
+print("Flop in one day at Rmax: %.3e; Joules per flop at Rmax: %.3e" % (RMAX * 86400, POWER_KW * 1e3 / RMAX))
+print()
+NMAX, HBM_NODE_GB, NODES_NMAX = 24837120, 512, 9604   # TOP500 system page (entry of Nov 2024 onward); OLCF guide; 9066176 / 944
+print("8 Nmax^2 = %.4e B; HBM of %d nodes = %.4e B; ratio %.3f" %
+      (8.0 * NMAX**2, NODES_NMAX, NODES_NMAX * HBM_NODE_GB * 1e9, 8.0 * NMAX**2 / (NODES_NMAX * HBM_NODE_GB * 1e9)))
+n_hbm = (nodes * HBM_NODE_GB * 1e9 / 8.0) ** 0.5
+print("HBM only, %d nodes: largest dense n = %.3e; dense LU %.1f h at Rmax" %
+      (nodes, n_hbm, (2.0 / 3.0 * n_hbm**3) / RMAX / 3600.0))
+w6 = 2.0 / 3.0 * 1e18
+print("n = 1e6: %.2f GB of matrix per node; Nmax / n = %.1f; dense LU at 1%% of Rmax: %.1f s" %
+      (8e12 / nodes / 1e9, NMAX / 1e6, w6 / (0.01 * RMAX)))
+</code></pre>
+<pre><code class="output">Rmax/Rpeak 0.703; HPCG/Rmax 0.0117; Rmax/HPCG 85.8
+cores per node = 64 + 8*110 = 944
+  June 2022      8730112 cores / 944 = 9248.000 nodes
+  June 2024      8699904 cores / 944 = 9216.000 nodes
+  November 2024  9066176 cores / 944 = 9604.000 nodes
+June 2024: 9216 nodes, 589824 CPU cores (6.8% of the listed cores), 8110080 GPU compute units
+Rpeak per listed core 1.97e+11 flop/s
+
+Mean household power 1.232 kW; Frontier power 22786 kW = 18497 households
+Energy of one day at 22786 kW: 547 MWh = 50.68 household-years
+Flop in one day at Rmax: 1.042e+23; Joules per flop at Rmax: 1.889e-11
+
+8 Nmax^2 = 4.9351e+15 B; HBM of 9604 nodes = 4.9172e+15 B; ratio 1.004
+HBM only, 9216 nodes: largest dense n = 2.429e+07; dense LU 2.2 h at Rmax
+n = 1e6: 0.87 GB of matrix per node; Nmax / n = 24.8; dense LU at 1% of Rmax: 55.3 s
+</code></pre>
+<p>The runs of June 2023, November 2023 and June 2024 used 9&nbsp;216 nodes under this reading, since they list the same core count. They hold \(9216\times64=589\,824\) CPU cores, which is 6.8 % of the listed 8&nbsp;699&nbsp;904 cores, and 8&nbsp;110&nbsp;080 GPU compute units. The lecture's "8.7 million CPU cores" is therefore an overcount of the CPU cores by a factor of 14.75. The user guide, read on 26 October 2026, lists 9&nbsp;856 compute nodes (77 cabinets of 128 nodes), so the nodes used for the list run are a subset of those installed, or the machine has changed; the sources do not say which. The ratio of \(R_{\max}\) to the HPCG rate is 85.8, the figure used in the section on flop/s. The mean household in the EIA figure draws 1.232 kW, so a draw of 22&nbsp;786 kW equals that of 18&nbsp;497 households, which is consistent with the lecture's "small town". One day at that draw is 547 MWh, equal to 50.7 household-years of electricity, and at \(R_{\max}\) the machine performs \(1.04\times10^{23}\) flop per day at \(1.9\times10^{-11}\) J per flop. The lecture's figures for the machine are correct on the date of the list, when the 1.7 exaflops is read as the peak figure that the slide labels it, with the one exception of the CPU-core claim.</p>
+<p>The date matters, because the lecture's "fastest" is a statement about one list. In the November 2024 list the first place went to El Capitan with \(R_{\max}=1.742\times10^{18}\) flop/s and 29&nbsp;581 kW (<a href="https://www.top500.org/lists/top500/2024/11/">TOP500, November 2024</a>). In the June 2026 list, the most recent at the time of writing, the first place belongs to LineShine with \(2.1984\times10^{18}\) flop/s and 42&nbsp;220 kW, El Capitan is second with \(1.809\times10^{18}\) flop/s, and Frontier is third with \(R_{\max}=1.353\times10^{18}\) flop/s and \(R_{\text{peak}}=2.0557\times10^{18}\) flop/s (<a href="https://www.top500.org/lists/top500/2026/06/">TOP500, June 2026</a>). From June 2024 to June 2026 the \(R_{\max}\) of the leading machine rose by a factor of 1.82, from \(1.206\times10^{18}\) to \(2.1984\times10^{18}\) flop/s.</p>
+<p>Now the lecture's conclusion can be tested. The claim has two forms: an arithmetic form (the time of a direct solve is too long) and a size form (it fails for the simplest problems). The budget listing above gives the data. For \(n=10^{6}\), dense LU needs \(6.667\times10^{17}\) flop, which takes 0.553 s at \(R_{\max}=1.206\times10^{18}\) flop/s and 0.389 s at the \(R_{\text{peak}}\) of the slide. The matrix needs 8 TB. The memory of the machine, estimated from the user guide as \(9216\times(512+8\times64)\) GB (the DDR4 and the HBM of each node), is 9.44 PB, so the matrix occupies 0.085 % of it. The simplest problem of the lecture needs about half a second of arithmetic at \(R_{\max}\). But \(R_{\max}\) is measured at the problem size \(N_{\max}\) that suits the machine, which is 24&nbsp;837&nbsp;120 for the Frontier entry of November 2024 on the <a href="https://www.top500.org/system/180047/">TOP500 system page</a>. At \(n=10^{6}\), 25 times smaller, the matrix gives each of 9&nbsp;216 nodes only 0.87 GB, and the rate is lower. The verdict does not depend on it: at 1 % of \(R_{\max}\) the factorization takes 55 s. The claim fails at \(n=10^{6}\).</p>
+<p>For dense elimination the claim holds at larger \(n\), and the constraint that makes it hold first is storage. In one day at \(R_{\max}\), dense LU can solve \(n\le5.39\times10^{7}\), from \(\tfrac23n^3=R_{\max}\cdot86\,400\ \mathrm{s}\). The memory of the machine holds a dense matrix only up to \(n\le3.44\times10^{7}\), from \(8n^2=9.44\times10^{15}\) bytes. The memory limit is smaller, by a factor of 1.57, so storage binds first, and a dense system at that limit takes 6.22 hours. The \(N_{\max}\) of the list fills the GPU memory: \(8N_{\max}^2\) is 1.004 times the 512 GB of HBM per node on 9&nbsp;604 nodes, the node count of the November 2024 list (1.004 with decimal gigabytes; 0.935 if the 64 GB per GPU are binary gigabytes), so the matrix of the list run fills 93 % to 100 % of the HBM. With only the HBM of 9&nbsp;216 nodes, the dense limit is \(n=2.43\times10^{7}\) (2.2 hours at \(R_{\max}\)), and storage binds still earlier. For \(n=10^{9}\) both constraints fail: the matrix needs 8 EB, 850 times the memory of the machine, and the arithmetic needs 17.5 years, 6400 times the one-day budget. For dense elimination the lecture's conclusion is therefore correct for \(n\ge3.4\times10^{7}\) on the machine of June 2024, because the matrix no longer fits in memory; one day of arithmetic alone would allow \(n=5.4\times10^{7}\). Below \(3.4\times10^{7}\) the conclusion is incorrect, and the lecture gives no value of \(n\) for the claim.</p>
+<p>This verdict concerns dense elimination, the method whose \(n^3\) cost the lecture uses. A direct method that exploits the band does not fail at \(n=10^{9}\): band LU needs \(2.0\times10^{18}\) flop, 1.66 s at \(R_{\max}\), and 506 TB, which is 5.4 % of the memory (budget listing). It fails at \(n=10^{12}\), with \(2\times10^{24}\) flop, 19.2 days at \(R_{\max}\), and 16 EB, 1700 times the memory. Table 1.2 lists a sparse direct method with the same order of time as conjugate gradients in two dimensions; this chapter does not compare the two further.</p>
+<p>For the iterative methods the same machine is far inside its limits. In the budget listing, CG on the model problem with \(n=10^{9}\) needs \(2.9\times10^{15}\) flop and 40 GB: 0.208 s at the HPCG rate of Frontier, 86 times slower than the Linpack-rate figure of 0.0024 s. With \(n=10^{12}\), the top of the lecture's range, it needs \(9.2\times10^{19}\) flop and 40 TB, which is 1.83 hours at the HPCG rate. These figures use the iteration bound (1.7), which was about 3 times the observed count in the listing of the previous section, and the five-point matrix in two dimensions, which is not the problem that HPCG uses. They are estimates from a model that assumes the same rate for the whole run, and the measured HPCG rate is the best available evidence for that rate. They show that the whole range of unknowns that the lecture lists, \(10^{6}\) to \(10^{12}\), is within reach of one machine of June 2024 for this model problem with conjugate gradients. The conclusion of the lecture, that the iterative methods are what make these machines useful, is therefore supported in the form that the budget model can test: the dense solver is out of reach from about \(3.4\times10^{7}\) unknowns, band elimination at \(10^{12}\), and conjugate gradients are not out of reach at \(10^{12}\).</p>
+<p>The final question of the lecture, which problems can be solved efficiently as machines grow, is the question of the chapters that follow. The cost model of this chapter is a single equation, \(T=W/R\), with one rate. A machine of \(10^{18}\) flop/s is not one processing element of that speed, and its memory is not one memory. Chapters 6 to 10 replace the single rate by a model of one node: the arithmetic units, the memory hierarchy, the bandwidth, and the roofline that explains why the HPCG rate is 1.2 % of the Linpack rate. Chapters 11 to 16 add the cost of dividing work among threads and processes. Chapters 17 to 26 add accelerators. Chapters 27 and 28 treat the diagnosis of slow and wrong programs, chapter 29 the libraries that supply the algorithms of this chapter, and chapter 30 the scheduling of jobs on a shared machine.</p>
+
+
+<h2 id="limits">What the model establishes and what it does not</h2>
+<p>Table 1.3 lists the statements of the lecture that this chapter tested, with the status that the tests gave them. Of the 17 statements, 4 are corrected, 1 is not supported, 1 is partly supported, 1 is not reproduced at the size it concerns, 4 are refined, 3 are confirmed, 1 is reproduced as arithmetic, 1 is true only on the date of its list, and 1 is not tested.</p>
+<div class="table-wrap"><table>
+<caption>Table 1.3. Statements of the lecture and their status in this chapter.</caption>
+<thead><tr><th scope="col">Statement of the lecture</th><th scope="col">Status</th><th scope="col">Evidence in this chapter</th></tr></thead>
+<tbody>
+<tr><td>Computation is a third support of science beside theory and experiment.</td><td>Not tested</td><td>A framing statement; the anecdotes are not used as evidence.</td></tr>
+<tr><td>Turing's model has one bit entering a black box, being modified, and leaving.</td><td>Refined</td><td>The machine of Turing (1936) has a tape of squares that bear symbols; the model defines computability and assigns no cost.</td></tr>
+<tr><td>Krylov was a decorated military officer at the end of the 19th century.</td><td>Confirmed; the service was naval</td><td>MacTutor: Captain of the Admiralty in January 1900; a General and Chief Naval Ship Construction Inspector in January 1908.</td></tr>
+<tr><td>Krylov's iterative methods were developed at the turn of the century.</td><td>Corrected</td><td>His paper of 1931 concerns the characteristic polynomial; the conjugate-gradient method is of 1952 (Hestenes and Stiefel).</td></tr>
+<tr><td>A direct solve costs of order \(n^3\) operations, 27 for \(n=3\).</td><td>Refined</td><td>Exact LU count (1.3): 13 flop, plus 15 for the substitutions; the leading constant is \(2/3\).</td></tr>
+<tr><td>\(n=10^{6}\) gives \(10^{18}\) operations, \(10^{6}\) s at \(10^{12}\) flop/s.</td><td>Reproduced as arithmetic</td><td>\(6.7\times10^{17}\) flop, 7.7 days (11.6 days with \(n^3\)); the storage is 8 TB.</td></tr>
+<tr><td>Krylov solvers reduce the cost from \(O(n^3)\) to \(O(n\log n)\).</td><td>Corrected</td><td>Table 1.2: conjugate gradients \(O(n^{3/2})\) in two dimensions; \(O(n\log n)\) is the FFT-based solver. Counts of iterations in the listing: 25, 51, 101, 204.</td></tr>
+<tr><td>Galerkin was an admiral in the Soviet Navy.</td><td>Partly supported</td><td>MacTutor: engineer and mathematician, no rank. Wikipedia (secondary): lieutenant general at the Navy's engineering school from 1939. No source opened gives admiral.</td></tr>
+<tr><td>The Difference Engine finds the coefficients of a polynomial fitted to data.</td><td>Corrected</td><td>Science Museum Group: it tabulates values by finite differences, with addition and subtraction.</td></tr>
+<tr><td>ENIAC performed about 300 floating-point operations per second.</td><td>Refined</td><td>385 multiplications, 5000 additions and 40 divisions per second on 10-digit decimal numbers; no floating-point format is described.</td></tr>
+<tr><td>Firing tables need the full three-dimensional Navier–Stokes equations.</td><td>Not supported</td><td>Weik describes trajectory runs on integrating machines and does not mention the equations.</td></tr>
+<tr><td>The performance of the fastest machines grows exponentially.</td><td>Confirmed, with a later slowdown</td><td>Doubling time 1.28 years from 1993 to 2024 at rank 1; 4.01 years from 2022 to 2026.</td></tr>
+<tr><td>Frontier performs 1.7 exaflops.</td><td>Refined</td><td>The slide says peak: \(R_{\text{peak}}=1.7148\times10^{18}\) flop/s on the June 2024 list; \(R_{\max}=1.206\times10^{18}\) flop/s. The slide also matches the lists of June and November 2023.</td></tr>
+<tr><td>Frontier consumes 23 MW and has 8,699,904 cores.</td><td>Confirmed</td><td>TOP500, June 2023, November 2023 and June 2024: 8 699 904 cores; 22 703 to 22 786 kW.</td></tr>
+<tr><td>The 8.7 million cores are CPU cores.</td><td>Corrected</td><td>944 processing elements per node; 589 824 CPU cores, 6.8 % of the listed count.</td></tr>
+<tr><td>Frontier is the fastest machine in the world.</td><td>True on the list of the lecture</td><td>El Capitan in November 2024; LineShine in June 2026.</td></tr>
+<tr><td>Even Frontier cannot solve the simplest problems by direct methods.</td><td>Not reproduced at \(n=10^{6}\)</td><td>0.553 s at \(R_{\max}\) and 8 TB of 9.44 PB; true for dense LU from \(n\approx3.4\times10^{7}\), where storage binds first; band LU still runs at \(n=10^{9}\).</td></tr>
+</tbody></table></div>
+<p>The model of this chapter, the triple of problem, algorithm and machine with the cost \(T=W/R\), establishes four things. The operation count of dense elimination is known exactly (1.3), and its leading constant is \(2/3\), which a program confirms for four sizes. Feasibility has two constraints, arithmetic time and storage, and for dense elimination on the leading machine of June 2024 storage binds first, at \(n=3.4\times10^{7}\). The costs of four solvers for the model problem have the exponents 3, 2, 2 and 3/2 in \(n\), which Table 1.2 states and the iteration counts confirm for Jacobi and conjugate gradients. The lecture's chain of dates, names and machine figures is checkable, and the checks corrected the items listed in the table.</p>
+<p>The model leaves out most of what determines the speed of a real program. Equation (1.1) assumes that arithmetic is the only cost, that the machine sustains one rate, and that no processing element idles. The section on flop/s shows that the second assumption fails by a factor of 86 for conjugate gradients on Frontier. The model does not include communication between processing elements, the memory hierarchy, the cost of reading and writing files, or the time that a job waits in a queue. Chapters 6 to 16 and 30 supply them.</p>
+<p>The quantitative results have limits of their own. They concern one problem, the five-point Poisson matrix in two dimensions, and the constants 5 flop per Jacobi unknown and 20 per conjugate-gradient iteration are counts of the author, not measurements. The iteration bound (1.7) overestimates the observed iterations by a factor of about 3 for this right-hand side. The HPCG benchmark solves a different problem (the name states conjugate gradients; the problem is not described on the page opened), so the factor of 86 is evidence of a gap, not a prediction for the model problem. All gigabytes and terabytes of this chapter are decimal (×10^9 B per GB); if the memory sizes of the user guide are binary, the memory estimates fall by up to 7 %. The memory of Frontier is estimated from the per-node figures of today's user guide and a node count obtained by dividing the listed core count by 944; neither the 944 nor the memory per node of the machine at the date of the list was checked in a source of that date. The listed \(R_{\text{peak}}\) is 2.7 % below the value \(9216\times4\times47.8\) TFlop/s \(=1.762\times10^{18}\) flop/s that follows from the guide's figure for one accelerator, and the sources opened do not explain the difference. Any contribution of the processors would widen the gap. The doubling times rest on 8 points at rank 1 and 4 at rank 500, with dates rounded to the half year; the sub-period rates at the end rest on two points each. The comparison of ENIAC with Frontier compares different operations. The laptop measurements use a single-thread reference BLAS for the solve, a hand-written tiled kernel for the product, and a machine shared with other processes, so the rates are not estimates of the processor's capability; chapter 6 derives its peak.</p>
+<p>The Dennard analysis assumes that every circuit switches in every cycle and that the capacitance scales as \(\epsilon_{\text{ox}}A_{\text{g}}/t_{\text{ox}}\). Real circuits switch a fraction of the time, and wires add capacitance that does not scale in the same way; Dennard et al. discuss the wires in their Table II, which this chapter did not use. The statements about Moore (1965) concern the number of components per circuit at minimum cost. They say nothing about the rate of any machine.</p>
+
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> Derive the operation count of band LU factorization for a matrix of order \(n\) with half-bandwidth \(b\) (all nonzeros within \(b\) positions of the diagonal, no fill-in outside the band). Specialize to the five-point matrix with \(n=N^2\) and \(b=N\), compute the ratio of this count to the dense count \(\tfrac23n^3\) for \(N=1000\), and compute the ratio of the storage figures.</p>
+<details><summary>Solution</summary>
+<p>At step \(k\), only the \(b\) rows below row \(k\) have a nonzero in column \(k\), and only the \(b\) columns to the right of column \(k\) have a nonzero in row \(k\). The step therefore forms \(b\) multipliers (\(b\) divisions) and updates a \(b\times b\) block with one multiplication and one subtraction per entry, \(2b^2\) flop. Near the end of the matrix fewer than \(b\) rows remain, which changes the count by \(O(b^3)\). Summing over the \(n\) steps gives \(W_{\text{band}}=2nb^2+O(nb+b^3)\). For \(n=N^2\) and \(b=N\) this is \(2N^4+O(N^3)\). The dense count is \(\tfrac23N^6\), so the ratio is \(2N^4\big/\tfrac23N^6=3/N^2\), which is \(3\times10^{-6}\) for \(N=1000\): dense elimination needs \(3.3\times10^{5}\) times more flop, the figure of the direct-cost section (\(6.7\times10^{17}\) against \(2\times10^{12}\)). The storage of the band factors is \(8n(2N+1)\) bytes and that of the dense matrix is \(8n^2\), so the ratio is \(n/(2N+1)\approx N/2=500\) for \(N=1000\), which agrees with 8 TB against 16 GB. In terms of the number of unknowns, \(n^3\) against \(n^2\) is the first two rows of Table 1.2.</p>
+</details>
+<p><strong>Exercise 2 (compute).</strong> A machine sustains \(R\) flop/s on dense LU and has \(M\) bytes of memory. (a) Find the largest \(n\) that a dense solve can reach in the time \(T\) and the largest \(n\) that fits in memory. (b) Show that storage binds first exactly when \(R\gt(M/8)^{3/2}/(1.5\,T)\). (c) For \(T=86\,400\) s, compute the critical rate for the memory of Frontier, \(9.44\times10^{15}\) B, and for the 15 GB of the laptop of this chapter, and decide which constraint binds on each machine at its measured rate (\(1.206\times10^{18}\) flop/s and \(4\times10^{9}\) flop/s).</p>
+<details><summary>Solution</summary>
+<p>(a) From (1.1) and (1.3), the time limit is \(\tfrac23n^3\le RT\), so \(n_{\text{time}}=(1.5RT)^{1/3}\). From (1.4), the memory limit is \(8n^2\le M\), so \(n_{\text{mem}}=(M/8)^{1/2}\). (b) Storage binds first when \(n_{\text{mem}}\lt n_{\text{time}}\), that is \((M/8)^{1/2}\lt(1.5RT)^{1/3}\). Raising both sides to the power 3 gives \((M/8)^{3/2}\lt1.5RT\), which is \(R\gt(M/8)^{3/2}/(1.5T)\). (c) For Frontier, \(M/8=1.18\times10^{15}\), \((M/8)^{3/2}=4.05\times10^{22}\), and dividing by \(1.5\times86\,400=1.296\times10^{5}\) s gives \(3.13\times10^{17}\) flop/s. The measured \(R_{\max}=1.206\times10^{18}\) is 3.9 times larger, so storage binds: \(n_{\text{mem}}=3.44\times10^{7}\) and \(n_{\text{time}}=5.39\times10^{7}\). For the laptop, \(M/8=1.875\times10^{9}\), \((M/8)^{3/2}=8.12\times10^{13}\), and the critical rate is \(6.3\times10^{8}\) flop/s. The measured solve rates of 2.9 to 4.2 Gflop/s are 5 to 7 times larger, so storage binds there too: for \(R=4\times10^{9}\), \(n_{\text{mem}}=4.33\times10^{4}\) and \(n_{\text{time}}=8.03\times10^{4}\). A machine would reach the time limit first only if its rate were below the critical rate, which for these two machines is 3.9 times and 5 to 7 times below the measured rate. For dense elimination, the ratio of rate to memory of both machines puts the constraint on storage.</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> The lecture presents iterative methods as faster than direct methods. Give a case with \(n=1000\) in which conjugate gradients cost more flop than LU factorization, and state which assumptions of the comparison the case violates.</p>
+<details><summary>Solution</summary>
+<p>Take \(A=Q\Lambda Q^{T}\) of order \(n=1000\), where \(Q\) is a random orthogonal matrix and the eigenvalues in \(\Lambda\) are spaced geometrically from 1 to \(10^{6}\), so that the condition number is \(\kappa=10^{6}\). One CG iteration needs a dense matrix-vector product, \(2n^2=2\times10^{6}\) flop, plus \(O(n)\) work. LU factorization needs \(\tfrac23n^3=6.67\times10^{8}\) flop, so CG is cheaper only if it needs fewer than \(n/3\approx333\) iterations. The bound (1.7) with \(\varepsilon=10^{-6}\) allows up to \(\lceil\tfrac12\sqrt{10^{6}}\ln(2\times10^{6})\rceil=7255\) iterations. The next listing runs CG with a random right-hand side and the stopping rule of the iteration listing, on this matrix and on a matrix with the same \(\kappa\) and evenly spaced eigenvalues. Its output is one sample run, since the iteration count depends slightly on the rounding of the BLAS in use.</p>
+<pre><code class="language-python" data-file="cg_spectrum.py" data-run="python3 cg_spectrum.py" data-check="returncode">"""Conjugate gradients on a dense symmetric positive definite matrix of order 1000 with condition number 1e6:
+the iteration count depends on how the eigenvalues are spread, not only on their ratio."""
+import sys
+import numpy as np
+
+n, TOL, CAP = 1000, 1e-6, 20000
+rng = np.random.default_rng(0)
+Q, _ = np.linalg.qr(rng.standard_normal((n, n)))      # random orthogonal eigenvectors
+b = rng.standard_normal(n)
+
+def cg_iterations(A):
+    """Iterations until the residual norm is below TOL times the norm of b, starting from zero."""
+    r = b.copy(); p = r.copy(); rr = r @ r; nb = np.sqrt(rr); k = 0
+    while np.sqrt(rr) &gt; TOL * nb and k &lt; CAP:
+        Ap = A @ p; alpha = rr / (p @ Ap)
+        r -= alpha * Ap
+        rr_new = r @ r; p = r + (rr_new / rr) * p; rr = rr_new; k += 1
+    return k
+
+lu = 2.0 / 3.0 * n**3
+print(f"LU: {lu:.3e} flop; break-even at {n / 3:.0f} CG iterations of 2n^2 flop each")
+ok = True
+for name, lam in (("evenly spaced", np.linspace(1.0, 1e6, n)), ("geometric", np.geomspace(1.0, 1e6, n))):
+    A = (Q * lam) @ Q.T
+    A = 0.5 * (A + A.T)
+    k = cg_iterations(A)
+    ok = ok and k &lt; CAP
+    print(f"{name:&lt;14} kappa = {lam[-1] / lam[0]:.0e}: {k:5d} iterations, CG {2.0 * n * n * k:.3e} flop, CG/LU = {2.0 * n * n * k / lu:.2f}")
+sys.exit(0 if ok else 1)
+</code></pre>
+<pre><code class="output">LU: 6.667e+08 flop; break-even at 333 CG iterations of 2n^2 flop each
+evenly spaced  kappa = 1e+06:   202 iterations, CG 4.040e+08 flop, CG/LU = 0.61
+geometric      kappa = 1e+06:  6267 iterations, CG 1.253e+10 flop, CG/LU = 18.80
+</code></pre>
+<p>With the geometric spectrum, CG needed 6267 iterations in the printed run, which is \(1.25\times10^{10}\) flop, 18.8 times the cost of LU. The spectrum matters: with the same \(\kappa\) and evenly spaced eigenvalues the same program needed 202 iterations, which costs 0.61 of LU, and CG wins. The run also shows the loss of finite termination: 6267 iterations exceed \(n=1000\), whereas Hestenes and Stiefel obtain the solution in at most \(n\) iterations in exact arithmetic, and rounding errors destroy that property (Shewchuk, p. 33). The condition number alone does not decide the cost. The case violates two assumptions behind the lecture's comparison. The matrix is dense, so one iteration costs \(2n^2\) and not \(O(n)\), and the eigenvalues are spread evenly in the logarithm, so the iteration count grows with the full width of the spectrum. Iterative methods win for sparse matrices with a moderate condition number, with clustered or evenly spread eigenvalues, or with a good preconditioner, which this chapter did not treat.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> A report estimates the time of the CG solve of the model problem at \(n=10^{6}\) on Frontier as \(W/R_{\max}=9.246\times10^{10}/1.206\times10^{18}=7.7\times10^{-8}\) s. Name the assumption of (1.1) that this estimate relies on, say why it fails here, and give a corrected figure with its remaining limits.</p>
+<details><summary>Solution</summary>
+<p>The estimate assumes that the machine sustains \(R_{\max}\), the rate of dense LU in the Linpack benchmark, during the CG run. The section on flop/s shows that Frontier sustains \(1.4054\times10^{16}\) flop/s on HPCG, a conjugate-gradient benchmark, which is 1/85.8 of \(R_{\max}\). The corrected figure is \(9.246\times10^{10}/1.4054\times10^{16}=6.6\times10^{-6}\) s, 86 times longer. Two limits remain. HPCG solves another problem (the page opened gives only its name), so the factor of 86 is evidence of a gap and not a measurement of this problem. And the corrected figure is still a lower bound: the model of this chapter has no communication cost, and 9&nbsp;216 nodes share only \(10^{6}\) unknowns, about 108 each. A conjugate-gradient iteration needs two global sums, whose cost chapters 14 to 16 model with latency and bandwidth. The honest statement is that the arithmetic needs at least 6.6 microseconds on the whole machine, and that a problem of this size would not use the whole machine.</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> A group must solve the two-dimensional model problem with \(N=10^{4}\) points per side (\(n=10^{8}\)) to the tolerance \(10^{-6}\) within one hour. Machine A sustains \(10^{12}\) flop/s at best and has 64 GB; machine B sustains \(10^{14}\) flop/s at best and has 1 TB. Use the formulas of this chapter to decide which of the four methods can run on which machine, and say what measurement the group should make before it commits.</p>
+<details><summary>Solution</summary>
+<p><em>Dense LU</em> needs \(8n^2=8\times10^{16}\) B, which fits on neither machine. <em>Band LU</em> needs \(8n(2N+1)=1.6\times10^{13}\) B, 16 TB, which fits on neither (\(2N^4=2\times10^{16}\) flop would take 200 s on B if it fit). <em>Jacobi</em> needs \(1.6\) GB and, by (1.6), \(2.8\times10^{8}\) sweeps, so \(1.4\times10^{17}\) flop: \(1.4\times10^{5}\) s, 39 hours, on A, and 1400 s, 23 minutes, on B at the nominal rate. <em>CG</em> needs 4 GB and, by the bound (1.7), 46&nbsp;188 iterations, so \(9.2\times10^{13}\) flop: 92 s on A and 0.92 s on B at the nominal rate. Only Jacobi on B and CG on both machines meet the deadline at the nominal rate. The nominal rate is optimistic: if the machines run these iterations at 1/86 of their best, as Frontier does on HPCG, CG takes \(7.9\times10^{3}\) s, 2.2 hours, on A, which misses the deadline, and 79 s on B, which meets it; Jacobi on B takes 33 hours. The break-even is an efficiency of \(92/3600=2.6\,\%\) of the nominal rate for CG on A. A recommendation: use CG, on B if B is available. If only A is available, run the same code at \(N=10^{3}\) (\(10^{3}\) times less work: \(9.2\times10^{10}\) against \(9.2\times10^{13}\) flop), measure its rate in flop/s from the iteration count, and commit to the full run only if the measured rate is at least 2.6 % of the best. The observed iteration counts of the previous listing are about a third of the bound, which gives a margin of about 3.</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement).</strong> Write a program that times <code>numpy.linalg.solve</code> for orders 400, 800, 1600 and 2400, fits a power law \(t=cn^{a}\) by least squares in logarithms, predicts the time at \(n=3200\), and then measures that time. Compare the exponent with 3 and the prediction with the measurement, and explain any discrepancy.</p>
+<details><summary>Solution</summary>
+<pre><code class="language-python">import time
+import numpy as np
+
+rng = np.random.default_rng(2)
+
+def best_time(n, reps):
+    A = rng.standard_normal((n, n)); b = rng.standard_normal(n)
+    best = 1e9
+    for _ in range(reps):
+        t0 = time.perf_counter(); np.linalg.solve(A, b); best = min(best, time.perf_counter() - t0)
+    return best
+
+sizes = [400, 800, 1600, 2400]
+times = [best_time(n, 3) for n in sizes]
+slope, intercept = np.polyfit(np.log(sizes), np.log(times), 1)
+predicted = float(np.exp(intercept) * 3200 ** slope)
+measured = best_time(3200, 2)
+print("fitted exponent %.2f, predicted %.2f s, measured %.2f s" % (slope, predicted, measured))
+</code></pre>
+<p>The program was run on the laptop of this chapter in two groups of runs. In the first three runs, made while other processes used the machine, the best times at \(n=2400\) were 3.4 to 3.8 s, the fitted exponents were 3.07 to 3.13, and the predictions for \(n=3200\) were 8.7 to 9.6 s. These first runs used the same fit without the final measurement, so they did not measure the time at \(n=3200\). In three later runs of the program above, made when the machine was quieter, the best times at \(n=2400\) were 2.2 to 2.3 s, the fitted exponents were 2.98 to 3.00, the predictions were 5.25 to 5.44 s, and the measured times at \(n=3200\) were 4.94 to 5.31 s. The prediction was 2 % to 9 % above the measurement. Two results follow. First, the exponent is close to the 3 of (1.3) when the rate is stable. The rates \(\tfrac23n^3/t\) in the quiet runs were 3.9 to 4.1 Gflop/s at \(n=400\) and 4.0 to 4.2 at \(n=2400\). Second, in the busy runs the rate fell from 3.0 to 3.2 Gflop/s at \(n=400\) to 2.4 to 2.7 Gflop/s at \(n=2400\), which raised the exponent above 3 and the prediction above the time that the quiet machine delivers. The rate that the quiet machine delivered at \(n=2000\) in the listing of the section on flop/s, 3.6 to 4.1 Gflop/s, implies 5.3 to 6.1 s at \(n=3200\), which agrees with the quiet runs and not with the busy ones. A prediction of a run time from a fit is as reliable as the stability of the rate during the measurements. On a shared machine, the measurement of the time itself, at the size in question, is the safer figure.</p>
+</details>
+
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li>Recording: <a href="https://www.youtube.com/watch?v=yX0KfCorP6s">W0L0, Introduction to High Performance Scientific Computing</a> (slides: the three supports of science; the board derivation of the \(n^3\) cost and the \(10^{6}\) s example; FLOPS \(10^{12}\)–\(10^{15}\); \(O(n\log n)\) and Krylov; the Difference Engine; ENIAC with 300; the growth charts; Frontier with 1.7 ExaFlops (Peak), 23 MW, 8,699,904 cores), NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay, 2025.</li>
+<li>TOP500 list pages, <a href="https://www.top500.org/lists/top500/1993/06/">June 1993</a>, <a href="https://www.top500.org/lists/top500/1997/06/">June 1997</a>, <a href="https://www.top500.org/lists/top500/2000/06/">June 2000</a>, <a href="https://www.top500.org/lists/top500/2010/06/">June 2010</a>, <a href="https://www.top500.org/lists/top500/2022/06/">June 2022</a>, <a href="https://www.top500.org/lists/top500/2023/06/">June 2023</a>, <a href="https://www.top500.org/lists/top500/2023/11/">November 2023</a>, <a href="https://www.top500.org/lists/top500/2024/06/">June 2024</a>, <a href="https://www.top500.org/lists/top500/2024/11/">November 2024</a> and <a href="https://www.top500.org/lists/top500/2026/06/">June 2026</a>, with the rank-500 rows of the list pages for 1993, 2010, 2024 and 2026. The entries (cores, Rmax, Rpeak, power) of Table 1.1 and of the programs; Frontier at 8,699,904 cores, 1.206 EFlop/s, 1.7148 EFlop/s and 22,786 kW in June 2024; El Capitan at 1.742 EFlop/s in November 2024; LineShine at 2.1984 EFlop/s in June 2026.</li>
+<li>TOP500, <a href="https://www.top500.org/system/180047/">Frontier system page</a> (read 26 October 2026): the problem size \(N_{\max}=24\,837\,120\) of the Linpack run of the current entry (November 2024 and later; \(R_{\max}=1353\) PFlop/s, \(R_{\text{peak}}=2055.72\) PFlop/s), and an HPCG figure of 14&nbsp;054 TFlop/s.</li>
+<li>TOP500, <a href="https://www.top500.org/project/linpack/">The Linpack Benchmark</a>. The benchmark solves a dense linear system; the algorithm must be LU factorization with partial pivoting with an operation count of \(2/3\,n^3+O(n^2)\); definitions of \(R_{\max}\), \(N_{\max}\), \(N_{1/2}\) and \(R_{\text{peak}}\); the statement that the number does not reflect the overall performance of a system.</li>
+<li>A. P. Petitet, University of Tennessee, Innovative Computing Laboratory, <a href="https://www.netlib.org/benchmark/hpl/hpl-2.3.tar.gz">HPL 2.3</a> (2 December 2018; the author named in the file header), source file <code>testing/ptest/HPL_pdtest.c</code>, lines 231–233 (the rate is computed from \(\tfrac23n^3+\tfrac32n^2\)) and 393–406 (the scaled residual with the infinity norm and the test against a threshold), and <code>testing/ptest/HPL.dat</code> line 13 (threshold 16.0). Also the page of the algorithm description, <a href="https://www.netlib.org/benchmark/hpl/algorithm.html">netlib.org/benchmark/hpl/algorithm.html</a>, which was opened and does not state the flop count.</li>
+<li>TOP500, <a href="https://www.top500.org/lists/hpcg/2024/06/">HPCG list, June 2024</a>. HPCG as a complement to the Linpack measurement; Frontier 14&nbsp;054 TFlop/s, Fugaku 16&nbsp;004.5 TFlop/s.</li>
+<li>Oak Ridge Leadership Computing Facility, <a href="https://docs.olcf.ornl.gov/systems/frontier_user_guide.html">Frontier User Guide</a>, system overview and node description (read on 2026-10-26): one 64-core AMD EPYC and four MI250X (eight GPUs) per node; 512 GB DDR4 per node and 64 GB HBM2E per GPU; 110 compute units per GPU; 47.8 TFLOPS vector double-precision per MI250X; 9&nbsp;856 compute nodes in total at the date of reading.</li>
+<li>J. W. Demmel, <a href="https://people.eecs.berkeley.edu/~demmel/cs267/lecture24/lecture24.html">CS267 notes for lectures 15 and 16, 5 and 7 March 1996 (file lecture24.html), Solving the discrete Poisson equation using Jacobi, SOR, conjugate gradients, and the FFT</a>. The table of serial time and storage of the solvers (Table 1.2); the spectral radius \(\cos(\pi/(n+1))\) of Jacobi; no fill-in outside the band of band LU; the restriction of the FFT and multigrid to equations like Poisson's.</li>
+<li>J. R. Shewchuk, <a href="https://www.cs.cmu.edu/~quake-papers/painless-conjugate-gradient.pdf">An introduction to the conjugate gradient method without the agonizing pain</a>, edition 1¼, 4 August 1994. p. 33: CG chooses the coefficients that minimize the energy norm of the error, and the history of its neglect in the 1960s; p. 37 (Section 10): the bound \(\lceil\tfrac12\sqrt\kappa\ln(2/\varepsilon)\rceil\); p. 38: \(O(m\sqrt\kappa)\), and \(O(n^{3/2})\) and \(O(n^{4/3})\) in two and three dimensions.</li>
+<li>M. R. Hestenes and E. Stiefel, <a href="https://nvlpubs.nist.gov/nistpubs/jres/049/jresv49n6p409_A1b.pdf">"Methods of conjugate gradients for solving linear systems"</a>, J. Res. Nat. Bur. Standards 49(6) (1952) 409–436. The abstract (an iterative algorithm that gives the solution in \(n\) steps and is a special case of a general method that includes Gaussian elimination) and the introduction (Lanczos's closely related method).</li>
+<li>A. M. Turing, <a href="https://www.cs.virginia.edu/~robins/Turing_Paper_1936.pdf">"On computable numbers, with an application to the Entscheidungsproblem"</a>, Proc. London Math. Soc. s2-42 (1937) 230–265, received 28 May 1936, read 12 November 1936. The first pages: the tape of squares that bear symbols, and the arguments that the computable numbers include all numbers that could naturally be regarded as computable.</li>
+<li>J. von Neumann, <a href="https://web.mit.edu/STS.035/www/PDFs/edvac.pdf">First Draft of a Report on the EDVAC</a>, 30 June 1945, as reprinted with an introduction by M. D. Godfrey, IEEE Annals of the History of Computing 15(4) (1993). Title page only: the date, and the contract between the Army Ordnance Department and the University of Pennsylvania.</li>
+<li>MacTutor, <a href="https://mathshistory.st-andrews.ac.uk/Biographies/Krylov_Aleksei/">Aleksei Krylov (1863–1945)</a>: father an artillery officer; fifty years of teaching at the naval academy; General and Chief Naval Ship Construction Inspector in January 1908. Wikipedia, <a href="https://en.wikipedia.org/wiki/Aleksey_Krylov">Aleksey Krylov</a> (a secondary source): Imperial Russian Navy; the 1931 paper on the characteristic polynomial, Izv. Akad. Nauk SSSR 7(4) 491–539 (not opened).</li>
+<li>MacTutor, <a href="https://mathshistory.st-andrews.ac.uk/Biographies/Galerkin/">Boris Grigorievich Galerkin (1871–1945)</a>: engineer and mathematician; method of approximate integration dated 1915; no rank recorded. Wikipedia, <a href="https://en.wikipedia.org/wiki/Boris_Galerkin">Boris Galerkin</a> (a secondary source): head of the structural mechanics department of the Navy's engineering school (VITU) in 1939 with the rank of lieutenant general, without earlier military service.</li>
+<li>Science Museum Group, <a href="https://www.sciencemuseum.org.uk/objects-and-stories/charles-babbages-difference-engines-and-science-museum">Charles Babbage's Difference Engines and the Science Museum</a>: purpose, finite differences, completion of one seventh in 1832, halt in 1833, £17,500.</li>
+<li>M. H. Weik, <a href="https://ftp.arl.army.mil/~mike/comphist/eniac-story.html">The ENIAC Story</a>, Ordnance Ballistic Research Laboratories, Aberdeen Proving Ground, 1961. The name; the date 15 February 1946; 19&nbsp;000 vacuum tubes, almost 200 kW, thirty units; the addition time of 200 microseconds, the multiplication time of 2.6 ms and the division time of 25 ms for 10-digit numbers; the firing and bombing tables; the differential analyzer.</li>
+<li>G. E. Moore, "Cramming more components onto integrated circuits", Electronics, 19 April 1965, pp. 114–117, <a href="https://www.cs.utexas.edu/~fussell/courses/cs352h/papers/moore.pdf">read in the reprint of Proc. IEEE 86(1), 1998, pp. 82–85</a>. A factor of two per year for the complexity at minimum component cost; 65&nbsp;000 components per circuit in 1975.</li>
+<li>R. H. Dennard, F. H. Gaensslen, H.-N. Yu, V. L. Rideout, E. Bassous and A. R. LeBlanc, "Design of ion-implanted MOSFET's with very small physical dimensions", IEEE J. Solid-State Circuits 9(5) (1974) 256–268, <a href="https://www.nationalacademies.org/read/12980/chapter/13">read in the reprint of the National Academies (2011), Appendix D</a>, and in a scanned copy (Table I on p. 265 of the scan). The scaling factors of Table I; the constancy of the power density; the non-scaling of the subthreshold characteristic.</li>
+<li>U.S. Energy Information Administration, <a href="https://www.eia.gov/tools/faqs/faq.php?id=97&amp;t=3">How much electricity does an American home use?</a>: 10&nbsp;791 kWh in 2022 per residential customer.</li>
+</ul>
+
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><span>First available chapter</span><a href="index.html">Lecture index</a><a rel="next" href="chapter-02-operating-systems-and-linux-kernel.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

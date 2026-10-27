@@ -1,0 +1,369 @@
+{
+  "chapter": 1,
+  "title": "What high performance scientific computing is for",
+  "status": "revised after review round 2",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "yX0KfCorP6s",
+      "label": "W0L0",
+      "playlist_index": 2,
+      "duration_seconds": 1621
+    }
+  ],
+  "frames_viewed": {
+    "yX0KfCorP6s": [
+      "f0002",
+      "f0006",
+      "f0013",
+      "f0016",
+      "f0021",
+      "f0023",
+      "f0024",
+      "f0025",
+      "f0026",
+      "f0027",
+      "f0028",
+      "f0030",
+      "f0031",
+      "f0032",
+      "f0033",
+      "f0034",
+      "f0035",
+      "f0036",
+      "f0038",
+      "f0041",
+      "f0048",
+      "f0049",
+      "f0050",
+      "f0052"
+    ]
+  },
+  "lecture_corrections": [
+    "Krylov solvers: the lecture says the iterative methods were developed at the turn of the century. Krylov's paper of 1931 concerns the characteristic polynomial of a matrix (English Wikipedia, secondary); the earliest Krylov-subspace solver in the sources opened is the conjugate-gradient method of Hestenes and Stiefel (1952).",
+    "Cost of Krylov methods: the lecture's board shows O(n log n). Demmel's table (CS267 notes for lectures 15 and 16, 1996) gives n^(3/2) for conjugate gradients on the 2-D Poisson problem and n log n for the FFT-based solver; Shewchuk p. 38 gives n^(3/2) in 2-D and n^(4/3) in 3-D. The chapter's iteration counts (25, 51, 101, 204 for N = 16..128) grow in proportion to N.",
+    "Galerkin: the lecture says an admiral in the Soviet Navy. Partly supported: MacTutor describes an engineer and mathematician and records no rank; English Wikipedia (secondary) records that in 1939 he became head of the structural mechanics department of the Navy's engineering school (VITU) with the rank of lieutenant general, without earlier military service. No source opened gives the rank of admiral.",
+    "Turing: the lecture describes a model in which one bit enters a black box. Turing (1936) defines a machine with a tape of squares bearing symbols; the chapter records this as a refinement.",
+    "Direct-solve count: the lecture gives about 27 operations for n = 3. The exact LU count is 13 flop plus 15 for the substitutions (28 in total); the leading constant of the large-n count is 2/3, not 1. Lecture's 10^18 operations and 10^6 s are reproduced as an order of magnitude (exact: 6.7e17 flop, 7.7 days at 1e12 flop/s).",
+    "Difference Engine: the lecture says it finds the coefficients of a polynomial fitted to data. The Science Museum Group page says it calculated and printed a series of values using finite differences, with addition and subtraction.",
+    "ENIAC: the lecture says about 300 floating-point operations per second. Weik's timings give 5000 additions, 385 multiplications and 40 divisions per second on 10-digit decimal numbers, and describe no floating-point format.",
+    "Firing tables: the lecture says each entry needs the full 3-D Navier-Stokes equations. Weik describes trajectory runs on a differential analyzer and does not mention the equations (absence in one source, not a proof).",
+    "Frontier: the slide says 1.7 ExaFlops (Peak): that is Rpeak, 1.7148e18 flop/s on the June 2024 list; Rmax, the ranking figure, is 1.206e18 flop/s. The slide's figures (8,699,904 cores, 1.7 EF peak, 23 MW) fit the lists of June 2023, November 2023 (Rmax 1.194e18, Rpeak 1.67982e18, 22,703 kW) and June 2024 equally; the chapter uses June 2024.",
+    "Frontier cores: the lecture says 8.7 million CPU cores. The list count 8,699,904 equals 9,216 nodes x 944 processing elements (64 CPU cores + 8 GPUs x 110 compute units per the OLCF guide), so 589,824 CPU cores (6.8 percent) and 8,110,080 GPU compute units.",
+    "Frontier as the fastest: true for the lists that match the slide (June 2023 to June 2024); El Capitan is first in November 2024 (1.742e18 flop/s) and LineShine in June 2026 (2.1984e18 flop/s).",
+    "Closing claim: the lecture says even Frontier could not solve the simplest problems by direct methods. At n = 1e6, dense LU is 6.7e17 flop, 0.553 s at Rmax and 8 TB (0.085 percent of an estimated 9.44 PB). Rmax is measured at Nmax = 24,837,120 (TOP500 system page, entry of November 2024), so the rate at n = 1e6 is lower; at 1 percent of Rmax the factorization takes 55 s. For dense LU, storage binds first: n = 3.44e7 by memory, 5.39e7 by one day of arithmetic; the claim holds from n = 3.4e7. At n = 1e9 both limits fail (8 EB = 850 times the memory; 17.5 years = 6,400 times the budget). Band LU, a direct method, runs at n = 1e9 (2.0e18 flop, 1.66 s at Rmax, 506 TB) and fails at n = 1e12 (2e24 flop, 19.2 days, 16 EB)."
+  ],
+  "source_uncertainties": [
+    "von Neumann, First Draft of a Report on the EDVAC (1945): the MIT copy is a scan without a text layer; only the title page and the introduction page of the 1993 reprint (Godfrey) were read as images. The chapter takes only the date (30 June 1945) and the contract parties from it, and does not state what the report proposes.",
+    "Krylov 1931 (Izv. Akad. Nauk SSSR 7(4) 491-539) and Galerkin 1915 were not opened. They are cited through MacTutor and, for Krylov's paper, English Wikipedia (a secondary source) and rest on those pages. Krylov's rank and service come from MacTutor; the MacTutor page for Krylov was read without the cited reference [1].",
+    "Turing 1936: the first pages of the text were read (opening summary and section 1 text on the tape and squares); the chapter relies on nothing else from the paper.",
+    "Dennard et al. 1974: the scaling factors were read in the National Academies reprint (2011), whose Table 1 text was extracted; the page number 265 for Table I is read from the OCR of a scanned copy and is not verified against the journal. Only the circuit-performance table and its text and the statement on the subthreshold characteristic were used; Table II (wires) was not used. The chapter does not say when voltage scaling ended; Bohr (2007) could not be opened.",
+    "Moore 1965: read in the 1998 Proc. IEEE reprint (pp. 82-85); the 63 components of 1965 is arithmetic of the chapter (65000 / 1024), not a figure stated by Moore.",
+    "TOP500: values were read from the list pages of the dates in the chapter (rank 1 to 10 tables, and the rank-500 row of the fifth page of each list). The dating of a June list as year + 0.5 is a convention of the chapter. The per-node count of 944 processing elements is inferred from exact divisibility of three listed core counts (June 2022, June 2024, November 2024), not stated by TOP500.",
+    "Frontier memory and node data come from the OLCF user guide as read on 2026-10-26, not from a version of June 2024. The guide lists 9,856 compute nodes; the divisibility argument gives 9,216 nodes in the June 2024 run. The chapter does not know whether the difference is the subset used for the run or a change of the machine. The memory of 9.44 PB (9,216 x 1024 GB) is an estimate.",
+    "Rpeak of Frontier: the list value 1.71481e18 flop/s is 2.7 percent below 9216 x 4 x 47.8e12 = 1.762e18 flop/s (the guide's vector double-precision peak per MI250X). The sources opened do not explain the difference (clock, node count, or CPU contribution). A CPU contribution would widen the gap (to about 3.7 percent at 16 flop per cycle per core, a figure not sourced here).",
+    "HPCG: hpcg-benchmark.org returned HTTP 404 for the page tried; only the TOP500 HPCG list (June 2024) was read, which names the benchmark and calls it a complement to Linpack but does not describe the problem. The factor 86 (Rmax / HPCG rate) is therefore evidence of a gap between dense-LU rate and conjugate-gradient rate, not a rate for the chapter's 2-D problem.",
+    "Demmel's lecture 24 is course material, not a refereed paper; the complexity table and the spectral radius cos(pi/(n+1)) of Jacobi are used as stated there and checked numerically by the chapter (Jacobi 221, 796, 3005 sweeps against 222, 804, 3044 predicted).",
+    "Shewchuk (1994): page numbers are the page numbers of the document (PDF page = document page + 6). The bound on p. 37 is for the energy norm of the error, while the chapter's programs stop on the residual norm; the comparison in the chapter is marked indicative.",
+    "Weik (1961): the account gives 19,000 vacuum tubes; no other source for the tube count was opened. That Weik describes no floating-point format and no Navier-Stokes equations is an absence in one source, not a proof of absence in the machine or the tables.",
+    "The Science Museum Group page was opened; no primary text of Babbage was opened.",
+    "The lecture's two charts (growth in computing power, TOP500 development) are images; the chapter reproduces list values instead of the charts, and does not claim that the charts' underlying data equal the values of the list pages (the first chart's source is not named in the lecture).",
+    "The TOP500 page of the benchmark (project/linpack) was read in the version served on 2026-10-26.",
+    "Timings: other agents used the machine during the runs. The matrix-product and solve listings were run seven times; the printed sample outputs are the fourth run and the ranges in the text cover all seven (timing_log kept in the author scratchpad, not in the repository). Ranges: naive 0.38-1.21 Gflop/s; tiled 4.7-11.0 (1 thread), 11.5-36.8 (4), 20.6-41.4 (8), 20.7-40.4 (12); NumPy solve 2.9-4.2 Gflop/s (3.6-4.1 at n = 2000); NumPy matrix product 1.2-5.3. The lowest values are from one run made while other processes loaded the machine. Exercise 6 reports two further groups of runs (3 busy, 3 quiet) of its own program; the quiet runs predicted 5.25-5.44 s and measured 4.94-5.31 s at n = 3200, the busy runs predicted 8.7-9.6 s without a measurement at n = 3200.",
+    "The CG iteration bound overestimates the observed count by a factor of about 3 for the source term 1; the budget table therefore overestimates CG time by about 3. The constants 5 flop per Jacobi unknown per sweep and 20 per CG iteration per unknown are counts by the chapter, not measurements.",
+    "The statement that the order of accuracy of the five-point scheme (error ratio 4.02, 4.01) holds only for one smooth solution on the unit square; no proof of stability is given (deferred to chapter 9).",
+    "Corrections rest on the slides or on statements that the context of the lecture repeats (Galerkin's naval rank, the Navier-Stokes description of firing tables, the Difference Engine purpose, CPU cores, the board figures). Single spoken words that could be machine-transcription errors (the 'army' of Krylov's service, the expansion of the ENIAC acronym) are not recorded as corrections. The 'turn of the century' item is recorded because the dates 1931 and 1952 fit neither century's turn.",
+    "Nmax = 24,837,120 is read from the TOP500 system page of Frontier for the current entry (November 2024 and later); the Nmax of the June 2024 entry is not shown. The node count 9,604 of that entry is derived (9,066,176 / 944). 8 Nmax^2 is 1.004 times the HBM of 9,604 nodes, so the list run seems to have sized the matrix to the HBM; the chapter's memory estimate of 9.44 PB adds DDR4 and HBM and is an upper bound for the dense limit (with HBM only, n = 2.43e7).",
+    "The Galerkin rank of lieutenant general (1939) comes from English Wikipedia, a secondary source; no primary source was opened. The statement that the finite-difference matrix equals a piecewise-linear Galerkin matrix is a standard result stated without a source.",
+    "The Demmel page (file lecture24.html) is titled 'CS267: Notes for Lectures 15 and 16, Mar 5 and 7, 1996'; Table 1.2 shows selected rows and columns of its table.",
+    "Jacobi's method (1845) is not cited: no source for the date was opened.",
+    "Memory units: the chapter treats GB, TB and PB as decimal. If the 64 GB of HBM per GPU are binary (GiB), the ratio of 8 Nmax^2 to the HBM of 9,604 nodes is 0.935 instead of 1.004, and the memory estimates fall by up to 7 percent; the conclusions do not change."
+  ],
+  "sections": [
+    {
+      "section": "The objects of the chapter and the running case",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "The unit flop/s and the example of 10^6 unknowns, which fix the quantities of the model.",
+      "research_extension": "TOP500 definition of Rmax and Rpeak.",
+      "teaching_construction": "The triple (problem, algorithm, machine), the cost model T = W/R with its three assumptions, the two feasibility constraints, the running case.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "Theory, experiment and computation: from a partial differential equation to a linear system",
+      "video_id": "yX0KfCorP6s",
+      "start": 17.0,
+      "end": 395.0,
+      "lecture_material": "Theory, experiment and computation as the supports of science; the conversion of PDEs into algebraic equations; the numbers of unknowns 10^6 to 10^12.",
+      "research_extension": "None beyond standard Taylor expansion.",
+      "teaching_construction": "Derivation of the five-point stencil, the count 5N^2 - 4N of nonzeros, the program that checks the nonzero count and the order of accuracy.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Four contributors and what the sources record",
+      "video_id": "yX0KfCorP6s",
+      "start": 395.0,
+      "end": 631.0,
+      "lecture_material": "Turing, von Neumann (395-631), Krylov (595-1021 interleaved with the cost discussion) and Galerkin (1021-1119).",
+      "research_extension": "Turing (1936), von Neumann (1945, title page), MacTutor on Krylov and Galerkin, Hestenes and Stiefel (1952), Shewchuk (1994).",
+      "teaching_construction": "Definition of the Krylov subspace and of the Galerkin method; the checking of each attribution.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "The cost of a direct solve",
+      "video_id": "yX0KfCorP6s",
+      "start": 631.0,
+      "end": 846.0,
+      "lecture_material": "Gaussian elimination, the order n^3, 27 operations for n = 3, 10^18 operations for 10^6 unknowns, 10^6 seconds.",
+      "research_extension": "TOP500 and HPL: the operation count 2/3 n^3 + O(n^2) with partial pivoting; Demmel on band LU.",
+      "teaching_construction": "Exact LU count (1.3), the counting program, storage (1.4), band LU count (1.5).",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Flop/s, Rpeak, Rmax, and what the TOP500 measures",
+      "video_id": "yX0KfCorP6s",
+      "start": 846.0,
+      "end": 957.0,
+      "lecture_material": "FLOPS and the range 10^12 to 10^15 for large machines.",
+      "research_extension": "TOP500 list pages (Table 1.1), the Linpack benchmark description, HPL source, the HPCG list.",
+      "teaching_construction": "Table 1.1, the ratio Rmax/Rpeak, the HPCG gap, the matrix-product and LU-solve measurements on the laptop.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "Iterative methods and the claim of O(n log n)",
+      "video_id": "yX0KfCorP6s",
+      "start": 957.0,
+      "end": 1021.0,
+      "lecture_material": "Iterative methods, Krylov subspace solvers, O(n log n).",
+      "research_extension": "Demmel lecture 24 (Table 1.2, Jacobi spectral radius), Shewchuk (bound and complexity).",
+      "teaching_construction": "Costs (1.6) and (1.7), the iteration-count program, the budget program.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "The Difference Engine and ENIAC",
+      "video_id": "yX0KfCorP6s",
+      "start": 1119.0,
+      "end": 1401.0,
+      "lecture_material": "Babbage's engine, ENIAC, 300 operations per second, firing tables.",
+      "research_extension": "Science Museum Group; Weik (1961).",
+      "teaching_construction": "The finite-difference table for x^2 + x + 41; the ENIAC rates from Weik's timings; the illustrative table-cost arithmetic.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "Growth of computing power: the data, Moore's observation and Dennard scaling",
+      "video_id": "yX0KfCorP6s",
+      "start": 1401.0,
+      "end": 1481.0,
+      "lecture_material": "Exponential growth, the TOP500 charts.",
+      "research_extension": "TOP500 list pages; Moore (1965); Dennard et al. (1974).",
+      "teaching_construction": "Doubling time (1.8), sub-period doubling times, the power-density derivation (1.9) and its table.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "Frontier and the one-day budget",
+      "video_id": "yX0KfCorP6s",
+      "start": 1481.0,
+      "end": 1621.0,
+      "lecture_material": "Frontier: 1.7 exaflops, 23 MW, 8.7 million cores; even Frontier could not use direct methods.",
+      "research_extension": "TOP500 June 2023, November 2023, June 2024, November 2024 and June 2026; TOP500 Frontier system page (Nmax); OLCF user guide; EIA household figure.",
+      "teaching_construction": "The decomposition of the core count, the power arithmetic, the test of the closing claim with the two feasibility constraints, the Nmax check against the memory, and the band-LU case.",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "TOP500 list pages (June 1993, June 1997, June 2000, June 2010, June 2022, June 2023, November 2023, June 2024, November 2024, June 2026)",
+      "url": "https://www.top500.org/lists/top500/2024/06/",
+      "supports": "Cores, Rmax, Rpeak and power of the systems used in Table 1.1 and the programs; Frontier June 2024: 8,699,904 cores, 1,206 PFlop/s, 1,714.81 PFlop/s, 22,786 kW; rank-500 Rmax values of 1993 (0.42 GFlop/s), 2010 (24.67 TFlop/s), 2024 (2.13 PFlop/s), 2026 (2.66 PFlop/s). June 2023 and November 2023: Frontier 8,699,904 cores, Rmax 1,194 PFlop/s, Rpeak 1,679.82 PFlop/s, 22,703 kW (the slide matches these lists and June 2024).",
+      "page_checked": "top-10 tables and the rank-500 row of page 5 of each list"
+    },
+    {
+      "title": "TOP500, The Linpack Benchmark",
+      "url": "https://www.top500.org/project/linpack/",
+      "supports": "The benchmark solves a dense linear system; LU with partial pivoting with 2/3 n^3 + O(n^2) operations; definitions of Rmax, Nmax, N1/2, Rpeak; the performance does not reflect overall performance.",
+      "page_checked": "whole page"
+    },
+    {
+      "title": "HPL 2.3 source (testing/ptest/HPL_pdtest.c, HPL.dat)",
+      "url": "https://www.netlib.org/benchmark/hpl/hpl-2.3.tar.gz",
+      "supports": "Rate computed from (2/3)N^3 + (3/2)N^2 (lines 231-233); scaled residual with infinity norms and the pass test (lines 393-406); threshold 16.0 (HPL.dat line 13).",
+      "page_checked": "lines 231-233, 393-406 of HPL_pdtest.c; line 13 of HPL.dat"
+    },
+    {
+      "title": "TOP500, HPCG list June 2024",
+      "url": "https://www.top500.org/lists/hpcg/2024/06/",
+      "supports": "HPCG described as a complement to the Linpack measurement; Frontier 14,054 TFlop/s and Fugaku 16,004.5 TFlop/s on HPCG.",
+      "page_checked": "table rows 1-2 and the description at the top of the page"
+    },
+    {
+      "title": "OLCF Frontier User Guide",
+      "url": "https://docs.olcf.ornl.gov/systems/frontier_user_guide.html",
+      "supports": "One 64-core EPYC and four MI250X (eight GPUs) per node; 512 GB DDR4; 64 GB HBM2E per GPU; 110 compute units per GPU; 47.8 TFLOPS vector double-precision per MI250X; 9,856 compute nodes at the date of reading.",
+      "page_checked": "system overview and node sections, read 2026-10-26"
+    },
+    {
+      "title": "Demmel, CS267 notes for lectures 15 and 16 (1996), file lecture24.html: Solving the discrete Poisson equation",
+      "url": "https://people.eecs.berkeley.edu/~demmel/cs267/lecture24/lecture24.html",
+      "supports": "Table of serial time and storage of dense LU, band LU, Jacobi, sparse LU, CG, SOR, FFT, multigrid; Jacobi spectral radius cos(pi/(n+1)); no fill-in outside the band; FFT and multigrid only for Poisson-like equations.",
+      "page_checked": "section The Complexity of Solving the Discrete Poisson Equation and the Jacobi section"
+    },
+    {
+      "title": "Shewchuk, An introduction to the conjugate gradient method without the agonizing pain (1994)",
+      "url": "https://www.cs.cmu.edu/~quake-papers/painless-conjugate-gradient.pdf",
+      "supports": "p. 33: CG minimizes the energy norm of the error; neglect of CG in the 1960s and revival in the 1970s as an iterative method. p. 37 (section 10): iteration bound ceil(0.5 sqrt(kappa) ln(2/eps)). p. 38: O(m sqrt(kappa)); O(n^(3/2)) in 2-D and O(n^(4/3)) in 3-D.",
+      "page_checked": "PDF pages 39, 43 and 44 (document pages 33, 37 and 38)"
+    },
+    {
+      "title": "Hestenes and Stiefel, Methods of conjugate gradients for solving linear systems (1952)",
+      "url": "https://nvlpubs.nist.gov/nistpubs/jres/049/jresv49n6p409_A1b.pdf",
+      "supports": "Abstract: an iterative algorithm giving the solution in n steps, a special case of a method that includes Gaussian elimination; introduction: Lanczos developed a closely related method.",
+      "page_checked": "abstract and introduction"
+    },
+    {
+      "title": "Turing, On computable numbers (1936)",
+      "url": "https://www.cs.virginia.edu/~robins/Turing_Paper_1936.pdf",
+      "supports": "Received 28 May 1936, read 12 November 1936; the machine with a tape of squares bearing symbols; arguments that computable numbers include all numbers naturally regarded as computable.",
+      "page_checked": "first pages (p. 230 onward)"
+    },
+    {
+      "title": "von Neumann, First Draft of a Report on the EDVAC (1945), Godfrey reprint",
+      "url": "https://web.mit.edu/STS.035/www/PDFs/edvac.pdf",
+      "supports": "Title page: dated 30 June 1945; contract between the Army Ordnance Department and the University of Pennsylvania.",
+      "page_checked": "title page and first page only (scan, no text layer)"
+    },
+    {
+      "title": "MacTutor: Aleksei Krylov",
+      "url": "https://mathshistory.st-andrews.ac.uk/Biographies/Krylov_Aleksei/",
+      "supports": "Father an artillery officer; fifty years of teaching at the naval academy; General and Chief Naval Ship Construction Inspector in January 1908; medal of the Royal Institution of Naval Architects. Captain of the Admiralty and acting superintendent of the Towing Tank on 3 January 1900.",
+      "page_checked": "whole biography"
+    },
+    {
+      "title": "Wikipedia: Aleksey Krylov (secondary)",
+      "url": "https://en.wikipedia.org/wiki/Aleksey_Krylov",
+      "supports": "Imperial Russian Navy; the 1931 paper on the characteristic polynomial (Izv. Akad. Nauk SSSR 7(4) 491-539).",
+      "page_checked": "article text and reference list"
+    },
+    {
+      "title": "MacTutor: Boris Galerkin",
+      "url": "https://mathshistory.st-andrews.ac.uk/Biographies/Galerkin/",
+      "supports": "Soviet mathematician and engineer (1871-1945); locomotive and boiler plant engineer; Petersburg Technological Institute; method dated 1915; no rank recorded.",
+      "page_checked": "whole biography"
+    },
+    {
+      "title": "Science Museum Group: Charles Babbage's Difference Engines",
+      "url": "https://www.sciencemuseum.org.uk/objects-and-stories/charles-babbages-difference-engines-and-science-museum",
+      "supports": "Difference Engine No. 1 calculated and printed series of values by finite differences using addition and subtraction; one seventh completed 1832; work halted 1833; 17,500 pounds spent.",
+      "page_checked": "Difference Engine No. 1 description"
+    },
+    {
+      "title": "Weik, The ENIAC Story (1961)",
+      "url": "https://ftp.arl.army.mil/~mike/comphist/eniac-story.html",
+      "supports": "Name; dedication 15 February 1946; 19,000 vacuum tubes and almost 200 kW; 200 microsecond addition time, 2.6 ms multiplication and 25 ms average division for 10-digit numbers; firing and bombing tables at the Ballistic Research Laboratory; differential analyzer with ten integrating units and its trajectory runs.",
+      "page_checked": "whole text"
+    },
+    {
+      "title": "Moore, Cramming more components onto integrated circuits (1965), reprint Proc. IEEE 86(1) 1998",
+      "url": "https://www.cs.utexas.edu/~fussell/courses/cs352h/papers/moore.pdf",
+      "supports": "Complexity at minimum component cost increased by roughly a factor of two per year for at least ten years; 65,000 components per circuit by 1975.",
+      "page_checked": "reprint pp. 82-85"
+    },
+    {
+      "title": "Dennard et al., Design of ion-implanted MOSFET's with very small physical dimensions (1974), National Academies reprint",
+      "url": "https://www.nationalacademies.org/read/12980/chapter/13",
+      "supports": "Scaling factors of Table 1: dimensions, voltage, current, capacitance and delay by 1/s (kappa in the paper), power per circuit by 1/s^2, power density constant; the subthreshold characteristic does not scale.",
+      "page_checked": "scaling section, Table 1 and the circuit-performance text"
+    },
+    {
+      "title": "EIA, How much electricity does an American home use?",
+      "url": "https://www.eia.gov/tools/faqs/faq.php?id=97&t=3",
+      "supports": "Average annual electricity purchase of a U.S. residential customer in 2022: 10,791 kWh.",
+      "page_checked": "whole page"
+    },
+    {
+      "title": "TOP500, Frontier system page",
+      "url": "https://www.top500.org/system/180047/",
+      "supports": "Nmax = 24,837,120 of the Linpack run for the current entry (Rmax 1,353 PFlop/s, Rpeak 2,055.72 PFlop/s); HPCG 14,054.0 TFlop/s.",
+      "page_checked": "performance table, read 2026-10-26"
+    },
+    {
+      "title": "Wikipedia: Boris Galerkin (secondary)",
+      "url": "https://en.wikipedia.org/wiki/Boris_Galerkin",
+      "supports": "In 1939 Galerkin became head of the structural mechanics department of the Navy's engineering school (VITU) and a lieutenant general, without earlier army service.",
+      "page_checked": "section 'War times and death'"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "n",
+      "first_section": "model",
+      "definition": "Number of unknowns and order of the matrix A."
+    },
+    {
+      "symbol": "N, h",
+      "first_section": "model",
+      "definition": "Interior grid points per side (n = N^2) and grid spacing 1/(N+1)."
+    },
+    {
+      "symbol": "A, u, b",
+      "first_section": "model",
+      "definition": "Matrix, unknown vector and right-hand side of the linear system."
+    },
+    {
+      "symbol": "W, M",
+      "first_section": "model",
+      "definition": "Work in flop and storage in bytes of an algorithm."
+    },
+    {
+      "symbol": "R, R_max, R_peak",
+      "first_section": "model",
+      "definition": "Machine rate in flop/s; Linpack rate; theoretical peak rate."
+    },
+    {
+      "symbol": "T, T_b",
+      "first_section": "model",
+      "definition": "Time of a computation (1.1) and time budget (one day = 86,400 s)."
+    },
+    {
+      "symbol": "rho, kappa, epsilon",
+      "first_section": "iterative",
+      "definition": "Jacobi error factor per sweep, condition number lambda_max/lambda_min, error reduction factor."
+    },
+    {
+      "symbol": "T_2",
+      "first_section": "growth",
+      "definition": "Doubling time (1.8)."
+    },
+    {
+      "symbol": "P = C V^2 f_clk, s",
+      "first_section": "growth",
+      "definition": "Switching power of one circuit with clock frequency f_clk; linear scale factor s of Dennard scaling (Dennard et al. write kappa; the chapter keeps kappa for the condition number)."
+    },
+    {
+      "symbol": "f, epsilon_mach",
+      "first_section": "model",
+      "definition": "f: source term of the PDE (not the serial fraction of later chapters); epsilon_mach: machine epsilon in the HPL residual."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python code_lab.py --chapter 01",
+    "listings": 9,
+    "all_passed": true
+  },
+  "lecture_confirmations": [
+    "Krylov: the lecture calls him a decorated military officer at the end of the 19th century. MacTutor: Captain of the Admiralty in January 1900, a General and Chief Naval Ship Construction Inspector in January 1908; the service was naval. (The word 'army' occurs once in the machine transcript with no slide or repeated context, so it is not recorded as a correction.)"
+  ],
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "REVISE (6 blocking, 5 major, 13 minor)",
+      "changes": "B1: lead rewritten: dense elimination fails from n = 3.4e7 (storage); at n = 1e9 both limits fail (8 EB = 850 times the memory, 17.5 years = 6,400 times the budget). B2: threshold 3.4e7 in the frontier section and in Table 1.3. B3: equation (1.9) rewritten with s and s^2 (a replacement had turned the factors into ellipses). B4: the Krylov 'army' correction dropped; the statement is now a confirmation (naval service); table row, counts, sidecar and uncertainty entry rewritten. B5: exercise 5 factor 10^3. B6: exercise 3 rebuilt on a geometric spectrum with a runnable listing cg_spectrum.py (6267 iterations, 18.8 times LU; evenly spaced eigenvalues need 202). M1: the slide matches the lists of June 2023, November 2023 and June 2024; the chapter uses June 2024. M2: Rmax is measured at Nmax = 24,837,120; at 1 percent of Rmax the factorization takes 55 s; Nmax fills the HBM. M3: dense verdict stated for dense LU; band LU runs at n = 1e9 and fails at 1e12. M4: Galerkin status 'partly supported' with the Wikipedia record of lieutenant general (1939). M5: symbols: epsilon_mach, C = eps_ox A_g / t_ox, f_clk, per-unit-area power, source term f, program variable k renamed s. m1 not applied (Jacobi 1845: no source opened). m2-m13 applied: accumulators sentence moved, count sentence, 8 threads 1.20 times faster than 4 in the printed run, 'in the four entries', dated user guide, CPU gap note, factor 1.82, Galerkin-matrix remark, 'applies to', Demmel title and caption, inline timestamps 9:55 and 17:01 and 'board', Table 1.3 wording."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT WITH FIXES (0 blocking, 0 major, 4 minor)",
+      "changes": "m1: the capacitance in the limits section is written with epsilon_ox, A_g and t_ox. m2: the HBM ratio states its convention (1.004 decimal, 0.935 binary; the matrix fills 93 to 100 percent of the HBM) and the limits section states that all units are decimal. m3: the unsupported sentence on another BLAS (about 1 percent) is deleted from exercise 3. m4: the sidecar wordings 'CS267 lecture 24', 'the lecture's list (June 2024)' and the Rpeak gap are updated. No listing changed; the code lab was not rerun."
+    }
+  ]
+}
