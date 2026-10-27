@@ -1,0 +1,387 @@
+{
+  "chapter": 9,
+  "title": "Why parallel computing: numerical models and their cost",
+  "status": "revised after review round 2",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "PXmMDWzebGE",
+      "label": "W3L1",
+      "playlist_index": 15,
+      "duration_seconds": 1194
+    },
+    {
+      "video_id": "z75dO5juDq8",
+      "label": "W3L2",
+      "playlist_index": 16,
+      "duration_seconds": 1637
+    }
+  ],
+  "frames_viewed": {
+    "PXmMDWzebGE": [
+      "f0002",
+      "f0004",
+      "f0006",
+      "f0008",
+      "f0010",
+      "f0012",
+      "f0014",
+      "f0016",
+      "f0018",
+      "f0022",
+      "f0024",
+      "f0026",
+      "f0028",
+      "f0030",
+      "f0032",
+      "f0034",
+      "f0036",
+      "f0037",
+      "f0038",
+      "f0039"
+    ],
+    "z75dO5juDq8": [
+      "f0003",
+      "f0007",
+      "f0011",
+      "f0015",
+      "f0019",
+      "f0023",
+      "f0025",
+      "f0026",
+      "f0027",
+      "f0028",
+      "f0029",
+      "f0030",
+      "f0031",
+      "f0033",
+      "f0035",
+      "f0037",
+      "f0039",
+      "f0041",
+      "f0043",
+      "f0045",
+      "f0047",
+      "f0049",
+      "f0051",
+      "f0053"
+    ]
+  },
+  "lecture_corrections": [
+    "W3L1: transistor density is said to double 'every 18 months' (stated in two places in the recording). The lecture's own chart caption says 'approximately every two years'. Moore 1965: yearly; Moore 1975: two years expected. Rupp data fit: 27.3 months (1971-1999), 23.9 months (2000-2021). The 18-month figure is Bohr's (2007) figure for Intel transistor counts in the 1970s-1980s only. The 18-month wording rests on the machine transcript alone (it occurs twice and is not a plausible mishearing of 'two years'); the slide caption confirms the two-year figure.",
+    "W3L1: 'doubling the power every 18 months' conflates component count with computing power; the listed clock frequency has had a slope of -0.011 doublings per year since 2004.",
+    "W3L1: Dennard scaling is said to have broken because a finite voltage is needed to tell 0 from 1. Bohr (2007, p. 12): the threshold voltage cannot scale because of sub-threshold leakage. Refined, not contradicted.",
+    "W3L1: the bag-of-integers example is presented as Amdahl's law. Its serial part (adding p partial sums) grows with p; f_eff = p^2/(M(p-1)) is not constant. Pairwise addition changes the result (107 s at p = 100). The conclusion that machines with millions of cores are useless holds only at fixed problem size (Gustafson 1988).",
+    "W3L2 slide: the discretized equation is written (T_{i-1,j} - T_{i,j} + T_{i+1,j})/dx^2 + (T_{i,j-1} - T_{i,j} + T_{i,j+1})/dy^2 = 0. The coefficient of the centre value must be -2 in each term; a constant temperature does not satisfy the slide's expression.",
+    "W3L2 slide: 'Iterative is more efficient' (than direct). Against banded Cholesky, plain Jacobi needs 10.9-12.8 times the operations (both O(N^4)); iteration wins in memory (N^2 vs N^3) and, for better methods (CG, SOR, multigrid), in operations. Demmel 1995 table.",
+    "W3L2: the slide labels three corners T_0 and the bottom-right corner T_inf; the top and left edges are held at T_0 and the right and bottom edges vary from T_0 to T_inf (spoken; the word 'linearly' is spoken only and is not used). T_inf is a symbol, not a value; the chapter uses the book's canonical boundary values (u = 1 on the top edge, 0 elsewhere) and says so."
+  ],
+  "source_uncertainties": [
+    "Intel ARK page for the i5-12450H returned HTTP 403 to a scripted request (2026-10-26). Turbo frequencies 4.40 GHz (P-core) and 3.30 GHz (E-core) and the core layout are those recorded in chapter 11; a web search returned TechPowerUp and other secondary sources with the same turbo values. Base frequencies were not used because sources disagree (E-core base 1.3 to 1.7 GHz).",
+    "Moore (1965): the Princeton reprint has four pages and prints no issue page numbers; 'p. 2 of 4' is the reprint page. The article starts on p. 114 of the issue according to the Computer History Museum catalogue; the end page 117 was not verified and is not cited.",
+    "Dennard et al. (1974): the PDF is a scan with OCR; the OCR of Table I is scrambled, so the factors were taken from the sentences beside the table (delay by K, power per circuit by K^2, power density constant). The printed page 265 was identified from the page text.",
+    "Bohr (2007): page numbers are the printed numbers of the SSCS newsletter (article on pp. 11-13); the figures 2x per 18 months and sub-threshold leakage numbers are read from the text, not the figures.",
+    "Rupp trend data: retrieved from the master branch on 2026-10-26 (no commit hash recorded); entries mix vendors and product classes; the listing embeds the values rounded to 4 significant digits, so its fits differ from fits of the raw files in the last digits only. The break at 2004 and the start at 1990 are read from the plot; the fit from 2007 (-0.017 per year) shows the sign does not depend on it. The data do not identify causes.",
+    "Demmel (1995) lecture notes: the table is in O() notation with N the number of unknowns; used for exponents only. The quotation 'cannot be straightforwardly parallelized' is from the same page.",
+    "Saad (2003): the five-point matrix in natural ordering is taken to be consistently ordered (classical result, Young); Definition 4.13 was not checked for it. Exercise 6 relies on the fact only through the measured sweep ratio (0.521-0.530) and the measured centre error factor.",
+    "Gustafson (1988) was read from the author's site (3 pages). Goldberg (1991) was read as the Oracle HTML reprint, where formulas are images; epsilon = (beta/2) beta^-p was read from the text.",
+    "The GCC manual pages were the current online version on 2026-10-26, which may be newer than gcc 13.3 used for the runs; the 13.3 manual was not opened. The quoted statements on -ftree-parallelize-loops and -march were not tested against 13.3 text.",
+    "System V AMD64 ABI draft 0.99.6 (2012) was used; the current psABI version was not opened. Printed page 9 (scope) and the register sequence on p. 124 (Appendix A.2.1) were read from the draft; section numbers are the reliable references.",
+    "The stair-step pattern of successive changes (ratios alternating between rho^2 and 1.000000) was observed for N = 31 and is explained only as a candidate (the -rho eigenvalue); it was not derived. That the largest error of the canonical problem is 7.9e-3 at N = 7 and 7.2e-3 at N = 15, 31, 63 is observed for these four sizes only and was not proved to stay constant.",
+    "Timing samples (jacobi_time.c, autopar.c) were captured while other agents' jobs ran on the machine. Ranges quoted in the text come from seven runs of the timing listing (time per point update, in cache 1.0-1.6 ns, N = 1000 1.6-2.6 ns; one run under heavy load 4.3-5.3 ns) and six runs of autopar.c, plus an earlier two-run test at N = 1000 and 2000 not reproduced by a listing. A single-thread time is a time on an unknown core of the hybrid processor.",
+    "The lecture's 'city' examples are used only as a scale for N: 10 km at 10 m spacing (N = 1000) and at 1 m (N = 10^4) are the chapter's illustration, not the lecture's numbers. Times for N >= 4000 are extrapolations of the measured rate.",
+    "The claim '3 nanometer technology' (W3L1) was not checked; the dimension that a node name denotes was not looked up. The modelling error of the W3L2 pipeline is not estimated.",
+    "Statements that rest on the machine transcript alone were not recorded as lecture corrections: the clock figures of about 3 GHz and 1.5 GHz, the 50 percent slowdown anecdote, the 'i and j from 0 to n' count and the wording of the Taylor-series passage were not confirmed by a slide. The anecdote is reported as told and is not tested. Timestamps are local segment times and locate topic changes to within a few seconds.",
+    "Regime of the single-mode sweep count: k = ln(c/tol)/(-ln rho) with c = (1-rho) 4/pi^2 holds only for tol much smaller than c. At N = 1000 and tol = 1e-6, c = 2.0e-6 and tol/c = 0.50, outside the range; measured sweeps are 1.36 times the count and the centre error 0.77 (largest error 0.82) of the bound rho/(1-rho) tol, identical at N = 63, 127, 255 (listing jacobi.c, last table; the largest-error constant 0.82 comes from a run against a converged solution that is not a listing). The estimates 1.91e5 sweeps and error 0.17 for N = 1000 use these constants; Chapter 4 measured 191,001 sweeps and maximum error 0.167 (not re-run here). The cost table (cost_model.py) uses the error-based count with eps, which is in range.",
+    "Length: about 14,000 words of prose with each inline formula counted as one token (about 13,000 with formulas removed), against the brief's 6,000-9,000; two trimming passes were made and the reviewer may cut further.",
+    "Maximum-norm guarantee: the largest row sum of G(Id-G)^-1 is 1.454 times rho/(1-rho) (computed from the matrix at N = 7, 15, 31 and by iteration at N = 63, reviewer's value 74.2/300.5/1205.8); not a listing. Chapter 4 states the same factor.",
+    "Auto-parallelization: the -fopt-info-loop report for autopar.c names only the top-edge fill in main (line 40); the sweep contains no OpenMP runtime call (objdump). The runs of autopar.c show the automatic build inside the plain build's range for that reason."
+  ],
+  "sections": [
+    {
+      "section": "The objects of the chapter and the running case",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Plate problem (W3L2); canonical grid conventions are the book's.",
+      "research_extension": "Intel ARK and TechPowerUp for the machine.",
+      "teaching_construction": "Formal model of the plate, grid, Jacobi sweep, iteration error, work, symbols and the machine.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "Moore's law, Dennard scaling and the end of faster single cores",
+      "video_id": "PXmMDWzebGE",
+      "start": 39.0,
+      "end": 669.0,
+      "lecture_material": "Moore's law chart, MOSFET, scaling table, plateau of frequency and single-thread performance, growth of cores, parallel computing slide.",
+      "research_extension": "Moore 1965 and 1975; Dennard et al. 1974; Bohr 2007; Rupp trend data.",
+      "teaching_construction": "Fits of doubling times; Dennard arithmetic table with V fixed; comparison of 18 months with the data.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "Dividing a sum among people, and Amdahl's law",
+      "video_id": "PXmMDWzebGE",
+      "start": 669.0,
+      "end": 1194.0,
+      "lecture_material": "10,000 integers with 10 and 100 people; Amdahl's law and its limits; conclusion about machines with millions of cores.",
+      "research_extension": "Amdahl 1967; Gustafson 1988.",
+      "teaching_construction": "T(p) = M/p + p, optimum sqrt(M), effective serial fraction, pairwise combination, table of Amdahl limits.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "From phenomenon to computation: three errors",
+      "video_id": "z75dO5juDq8",
+      "start": 40.0,
+      "end": 808.0,
+      "lecture_material": "Pipeline phenomenon-equation-method-computation; three errors; balance; central difference.",
+      "research_extension": "Goldberg 1991 (unit roundoff); NIST CODATA (Boltzmann constant).",
+      "teaching_construction": "Error decomposition (9.3); central difference with Taylor remainder; error-balance bound (9.5); experiment in double and single precision.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "The plate problem and the five-point stencil",
+      "video_id": "z75dO5juDq8",
+      "start": 808.0,
+      "end": 1080.0,
+      "lecture_material": "Plate, Laplace's equation, grid, discretized equation, Ax = b, 'iterative is more efficient'.",
+      "research_extension": "Saad 2003 (eigenvalues of the model problem).",
+      "teaching_construction": "Derivation of the stencil and its truncation error; correction of the slide; maximum-principle bound (9.7); closed-form discrete solution; canonical problem: exact centre value and corner behaviour.",
+      "evidence_class": "theorem"
+    },
+    {
+      "section": "Jacobi iteration: convergence, iteration count and the serial code",
+      "video_id": "z75dO5juDq8",
+      "start": 1080.0,
+      "end": 1147.0,
+      "lecture_material": "A code is written, compiled and run; plot of the temperature field.",
+      "research_extension": "Saad 2003 Theorem 4.1 and eq. 13.5; Demmel 1995.",
+      "teaching_construction": "Spectrum (9.8), iteration count with amplitude 4/pi^2 (9.9), stopping-rule factor (9.10); canonical code jacobi_step; three-error experiment.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "What the iteration costs, and why one core cannot keep up",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None (the lecture states that accuracy affects cost).",
+      "research_extension": "Demmel 1995 table of solver costs.",
+      "teaching_construction": "Work (9.11), measured time per point update, cost table, required speedup and Amdahl condition, work-span remark, banded Cholesky comparison.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "From source code to instructions",
+      "video_id": "z75dO5juDq8",
+      "start": 1147.0,
+      "end": 1637.0,
+      "lecture_material": "Punch card, system layers, abstraction, ISA, ABI; W3L1 claim about automatic parallelization.",
+      "research_extension": "System V AMD64 ABI; GCC manual (-ftree-parallelize-loops, -march).",
+      "teaching_construction": "Session on the compiled kernel (14 instructions per point update); calling convention in the disassembly; automatic-parallelization test.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "What the model establishes and what it does not",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "None.",
+      "teaching_construction": "Table 9.1 of lecture claims and their status; boundaries.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Exercises",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "Saad Theorem 4.16 (exercise 6).",
+      "teaching_construction": "Six exercises with full solutions: derive, compute, counterexample, diagnose an assumption, design judgment, implementation and measurement.",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "Lecture W3L1 recording",
+      "url": "https://www.youtube.com/watch?v=PXmMDWzebGE",
+      "supports": "Moore's law, Dennard scaling, plateau, parallel computing slide, bag of integers, Amdahl's law.",
+      "page_checked": "slide frames listed in frames_viewed"
+    },
+    {
+      "title": "Lecture W3L2 recording",
+      "url": "https://www.youtube.com/watch?v=z75dO5juDq8",
+      "supports": "Numerical modelling and errors, plate problem, discretization, system layers, ISA and ABI.",
+      "page_checked": "slide frames listed in frames_viewed"
+    },
+    {
+      "title": "Moore, Cramming more components onto integrated circuits, Electronics 38(8), 1965",
+      "url": "https://www.cs.princeton.edu/courses/archive/fall14/cos109/mooreslaw.pdf",
+      "supports": "Complexity for minimum component cost rose by roughly a factor of two per year; expected to continue for at least 10 years; 65,000 components in 1975; author at Fairchild Semiconductor.",
+      "page_checked": "full reprint (4 pages); statement on reprint page 2"
+    },
+    {
+      "title": "Moore, Progress in digital integrated electronics, IEDM 1975",
+      "url": "https://www.eng.auburn.edu/~agrawvd/COURSE/E7770_Spr07/READ/Gordon_Moore_1975_Speech.pdf",
+      "supports": "Complexity approximately doubled every year since introduction; a slope that might approximate a doubling every two years by the end of the decade.",
+      "page_checked": "full text of the speech (pp. 11-13 of the Technical Digest)"
+    },
+    {
+      "title": "Dennard et al., Design of ion-implanted MOSFET's with very small physical dimensions, IEEE JSSC SC-9(5), 1974",
+      "url": "https://www.eng.auburn.edu/~agrawvd/COURSE/READING/LOWP/Design%20of%20ion-implanted%20MOSFETs%20with%20very%20small%20physical%20dimensions.pdf",
+      "supports": "Delay per circuit falls by K, power per circuit by K^2, power density constant (text beside Table I).",
+      "page_checked": "p. 265 (Table I and text); OCR of the table scrambled, text read"
+    },
+    {
+      "title": "Bohr, A 30 year retrospective on Dennard's MOSFET scaling paper, IEEE SSCS Newsletter, Winter 2007",
+      "url": "https://sscs.ieee.org/images/files/newsletter_archive/sscs_newsletter_200701.pdf",
+      "supports": "0.7x feature size per generation, 2x density; 2x per 18 months in Intel transistor counts in the 1970s-1980s, every 2 years since the mid-1990s; sub-threshold leakage limits threshold and supply voltage scaling.",
+      "page_checked": "printed pp. 11-13 of the newsletter"
+    },
+    {
+      "title": "Rupp, microprocessor-trend-data (50yrs/transistors.dat, frequency.dat)",
+      "url": "https://github.com/karlrupp/microprocessor-trend-data",
+      "supports": "99 transistor counts and 101 clock frequencies, 1971-2021; fits of doubling times.",
+      "page_checked": "raw files retrieved 2026-10-26"
+    },
+    {
+      "title": "Amdahl, Validity of the single processor approach..., AFIPS 1967 (2007 reprint)",
+      "url": "https://www3.cs.stonybrook.edu/~rezaul/Spring-2019/CSE613/reading/Amdahl-1967.pdf",
+      "supports": "Housekeeping 40 percent; overhead limits throughput to five to seven times; no equations.",
+      "page_checked": "both pages of the reprint"
+    },
+    {
+      "title": "Gustafson, Reevaluating Amdahl's law, CACM 31(5), 1988",
+      "url": "http://johngustafson.net/pubs/pub13/amdahl.pdf",
+      "supports": "Scaled speedup N + (1-N)s' (credited to E. Barsis); speedups 1021, 1020, 1016 on 1024 processors, serial fractions 0.4-0.8 percent; criticism of reading s as the fixed-size fraction.",
+      "page_checked": "full text (3 pages)"
+    },
+    {
+      "title": "Goldberg, What every computer scientist should know about floating-point arithmetic, ACM Computing Surveys 23(1), 1991",
+      "url": "https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html",
+      "supports": "Machine epsilon (beta/2) beta^-p bounds the relative rounding error.",
+      "page_checked": "section Relative Error and Ulps (Oracle HTML reprint)"
+    },
+    {
+      "title": "Saad, Iterative Methods for Sparse Linear Systems, 2nd ed., SIAM 2003",
+      "url": "https://www-users.cse.umn.edu/~saad/IterMethBook_2ndEd.pdf",
+      "supports": "Theorem 4.1 (p. 115): convergence iff spectral radius below 1; Theorem 4.16 (p. 126): SOR-Jacobi eigenvalue relation; sec. 13.2 pp. 424-427: eq. 13.5 and 13.14, eigenvalues of the 1-D and 2-D model problems.",
+      "page_checked": "pages 115, 126, 424-427 (printed numbers)"
+    },
+    {
+      "title": "Demmel, CS 267 Lecture 24, 1995",
+      "url": "https://people.eecs.berkeley.edu/~demmel/cs267-1995/lecture24/lecture24.html",
+      "supports": "Table of serial costs of Poisson solvers; rho_Jacobi = cos(pi/(n+1)) in the 2-norm; Gauss-Seidel in row order not straightforwardly parallelizable.",
+      "page_checked": "full page"
+    },
+    {
+      "title": "NIST CODATA, Boltzmann constant",
+      "url": "https://physics.nist.gov/cgi-bin/cuu/Value?k",
+      "supports": "k_B = 1.380649e-23 J/K, exact.",
+      "page_checked": "full page"
+    },
+    {
+      "title": "GCC manual, Optimize Options and x86 Options (online, 2026-10-26)",
+      "url": "https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html",
+      "supports": "-ftree-parallelize-loops possible only for independent iterations, profitable for CPU-bound loops; -march code may not run on other processors (x86 Options page).",
+      "page_checked": "the option entries; version of the manual may be newer than 13.3"
+    },
+    {
+      "title": "System V ABI, AMD64 Architecture Processor Supplement, draft 0.99.6",
+      "url": "https://refspecs.linuxfoundation.org/elf/x86_64-abi-0.99.pdf",
+      "supports": "Scope (sec. 1, p. 9); argument passing and return of values (sec. 3.2.3); user-level integer register sequence (A.2.1).",
+      "page_checked": "sec. 1, 3.2.3, A.2.1"
+    },
+    {
+      "title": "Intel Core i5-12450H specifications (ARK) and TechPowerUp",
+      "url": "https://www.intel.com/content/www/us/en/products/sku/132222/intel-core-i512450h-processor-12m-cache-up-to-4-40-ghz/specifications.html",
+      "supports": "4 P-cores x 2 threads + 4 E-cores x 1 thread; turbo 4.40 / 3.30 GHz.",
+      "page_checked": "ARK returned HTTP 403; TechPowerUp via web search; figures as recorded in chapter 11"
+    },
+    {
+      "title": "TechPowerUp, Intel Core i5-12450H",
+      "url": "https://techpowerup.com/cpu-specs/core-i5-12450h.c2533",
+      "supports": "4 performance cores and 4 efficient cores, 12 threads, turbo up to 4.4 GHz (performance) and 3.3 GHz (efficient).",
+      "page_checked": "found through a web search; the page itself was not fetched, the search summary was used"
+    },
+    {
+      "title": "GCC manual, x86 Options (online, 2026-10-26)",
+      "url": "https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html",
+      "supports": "-march=cpu-type: code 'may not run at all on processors other than the one indicated'; -march=native: 'the result might not run on different machines'.",
+      "page_checked": "the -march entry; may be newer than 13.3"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "u, N, h, i, j, IDX",
+      "first_section": "model",
+      "definition": "Plate temperature, interior points per side, spacing 1/(N+1), row and column indices, array index macro."
+    },
+    {
+      "symbol": "F, W, T_1, T_p, S_p, E_p, f, P, t_pt",
+      "first_section": "model",
+      "definition": "Operations per sweep (5N^2), work, times on 1 and p workers, speedup, efficiency, serial fraction, parallel proportion (P = 1-f), time per point update."
+    },
+    {
+      "symbol": "k (Dennard), P = C V^2 f",
+      "first_section": "scaling",
+      "definition": "Linear shrink factor; switching power of a circuit (C capacitance, V voltage, f clock)."
+    },
+    {
+      "symbol": "M, T(p)",
+      "first_section": "amdahl",
+      "definition": "Number of integers in the bag; time of p people adding them (9.1)."
+    },
+    {
+      "symbol": "u_phys, u, u_h, U",
+      "first_section": "pipeline",
+      "definition": "Physical temperature, exact PDE solution, exact five-point solution, computed array."
+    },
+    {
+      "symbol": "u_r, M_0, M_3, h*",
+      "first_section": "pipeline",
+      "definition": "Unit roundoff, bounds on |f| and |f'''|, error-minimizing step."
+    },
+    {
+      "symbol": "Delta_h, tau",
+      "first_section": "stencil",
+      "definition": "Five-point operator and its truncation error (9.6)."
+    },
+    {
+      "symbol": "G, rho, mu_jl, phi_jl, e^k, d^k, a_1, epsilon, tol",
+      "first_section": "jacobi",
+      "definition": "Jacobi iteration matrix, spectral radius cos(pi h), its eigenvalues and eigenvectors, error and change after k sweeps, amplitude 4/pi^2 of the slowest mode, target iteration error, tolerance on the change."
+    },
+    {
+      "symbol": "K, nu, P_sw",
+      "first_section": "scaling",
+      "definition": "Dennard shrink factor per generation, clock frequency, switching power of a circuit C V^2 nu."
+    },
+    {
+      "symbol": "c = (1-rho) 4/pi^2",
+      "first_section": "jacobi",
+      "definition": "Amplitude of the change of the slowest mode; the single-mode sweep count needs tol much smaller than c."
+    },
+    {
+      "symbol": "Id, Gamma, g, B(h)",
+      "first_section": "jacobi",
+      "definition": "Identity matrix; banded Cholesky factor; function differentiated in the error-balance experiment; bound on the central-difference error."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python code_lab.py --chapter 9",
+    "listings": 12,
+    "all_passed": true
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "REVISE (4 blocking, 6 major, 17 minor)",
+      "changes": "B1: tol/c at N = 1000 is 0.50 (c = 2.0e-6); jacobi.c last table uses tol/c = 0.1 and 0.501 (ratios 1.36, centre 0.77, largest error 0.82); 1.91e5 sweeps, error 0.17, 26 % low, agreeing with Chapter 4's 191,001 and 0.167; limits and sidecar updated. B2: the max-norm guarantee needs the factor 1.45 rho/(1-rho); comment in band_solve.c, text in the jacobi and cost sections and Exercise 2 corrected. B3: gcc parallelizes only the top-edge fill in main; the sweep stays serial with and without the reduction; text and Table 9.1 rewritten; compiler report and objdump count added to the session. B4: Exercise 1 ranges, step 2 in k, 7.9e-3 at N = 7, Exercise 4 value 5176. M1: plate edge values from the lecture; M2: Barsis credit and the 111-201 reading of Gustafson; M3: Exercise 5 states the canonical corner error; M4: Gauss-Seidel factor stated for the dominant eigenvector, bound not carried over; M5: no cut (lead: not required); M6: sign of a_1. Minor: m1, m2, m3, m4, m5, m6, m7 (grid indices r,s; digits l), m8, m9, m10, m12, m14, m15, m16, m17 fixed; m11 (lecture order of the auto-parallelization test) and m13 (node names) not changed: the test is cross-referenced from the scaling section, and no source for node names was opened."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT WITH FIXES (1 blocking, 1 major, 4 minor)",
+      "changes": "B1: the limits paragraph now says the 26 % underestimate holds at N = 1000 only (tol/c = 0.50) and that for larger N at tol = 1e-6 the count does not apply (tol/c > 1). M1: no cut, by the lead's decision. m1: the 1.45 value at N = 63 and the 0.82 constant are labelled in the text as computations made outside the code lab. m2: duplicated phrase removed; the directive speedup range is 2.1 to 2.7 over seven runs (text and Table 9.1). m3, m4: unchanged. No listing changed; the code lab was not rerun."
+    }
+  ]
+}

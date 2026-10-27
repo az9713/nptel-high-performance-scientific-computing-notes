@@ -1,0 +1,1235 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="f2c6dee8d6a5db257699e95abf939fb744f2c4ae22c2666a12047af66625ec2f"><title>Why parallel computing: numerical models and their cost · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>Why parallel computing: numerical models and their cost</h1>
+<p class="lead">A plate on a \(1000\times1000\) grid has \(10^{6}\) unknown temperatures. Jacobi iteration reduces the iteration error to \(10^{-6}\) after \(2.6\times10^{6}\) sweeps and \(1.3\times10^{13}\) floating-point operations. One core of the machine used in this book performs a sweep of this grid in 1.6 to 2.6 ms, so the run takes about 1.5 hours. A grid ten times finer in each direction multiplies the work by \(10^{4}\): 1.7 years. A program that stops when two successive sweeps differ by less than \(10^{-6}\) ends the \(1000\times1000\) run after about \(2\times10^{5}\) sweeps, 5 to 9 minutes at the rates measured here, with an error of about 0.15 to 0.17 in a field whose centre value is 0.25 (Chapter 4 measured 191,001 sweeps and a maximum error of 0.167). A faster single core is not available. In Rupp's continuation of the trend data shown in the lecture, the clock frequency doubled every 27.8 months from 1990 to 2003 and has had a slope of \(-0.011\) doublings per year since 2004; the earlier trend would give 354 GHz in 2021, and the highest clock among the entries since 2010 is 4.0 GHz. This chapter derives the five-point model of the plate, the convergence of Jacobi iteration and the iteration count that produce these numbers, shows which statements of the lectures the numbers confirm and which they correct, and states how much speedup a parallel machine must deliver.</p>
+<p class="source-note">Grounded in two recordings of the NPTEL course <em>High Performance Scientific Computing</em> (Prof. Shivasubramanian Gopalakrishnan, IIT Bombay): <a href="https://www.youtube.com/watch?v=PXmMDWzebGE">W3L1, Need for Parallel Computing</a>, and <a href="https://www.youtube.com/watch?v=z75dO5juDq8">W3L2, Role of Numerical Models in Solving Complex Problems on Computers</a>. <strong>Lecture material:</strong> Moore's law, the MOSFET and Dennard scaling; the plateau of clock frequency and the growth of the core count; the sum of 10,000 integers by 10 and by 100 people; Amdahl's law; numerical modelling and its three errors; the central difference; the steady heat conduction problem on a plate as a linear system; the claim that iterative solvers are more efficient; the layers between a program and the hardware, the instruction set architecture (ISA) and the application binary interface (ABI). The lecture shows no code. <strong>Research extensions:</strong> Moore (1965, 1975), Dennard et al. (1974) and Bohr (2007) for the laws and the end of voltage scaling; Rupp's microprocessor trend data for doubling times; Amdahl (1967) and Gustafson (1988); Goldberg (1991) for the unit roundoff; Saad (2003) and Demmel (1995) for the spectrum of the model problem and the cost of solvers; the GCC manual and the System V AMD64 ABI. <strong>Original teaching constructions:</strong> the formal model of the plate and its cost; the error-balance experiment; the maximum-principle bound; the iteration count with the amplitude \(4/\pi^2\) and the stopping-rule factor \(\rho/(1-\rho)\); the canonical serial Jacobi code that later chapters extend; the comparison with banded Cholesky; the cost table; the automatic-parallelization test; all programs, measurements and exercises.</p>
+
+<h2 id="model">The objects of the chapter and the running case</h2>
+<p>The chapter studies one numerical problem and the cost of solving it. The <em>plate problem</em> is the steady temperature \(u(x,y)\) of a thin square plate of uniform material, \(0\le x,y\le1\). Steady heat conduction without sources in a material of constant conductivity \(\kappa\) obeys Laplace's equation \(\partial^2u/\partial x^2+\partial^2u/\partial y^2=0\) in the interior (Fourier's law \(\mathbf q=-\kappa\nabla u\) and the balance \(\nabla\cdot\mathbf q=0\)). The boundary values are given. This book fixes one boundary condition for all its solvers, the <em>canonical problem</em>: \(u=1\) on the top edge \(y=1\), and \(u=0\) on the other three edges. The lecture poses a different Dirichlet problem (the section on the stencil gives the difference); nothing in the matrix, the spectrum or the iteration count of this chapter depends on the boundary values, and only the code that fills the boundary changes.</p>
+<p><strong>The grid.</strong> A grid with \(N\) interior points per side has spacing \(h=1/(N+1)\). The array <code>u</code> holds \((N+2)\times(N+2)\) doubles in row-major order. The element <code>u[IDX(i,j)]</code>, with <code>#define IDX(i,j) ((i)*(N+2)+(j))</code>, approximates the temperature at \(x_j=jh\), \(y_i=1-ih\). Row \(i=0\) is the top edge and row \(i=N+1\) the bottom edge. The indices \(1\le i,j\le N\) are the <em>interior</em>; the \(N^2\) interior values are the <em>unknowns</em>. The four edges hold the boundary values and are never changed. The lecture writes the grid with \(i\) along the horizontal axis and \(j\) downward and counts "\(i\) and \(j\) from 0 to \(n\)"; that grid has \((n+1)^2\) nodes, and the unknowns are the \(N^2\) interior nodes when the edges are given.</p>
+<p><strong>The scheme and the solver.</strong> The <em>five-point scheme</em> replaces the equation at each interior node by the statement that the value there equals the average of its four neighbours. A <em>Jacobi sweep</em> computes, for every interior node, the average of the four neighbours in the current array and stores it in a second array, <code>unew</code>. The <em>change</em> of a sweep is the largest absolute difference between <code>unew</code> and <code>u</code> over the interior. The program swaps the two arrays and repeats until the change is below the tolerance <code>tol</code> or <code>max_iter</code> sweeps are done. The <em>iteration error</em> after \(k\) sweeps is the largest difference between the \(k\)-th iterate and the exact solution of the five-point equations.</p>
+<p><strong>The cost.</strong> A <em>point update</em> is the computation of one new interior value together with the change at that node. It takes three additions and one multiplication for the average and one subtraction for the change, so one sweep performs \(F=5N^2\) floating-point operations (\(F\), the operation count, in the notation of this book; comparisons and absolute values are not counted). The work \(W\) of a solve is the number of operations of all sweeps, \(W=5N^2k\) for \(k\) sweeps. The time \(T_1\) is the wall-clock time of the solve on one thread, and \(t_{\mathrm{pt}}\) the time of one point update. With \(p\) processing elements, \(T_p\) is the wall-clock time, \(S_p=T_1/T_p\) the speedup and \(E_p=S_p/p\) the efficiency; \(f\) is the serial fraction of \(T_1\) in Amdahl's law (\(P=1-f\) is the parallel proportion in the lecture's notation). The symbols \(\rho\) (spectral radius of the iteration), \(\varepsilon\) (target iteration error) and \(\tau_{ij}\) (truncation error) are defined where they first appear.</p>
+<p><strong>The machine.</strong> Every time in the chapter comes from one laptop, an Intel Core i5-12450H under Windows 11, with programs built by gcc 13.3 in a WSL 2 Ubuntu 24.04 guest (<code>-O2</code>, no <code>-march</code> flag, one thread). The processor is hybrid: 4 performance cores with 2 hardware threads each and 4 efficient cores with 1 thread each, 12 logical processors, with a maximum turbo frequency of 4.40 GHz for a performance core and 3.30 GHz for an efficient core (<a href="https://www.intel.com/content/www/us/en/products/sku/132222/intel-core-i512450h-processor-12m-cache-up-to-4-40-ghz/specifications.html">Intel ARK</a>, which returned HTTP 403 to a scripted request on 2026-10-26; the figures are those recorded in chapter 11 and agree with <a href="https://techpowerup.com/cpu-specs/core-i5-12450h.c2533">TechPowerUp</a>). The guest does not let a program choose its core, so a single-thread time is a time on an unknown core of the two kinds. The machine was shared with other jobs during the captures. A timing listing is checked only by its return code and prints one sample; every other listing is deterministic and checked byte for byte.</p>
+<p>The programs of this chapter are the first versions of programs that later chapters extend: the same names (<code>jacobi_step</code>, <code>u</code>, <code>unew</code>, <code>N</code>, <code>max_iter</code>, <code>tol</code>), the same layout and the same boundary conditions appear in the OpenMP, MPI, CUDA and OpenACC versions of Jacobi iteration (chapters 12, 16, 20 and 24) and in the profiling of a slow solver (chapter 27).</p>
+
+<h2 id="scaling">Moore's law, Dennard scaling and the end of faster single cores <a class="timestamp" href="https://www.youtube.com/watch?v=PXmMDWzebGE&amp;t=39s">W3L1 0:39</a></h2>
+<p><strong>What the lecture states.</strong> The lecture attributes two observations to engineers of the 1970s. Gordon Moore predicted that the number of transistors per unit area of an integrated circuit doubles roughly every 18 months; the lecture's chart (Our World in Data, 1971 to 2018) is captioned "approximately every two years". Robert Dennard's rule, shown as a table, says that if the linear dimension of a MOSFET (metal-oxide-silicon field-effect transistor, the switch of a logic gate) shrinks by a factor \(K\) (the slide writes \(k\)), then voltage, current, capacitance and switching delay fall by \(K\) and the power per circuit by \(K^2\). The lecture states that Dennard scaling "is already broken", because a voltage large enough to tell a 0 from a 1 is needed; that clock frequency and single-thread performance have stopped growing while the transistor count still grows (the chart "35 years of microprocessor trend data", credited to Horowitz, Labonte, Shacham, Olukotun, Hammond and Batten, with extrapolations by C. Moore); and that the only way to more computing power is more cores, from one core two decades ago to more than 128 today, which a single computation uses only if it is written as a parallel program.</p>
+<p><strong>What the sources say.</strong> Moore's 1965 article, written as director of research at Fairchild Semiconductor, states that the "complexity for minimum component costs has increased at a rate of roughly a factor of two per year", expects this to continue for at least 10 years, and gives 65,000 components per circuit for 1975 (<a href="https://www.cs.princeton.edu/courses/archive/fall14/cos109/mooreslaw.pdf">reprint</a>, p. 2 of 4). His 1975 paper reports that the complexity "has approximately doubled every year" since the introduction of integrated circuits and expects a slope that "might approximate a doubling every two years, rather than every year, by the end of the decade" (<a href="https://www.eng.auburn.edu/~agrawvd/COURSE/E7770_Spr07/READ/Gordon_Moore_1975_Speech.pdf">IEDM Technical Digest 1975, pp. 11–13</a>). The figure of 18 months has another source. Bohr (<a href="https://sscs.ieee.org/images/files/newsletter_archive/sscs_newsletter_200701.pdf">IEEE SSCS Newsletter, Winter 2007, p. 11</a>) writes that in the 1970s and 1980s a process generation, with 0.7 times the feature size and so twice the density, came every 3 years, and that growing chips made the transistor counts of the industry's microprocessors (he plots Intel's) rise close to 4 times every 3 years, "or 2x every 18 months"; since the mid-1990s generations came every 2 years and the count doubled about every 2 years. The lecture's 18 months describes one period of one company's products, and its own slide gives the longer-run figure.</p>
+<p>The listing below tests the doubling time against a data set. Rupp's repository of microprocessor trend data (<a href="https://github.com/karlrupp/microprocessor-trend-data">karlrupp/microprocessor-trend-data</a>, files <code>50yrs/transistors.dat</code> and <code>50yrs/frequency.dat</code>, CC BY 4.0, retrieved 2026-10-26) continues the lecture's chart with 99 transistor counts and 101 clock frequencies from 1971 to 2021. The listing embeds both files rounded to 4 significant digits, fits a line to \(\log_2\) of the value against the year by least squares, and prints the doubling time. It also tabulates Dennard scaling for \(K=\sqrt2\), the linear shrink of one process generation. A circuit dissipates \(P_{\mathrm{sw}}=CV^2\nu\) in switching: a node of capacitance \(C\) is charged through the voltage \(V\) at the clock frequency \(\nu\). Ideal scaling takes \(C\to C/K\), \(V\to V/K\), \(\nu\to K\nu\), so \(P_{\mathrm{sw}}\to P_{\mathrm{sw}}/K^2\), while the area of a circuit falls by \(K^2\). The "V fixed" column keeps \(V\) constant and \(\nu\) rising by \(K\) per generation. The program is deterministic, so the check is exact.</p>
+<pre><code class="language-python" data-file="moore_fit.py" data-run="python3 moore_fit.py">"""Doubling times from Rupp's microprocessor trend data, and the arithmetic of Dennard scaling.
+
+Data: K. Rupp, 50 years of microprocessor trend data, 50yrs/transistors.dat and frequency.dat
+(CC BY 4.0). Each entry is year:value, rounded to 4 significant digits. Transistors in
+thousands, frequency in MHz.
+"""
+from math import log2, sqrt
+
+TRANSISTORS = """
+    1971.88:2.308 1972.31:3.555 1974.33:6.098 1979.57:29.16 1982.31:135.8
+    1985.91:273.8 1986.25:109.4 1988.65:121.9 1989.47:1208 1990.58:1208
+    1992.40:1208 1992.69:3106 1992.69:1114 1993.03:1715 1993.41:3106
+    1993.41:922.2 1994.71:1911 1994.71:2788 1995.43:9647 1995.72:3106
+    1996.15:5474 1996.35:6793 1996.35:3652 1996.44:4294 1996.83:9647
+    1997.36:5474 1997.45:3555 1997.55:8896 1997.64:7567 1998.89:15260
+    1999.13:9390 1999.18:6978 1999.47:9390 1999.47:21670 2000.19:22270
+    2000.67:28390 2000.67:37180 2001.11:29160 2001.20:42550 2001.68:25480
+    2001.83:37180 2002.40:55730 2002.79:38200 2002.88:220700 2003.41:151200
+    2003.51:54250 2003.65:106500 2004.81:125200 2004.81:106500 2004.81:273800
+    2005.72:232900 2005.82:112400 2005.96:305100 2006.06:115500 2006.88:378600
+    2006.88:155400 2006.92:245800 2006.97:296900 2006.97:582900 2007.07:151200
+    2007.64:582900 2007.74:232900 2007.79:805800 2007.84:115500 2007.98:509400
+    2008.22:445100 2008.46:410500 2009.18:457300 2009.28:784400 2009.66:2.308e+06
+    2009.71:1.911e+06 2010.19:410500 2010.38:1.31e+06 2011.16:1.17e+06 2011.32:2.6e+06
+    2011.90:1.2e+06 2012.40:2.4e+06 2012.41:2.3e+06 2012.70:2.1e+06 2012.90:1.2e+06
+    2013.40:5e+06 2013.80:4.3e+06 2014.16:4.3e+06 2014.50:4.2e+06 2014.80:2.6e+06
+    2014.81:3.8e+06 2014.82:5.7e+06 2016.33:7.2e+06 2016.67:8e+06 2017.50:1.92e+07
+    2018.40:8e+06 2018.50:2.11e+07 2019.30:8e+06 2019.80:3.95e+07 2020.10:3.04e+07
+    2020.90:1.6e+07 2021.80:5.7e+07 2021.90:5.82e+07 2021.90:5.5e+07
+"""
+
+FREQUENCY = """
+    1971.88:0.7041 1972.26:0.5094 1974.33:2.017 1979.57:5.048 1982.31:6.098
+    1985.91:16.11 1986.25:16.11 1988.65:40.32 1989.47:24.8 1990.58:33.38
+    1992.40:65.52 1992.69:60.43 1992.69:100.9 1993.03:198.1 1993.41:67.32
+    1993.41:40.32 1994.71:151.2 1994.71:296.9 1995.43:296.9 1995.72:90.58
+    1996.11:198.1 1996.35:198.1 1996.44:90.58 1996.83:509.4 1997.36:252.5
+    1997.45:537.6 1997.55:232.9 1997.64:296.9 1998.85:495.8 1999.13:296.9
+    1999.18:399.5 1999.47:457.3 1999.47:509.4 2000.19:743.2 2000.67:1000
+    2001.11:897.7 2001.20:2017 2001.68:805.8 2001.78:1420 2002.40:2247
+    2002.79:1811 2002.88:1000 2003.41:1176 2003.51:2187 2003.61:1811
+    2004.81:2642 2004.81:1911 2004.86:3652 2005.72:3191 2005.87:2788
+    2005.96:1208 2006.01:2247 2006.88:3652 2006.88:2642 2007.02:2714
+    2007.07:2308 2007.64:2943 2007.74:4656 2007.74:4068 2007.84:2017
+    2007.98:1420 2008.17:2017 2008.17:2308 2008.46:3023 2009.18:2503
+    2009.28:3278 2009.42:2642 2009.66:2642 2009.71:3278 2010.19:2308
+    2011.16:3470 2011.32:2400 2011.90:3000 2012.40:3100 2012.41:2900
+    2012.70:3700 2012.90:2500 2013.40:1200 2013.80:2700 2014.16:2800
+    2014.50:3700 2014.80:3200 2014.81:2600 2014.82:2300 2016.33:2200
+    2016.50:1500 2016.67:4000 2017.50:2200 2017.58:2100 2017.59:2500
+    2018.40:3400 2018.50:1200 2019.30:2700 2019.80:2250 2020.10:2900
+    2020.20:2700 2020.90:3200 2021.30:2300 2021.80:3200 2021.90:1000
+    2021.90:2600
+"""
+
+
+def parse(text):
+    return [tuple(map(float, item.split(":"))) for item in text.split()]
+
+
+def fit(points, lo, hi):
+    """Least-squares line log2(value) = a + s * year over lo &lt;= year &lt; hi; returns (s, n, intercept)."""
+    pts = [(y, log2(v)) for y, v in points if lo &lt;= y &lt; hi]
+    n = len(pts)
+    my = sum(y for y, _ in pts) / n
+    mv = sum(v for _, v in pts) / n
+    s = sum((y - my) * (v - mv) for y, v in pts) / sum((y - my) ** 2 for y, _ in pts)
+    return s, n, mv - s * my
+
+
+tr, fr = parse(TRANSISTORS), parse(FREQUENCY)
+print(f"{len(tr)} transistor counts, {len(fr)} clock frequencies")
+
+print("\ntransistor count: doubling time of the least-squares line")
+for lo, hi in ((1971, 2022), (1971, 2000), (2000, 2022)):
+    s, n, _ = fit(tr, lo, hi)
+    print(f"  {lo}-{hi - 1}: n={n:3d}  doubles every {12 / s:5.1f} months")
+print(f"  growth over 1971-2021 if it doubled every 18 months: {2 ** (50 / 1.5):.1e}; every 24 months: {2 ** 25:.1e}")
+
+print("\nclock frequency: slope of log2(MHz) per year")
+for lo, hi in ((1990, 2004), (2004, 2022), (2007, 2022)):
+    s, n, a = fit(fr, lo, hi)
+    print(f"  {lo}-{hi - 1}: n={n:3d}  slope {s:+.3f} per year" + (f"  (doubling every {12 / s:4.1f} months)" if s &gt; 0.05 else ""))
+s, n, a = fit(fr, 1990, 2004)
+print(f"  the 1990-2003 line extended to 2021 gives {2 ** (a + s * 2021) / 1000:.0f} GHz; "
+      f"the highest clock among the entries since 2010 is {max(v for y, v in fr if y &gt;= 2010) / 1000:.1f} GHz")
+
+print("\nDennard scaling, one generation = linear shrink by 1/K with K = sqrt(2); chip area fixed")
+print(f"{'gen':&gt;3} {'density':&gt;8} {'clock':&gt;6} | {'ideal: P/circuit':&gt;16} {'P/area':&gt;7} | {'V fixed: P/circuit':&gt;18} {'P/area':&gt;7}")
+K = sqrt(2)
+for g in (0, 1, 2, 5, 10):
+    dens, freq = K ** (2 * g), K ** g                   # circuits per area, clock frequency
+    ideal = (1 / K) * (1 / K) ** 2 * K                    # C V^2 nu with C -&gt; C/K, V -&gt; V/K, nu -&gt; K nu
+    fixed = (1 / K) * 1.0 * K                             # same with V unchanged
+    print(f"{g:3d} {dens:8.0f} {freq:6.1f} | {ideal ** g:16.3f} {ideal ** g * dens:7.2f} | {fixed ** g:18.3f} {fixed ** g * dens:7.1f}")
+</code></pre>
+<pre><code class="output">99 transistor counts, 101 clock frequencies
+
+transistor count: doubling time of the least-squares line
+  1971-2021: n= 99  doubles every  23.9 months
+  1971-1999: n= 34  doubles every  27.3 months
+  2000-2021: n= 65  doubles every  23.9 months
+  growth over 1971-2021 if it doubled every 18 months: 1.1e+10; every 24 months: 3.4e+07
+
+clock frequency: slope of log2(MHz) per year
+  1990-2003: n= 36  slope +0.432 per year  (doubling every 27.8 months)
+  2004-2021: n= 56  slope -0.011 per year
+  2007-2021: n= 47  slope -0.017 per year
+  the 1990-2003 line extended to 2021 gives 354 GHz; the highest clock among the entries since 2010 is 4.0 GHz
+
+Dennard scaling, one generation = linear shrink by 1/K with K = sqrt(2); chip area fixed
+gen  density  clock | ideal: P/circuit  P/area | V fixed: P/circuit  P/area
+  0        1    1.0 |            1.000    1.00 |              1.000     1.0
+  1        2    1.4 |            0.500    1.00 |              1.000     2.0
+  2        4    2.0 |            0.250    1.00 |              1.000     4.0
+  5       32    5.7 |            0.031    1.00 |              1.000    32.0
+ 10     1024   32.0 |            0.001    1.00 |              1.000  1024.0</code></pre>
+<p><strong>Reading the output.</strong> The transistor counts double every 23.9 months over 1971–2021, every 27.3 months before 2000 (34 entries) and every 23.9 months from 2000 on (65 entries). A doubling every 18 months would have multiplied the count by \(1.1\times10^{10}\) over 50 years and a doubling every 24 months by \(3.4\times10^{7}\); the data grew by \(2.5\times10^{7}\), from 2.3 thousand (1971.88) to \(5.82\times10^{7}\) thousand (2021.9). The two-year figure of the lecture's slide fits; the 18-month figure does not. The clock frequency has the slope \(+0.432\) doublings per year from 1990 to 2003, a doubling every 27.8 months, and \(-0.011\) from 2004 to 2021 (\(-0.017\) from 2007). The 1990–2003 line extended to 2021 gives 354 GHz; the highest clock among the entries since 2010 is 4.0 GHz, and the turbo clock of this machine's performance cores is 4.40 GHz. The lecture describes the same plateau.</p>
+<p>The table at the end of the output explains the plateau. Under ideal Dennard scaling the power per circuit falls by \(1/K^2\) while circuits become \(K^2\) times denser, so power per unit area stays at 1.00 while the clock rises by \(K\) per generation: ten generations (about 20 years) give circuits 1024 times as dense, running 32 times faster, at the same power per chip area. Dennard et al. state this under their Table I: the delay of each circuit falls by a factor \(K\), its power dissipation by \(K^2\), and "the power density remains constant" (IEEE J. Solid-State Circuits SC-9(5), 1974, <a href="https://www.eng.auburn.edu/~agrawvd/COURSE/READING/LOWP/Design%20of%20ion-implanted%20MOSFETs%20with%20very%20small%20physical%20dimensions.pdf">p. 265</a>); the lecture's table reproduces this. If the voltage stops falling while clock and density still rise, the power per circuit stays constant and the power per unit area doubles at each generation, 32 times after five. A chip cannot dissipate that, so the clock stops rising.</p>
+<p>The lecture explains the stop of voltage scaling by the need of "a certain finite voltage" to identify the binary states. Bohr (p. 12) names a mechanism: Dennard's rule assumed that the threshold voltage \(V_T\) would scale with the supply voltage, and after 30 years of scaling the leakage current of a switched-off transistor (sub-threshold leakage) had grown from below \(10^{-10}\) to above \(10^{-7}\) amperes per micrometre of gate width; "due to leakage constraints, it will be difficult to further scale \(V_T\) and thus it will also be difficult to scale operating voltage." The two accounts are compatible. The lecture also says that today's computers use "3 nanometer technology"; the chart on the same slide plots gate lengths from 50 to 15 nm, and this chapter did not check which dimension a manufacturing node name denotes.</p>
+<p><strong>Consequences.</strong> The transistor count still doubles and the clock does not, so the added transistors become cores, caches and vector units, which a program uses only if it is written for them. The lecture's slide on parallel computing states the consequence: high performance computing involves parallel programming; "you cannot run away from parallel programming in the future"; "automatic parallelization has been a disaster so far"; messages must be communicated; Amdahl's law. The next section treats the last two, and the section on source code and instructions tests the claim about automatic parallelization on the Jacobi sweep.</p>
+<p><strong>Boundary of the evidence.</strong> The fits describe a public data set of products of several vendors, not a controlled measurement; "frequency" is the listed clock of an entry. The break at 2004 is read off the plot, and the fit from 2007 shows that the sign of the slope does not depend on it. The fits say nothing about causes; those come from Dennard et al. and Bohr.</p>
+
+<h2 id="amdahl">Dividing a sum among people, and Amdahl's law <a class="timestamp" href="https://www.youtube.com/watch?v=PXmMDWzebGE&amp;t=669s">W3L1 11:09</a></h2>
+<p><strong>The lecture's example.</strong> A person who adds one integer per second needs 10,000 s to add a bag of 10,000 integers. With 10 people of equal skill the naive expectation is 1000 s. The lecture counts two additional steps and neglects the cost of handing out the numbers and of returning the results: each person adds 1000 numbers, taking 1000 s, and then one person adds the 10 partial sums, taking 10 s, so the time is 1010 s. With 100 people each adds 100 numbers in 100 s and one person adds 100 partial sums in another 100 s, so the time is 200 s and the speedup is 50: "if I put 100 times more resources I actually go only 50 times faster". The lecture presents this as the motivation of Amdahl's law.</p>
+<p><strong>The model.</strong> Let \(M\) be the number of integers (the lecture's 10,000; \(N\) is kept for the grid size of the plate problem) and \(p\) the number of people. The slowest person adds \(\lceil M/p\rceil\) integers, and one person then adds the \(p\) partial sums, so</p>
+\[
+T(p)=\Big\lceil \frac{M}{p}\Big\rceil+p,\qquad p\ge2,\qquad T(1)=M. \tag{9.1}
+\]
+<p>The two terms have opposite trends. Ignoring the ceiling, \(dT/dp=1-M/p^2\) is zero at \(p^*=\sqrt M\), the second derivative \(2M/p^3\) is positive, and \(T(p^*)=2\sqrt M\), a speedup of \(S_{p^*}=\sqrt M/2\). For \(M=10^4\): \(p^*=100\), \(T=200\) s and \(S=50\). The lecture's 100 people are the best team size of this model, not an arbitrary choice. The model is symmetric under \(p\leftrightarrow M/p\), so \(p=10\) and \(p=1000\) take the same time, 1010 s: a team of 1000 people is as slow as a team of 10, and a team of 10,000 takes 10,001 s, as long as one person. The listing evaluates (9.1) and prints the best team found by search.</p>
+<p><strong>A serial part that grows with the team.</strong> Amdahl's law (below) assumes a serial fraction that does not depend on the number of workers. In (9.1) the serial step, adding \(p\) partial sums, takes \(p\) seconds. To express the times as \(T_p=fT_1+(1-f)T_1/p\) the fraction would have to be \(f=p^2/(M(p-1))\approx p/M\). The column <code>f_eff</code> of the listing shows it: 0.0011 at \(p=10\), 0.0101 at \(p=100\), 0.1001 at \(p=1000\). A fraction that grows tenfold when the team grows tenfold is not a constant of the problem. The serial step is a property of the algorithm that combines the results: one person adds all the partial sums. If the partial sums are added in pairs, in rounds, each round halves the number of sums, and the time is \(\lceil M/p\rceil+\lceil\log_2p\rceil\) (the same neglect of communication cost). The listing shows that this changes the result: 107 s at \(p=100\) (speedup 93.5) and 20 s at \(p=1000\) (speedup 500). The serial part of a parallel program depends on how the results are combined, so it is not a property of the problem alone. Chapter 15 treats tree-shaped combination of results (reductions) in message passing, including the cost of the messages that this model neglects.</p>
+<pre><code class="language-python" data-file="bag_of_integers.py" data-run="python3 bag_of_integers.py">"""The lecture's bag of 10,000 integers, added by p people at one addition per second."""
+from math import ceil, log2, sqrt
+
+M = 10_000                      # integers in the bag; one addition takes one second
+
+
+def t_flat(p):
+    """Each person adds ceil(M/p) numbers; one person then adds the p partial sums."""
+    return M if p == 1 else ceil(M / p) + p
+
+
+def t_tree(p):
+    """The p partial sums are added pairwise: ceil(log2 p) rounds of one addition each."""
+    return ceil(M / p) + ceil(log2(p))
+
+
+def f_eff(s, p):
+    """Serial fraction that Amdahl's law (fixed f) would need to give speedup s on p workers."""
+    return (1 / s - 1 / p) / (1 - 1 / p)
+
+
+print(f"{'p':&gt;6} {'T flat':&gt;8} {'S flat':&gt;7} {'f_eff':&gt;7} | {'T tree':&gt;7} {'S tree':&gt;7}")
+for p in (1, 10, 100, 200, 1000, 10000):
+    s = M / t_flat(p)
+    f = f"{f_eff(s, p):7.4f}" if p &gt; 1 else "      -"
+    print(f"{p:6d} {t_flat(p):8d} {s:7.1f} {f} | {t_tree(p):7d} {M / t_tree(p):7.1f}")
+
+best = min(range(1, M + 1), key=t_flat)
+print(f"best flat team: p = {best}, T = {t_flat(best)} s, S = {M / t_flat(best):.1f}; "
+      f"model: p* = sqrt(M) = {sqrt(M):.0f}, T* = 2 sqrt(M) = {2 * sqrt(M):.0f}")
+
+print("\nAmdahl's law S = 1/((1-P) + P/n), P = parallel proportion, n = processors")
+print(f"{'P':&gt;5} {'n=100':&gt;8} {'n=1000':&gt;8} {'n=10^6':&gt;8} {'1/(1-P)':&gt;8}")
+for P in (0.50, 0.75, 0.90, 0.95, 0.99):
+    row = [1 / ((1 - P) + P / n) for n in (100, 1000, 10**6)]
+    print(f"{P:5.2f} " + " ".join(f"{v:8.1f}" for v in row) + f" {1 / (1 - P):8.1f}")
+</code></pre>
+<pre><code class="output">     p   T flat  S flat   f_eff |  T tree  S tree
+     1    10000     1.0       - |   10000     1.0
+    10     1010     9.9  0.0011 |    1004    10.0
+   100      200    50.0  0.0101 |     107    93.5
+   200      250    40.0  0.0201 |      58   172.4
+  1000     1010     9.9  0.1001 |      20   500.0
+ 10000    10001     1.0  1.0001 |      15   666.7
+best flat team: p = 100, T = 200 s, S = 50.0; model: p* = sqrt(M) = 100, T* = 2 sqrt(M) = 200
+
+Amdahl's law S = 1/((1-P) + P/n), P = parallel proportion, n = processors
+    P    n=100   n=1000   n=10^6  1/(1-P)
+ 0.50      2.0      2.0      2.0      2.0
+ 0.75      3.9      4.0      4.0      4.0
+ 0.90      9.2      9.9     10.0     10.0
+ 0.95     16.8     19.6     20.0     20.0
+ 0.99     50.3     91.0    100.0    100.0</code></pre>
+<p><strong>Amdahl's law as the lecture states it.</strong> The lecture writes \(P\) for the proportion of the program that can be made parallel, \(1-P\) for the proportion that stays serial, and \(N\) for the number of processors (the book's \(p\); the book's \(f\) is \(1-P\)). The maximum speedup is</p>
+\[
+S(p)=\frac{1}{(1-P)+P/p},\qquad \lim_{p\to\infty}S(p)=\frac{1}{1-P}. \tag{9.2}
+\]
+<p>The second part of the listing tabulates (9.2). For \(P=0.5\) the limit is 2, for 0.75 it is 4, for 0.90 it is 10 and for 0.95 it is 20, the plateaus of the four curves on the lecture's slide (65,536 processors on the horizontal axis). For \(P=0.99\) the limit is 100, as the lecture states, and 100 processors give 50.3, 1000 give 91.0, \(10^6\) give 100.0. Amdahl's 1967 paper contains no equation (the editors of the <a href="https://www3.cs.stonybrook.edu/~rezaul/Spring-2019/CSE613/reading/Amdahl-1967.pdf">2007 reprint</a> say so); it argues that housekeeping, which he puts at 40 percent of the executed instructions, appears sequential, might be halved in a dedicated environment but not reduced by a factor of three, and "overhead alone would then place an upper limit on throughput of five to seven times the sequential processing rate". Chapter 11 derives (9.2) from three stated assumptions, solves it for the serial fraction implied by a measured speedup, and tests it on measured OpenMP times; this chapter uses (9.2) only to state requirements.</p>
+<p><strong>The lecture's conclusion and its boundary.</strong> The lecture concludes that a program that cannot use more than about 1000 processors makes machines with millions of cores "effectively rendered useless", and advises finding the parallel portion of an algorithm and maximizing it. The first statement holds for a problem of fixed size, which is the assumption of (9.2). Gustafson (1988) points out that the serial time of a run on many processors usually does not grow with the problem size, and that users enlarge the problem with the machine. With \(s'\) the serial fraction of the time measured on the parallel system and \(p\) the number of processors (he writes \(N\)), the paper gives the scaled speedup \(p+(1-p)s'\), an alternative to Amdahl's law that it credits to E. Barsis, and reports speedups of 1021, 1020 and 1016 on 1024 processors for three applications whose serial fraction was 0.4 to 0.8 percent (pp. 532–533). If these fractions were read as the fixed-size \(f\) of (9.2), the limit on 1024 processors would be 111 to 201. That reading is the misuse that Gustafson criticizes, because a serial fraction measured on the parallel system is not the serial fraction of \(T_1\) (<a href="http://johngustafson.net/pubs/pub13/amdahl.pdf">Gustafson, CACM 31(5), 1988, pp. 532–533</a>). Chapter 16 treats scaled speedup and its measurement. For the Jacobi iteration of this chapter the scaled argument needs a correction: the number of sweeps grows as \(N^2\) (the section on the iteration), so a larger grid on more processors does not keep the time constant. The section on the cost of the iteration states what Amdahl's law requires of the plate problem.</p>
+
+<h2 id="pipeline">From phenomenon to computation: three errors <a class="timestamp" href="https://www.youtube.com/watch?v=z75dO5juDq8&amp;t=40s">W3L2 0:40</a></h2>
+<p><strong>The lecture's pipeline.</strong> The lecture starts from the statement that closed-form solutions of the partial differential equations (PDEs) that describe heat transfer, fluid flow and electromagnetism are rarely available, so a computation replaces them. The pipeline has four stages, drawn as four boxes: a phenomenon (flows, heat transfer, electromagnetics); the governing equations (Navier–Stokes, the heat equation, Maxwell's equations); a numerical method (finite differences, finite volumes, Galerkin methods, the lattice Boltzmann method); and the computation. Each arrow introduces an error, drawn as a red box. The error of the first arrow is the <em>modelling error</em>: assumptions such as the continuum hypothesis (treating a fluid as continuous although it consists of molecules), uniform viscosity or uniform conductivity. The error of the second arrow is the <em>discretization error</em>: the derivatives are replaced by differences, and the lecture's example is the central difference \(f'(x)\approx(f(x+h)-f(x-h))/(2h)\), obtained from Taylor series by neglecting terms of higher order. The error of the third arrow is the <em>arithmetic error</em>: finite precision, with round-off. The lecture's thesis is that "the entire game of numerical modelling is to sort of balance all these errors": a computer accurate to \(10^{-100}\) is of no use if the method has an error of \(10^{-2}\); a 16th-order method is of no use on a computer that works to \(10^{-8}\); and neither helps if the model assumed constant viscosity. How many digits are needed depends on the use: 35 versus 35.231579 degrees Celsius for human comfort, but more digits for a controlled chemical experiment, and the number of digits "has direct impact on the effort in the computations".</p>
+<p>The model of this chapter makes the thesis a statement that can be checked. Let \(u_{\mathrm{phys}}\) be the temperature of the physical plate, \(u\) the exact solution of the governing equation, \(u_h\) the exact solution of the difference equations on a grid of spacing \(h\), and \(U\) the numbers the program holds at the end. By the triangle inequality, in any norm,</p>
+\[
+\|u_{\mathrm{phys}}-U\|\le\underbrace{\|u_{\mathrm{phys}}-u\|}_{\text{modelling}}+\underbrace{\|u-u_h\|}_{\text{discretization}}+\underbrace{\|u_h-U\|}_{\text{solver and arithmetic}}. \tag{9.3}
+\]
+<p>The lecture assigns the third term to arithmetic. For an iterative solver the third term has two parts: the <em>iteration error</em>, which exists in exact arithmetic because the iteration stops, and the rounding error. The section on the iteration shows that the iteration error is the one that dominates when the stopping rule is careless. The modelling error cannot be computed from the model; this chapter does not estimate it. A scale shows why the lecture rejects the alternative of tracking molecules. At atmospheric pressure \(p_0=101325\) Pa and temperature 293.15 K, the ideal-gas law gives \(n=p_0/(k_BT)=2.5\times10^{25}\) molecules per cubic metre, with the exact value \(k_B=1.380649\times10^{-23}\) J/K (<a href="https://physics.nist.gov/cgi-bin/cuu/Value?k">NIST CODATA</a>). A cubic kilometre of air holds \(2.5\times10^{34}\) molecules. Storing three position and three velocity components of each as doubles takes \(1.2\times10^{36}\) bytes, which is \(8\times10^{25}\) times the 15 GB of memory of this chapter's machine.</p>
+<p><strong>The central difference, with its Taylor series.</strong> The slide shows only the final formula. For a function with three continuous derivatives, Taylor's theorem gives</p>
+\[
+g(x\pm h)=g(x)\pm hg'(x)+\frac{h^2}{2}g''(x)\pm\frac{h^3}{6}g'''(\xi_\pm),\qquad \xi_\pm\in(x-h,x+h),
+\]
+<p>so the difference of the two values is \(2hg'(x)+\tfrac{h^3}{6}\bigl(g'''(\xi_+)+g'''(\xi_-)\bigr)\), and</p>
+\[
+\frac{g(x+h)-g(x-h)}{2h}=g'(x)+\frac{h^2}{6}g'''(\xi),\qquad \xi\in(x-h,x+h). \tag{9.4}
+\]
+<p>The method is second-order accurate: the error falls by 4 when \(h\) is halved. The lecture states this; (9.4) gives the constant, \(|g'''|/6\). Rounding enters through the values of \(g\). Let \(u_r\) be the unit roundoff, the largest relative error of one rounded floating-point result under round-to-nearest. For a binary format with an \(\ell\)-digit significand it is \(2^{-\ell}\): \(2^{-53}=1.1\times10^{-16}\) for IEEE double precision (53 digits) and \(2^{-24}=6.0\times10^{-8}\) for single precision (24 digits) (<a href="https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html">Goldberg 1991</a>, section "Relative Error and Ulps", where \(\varepsilon=(\beta/2)\beta^{-p}\)). If \(x\pm h\) are exact and each value of \(g\) has a relative error of at most \(u_r\), the numerator of (9.4) has an absolute error of at most \(2u_r|g|\), and the quotient has an error of at most \(u_r|g|/h\). With \(M_0=\max|g|\) and \(M_3=\max|g'''|\) near \(x\), the total error is bounded by</p>
+\[
+B(h)\le\frac{M_3}{6}h^2+\frac{M_0\,u_r}{h},\qquad h^*=\Bigl(\frac{3M_0u_r}{M_3}\Bigr)^{1/3},\qquad B(h^*)=\frac{M_3}{2}\,h^{*2}. \tag{9.5}
+\]
+<p>The first term falls with \(h\), the second rises, and the bound has a minimum at \(h^*\), where the truncation term is one third of the bound and the rounding term two thirds. The minimum is therefore \(M_3h^{*2}/2\); for \(M_0=M_3\) it is \(\tfrac12(3u_r)^{2/3}\): \(2.4\times10^{-11}\) in double and \(1.6\times10^{-5}\) in single precision. The fourth-order formula \([g(x-2h)-8g(x-h)+8g(x+h)-g(x+2h)]/(12h)\) has truncation error \(h^4g^{(5)}(\xi)/30\) and a rounding term at most \(1.5\,u_rM_0/h\) (the coefficients \(1,8,8,1\) sum to 18, and \(18/12=1.5\)); its bound is minimal at \(h^*=(11.25\,u_r)^{1/5}\) with value \(h^{*4}/6\) for \(M_0=M_5\).</p>
+<p>The listing tests (9.5). It differentiates \(g(x)=e^x\), whose derivatives are all \(e^x\), so the relative error does not depend on \(x\) and can be averaged over 256 points \(x=j/128\). It uses \(h=2^{-k}\), so that \(x\pm h\) and \(x\pm2h\) are exact in both precisions and only <code>exp</code> and <code>expf</code> are rounded, and it prints the root mean square of the relative error of the second-order formula in double and single precision and of the fourth-order formula in both. The program is deterministic, so the check is exact.</p>
+<pre><code class="language-c" data-file="error_balance.c" data-build="gcc -O2 error_balance.c -o error_balance -lm" data-run="./error_balance">#include &lt;stdio.h&gt;
+#include &lt;math.h&gt;
+
+/* Central-difference derivative of f(x) = exp(x), orders 2 and 4, in double and in float.
+   Every derivative of exp is exp, so the RELATIVE error does not depend on x and can be
+   averaged over 256 points x = j/128 in [0, 2). With h = 2^-k the points x +- h and x +- 2h
+   are exact in both precisions, so only the evaluations of exp are rounded. */
+
+#define NPOINT 256
+
+static double rel_rms(int dbl, int order, int k)
+{
+    double h = ldexp(1.0, -k), sum = 0.0;
+    for (int j = 0; j &lt; NPOINT; j++) {
+        double x = j / 128.0, e = exp(x), v;
+        if (dbl &amp;&amp; order == 2)
+            v = (exp(x + h) - exp(x - h)) / (2 * h);
+        else if (dbl)
+            v = (exp(x - 2*h) - 8*exp(x - h) + 8*exp(x + h) - exp(x + 2*h)) / (12 * h);
+        else if (order == 2)
+            v = (expf((float)(x + h)) - expf((float)(x - h))) / (2 * (float)h);
+        else
+            v = (expf((float)(x - 2*h)) - 8*expf((float)(x - h)) + 8*expf((float)(x + h))
+                 - expf((float)(x + 2*h))) / (12 * (float)h);
+        sum += (v / e - 1) * (v / e - 1);
+    }
+    return sqrt(sum / NPOINT);
+}
+
+int main(void)
+{
+    printf("rms relative error of f'(x) over %d points; f = exp\n", NPOINT);
+    printf("%3s %10s %12s %12s %12s %12s\n", "k", "h=2^-k", "double ord2", "double ord4", "float ord2", "float ord4");
+    for (int k = 2; k &lt;= 22; k += 2)
+        printf("%3d %10.2e %12.2e %12.2e %12.2e %12.2e\n", k, ldexp(1.0, -k),
+               rel_rms(1, 2, k), rel_rms(1, 4, k), rel_rms(0, 2, k), rel_rms(0, 4, k));
+
+    printf("\nminimum over k = 1..22, against the worst-case model\n");
+    printf("%-7s %-5s %4s %10s %9s %10s\n", "type", "order", "k*", "min rms", "h* model", "B* model");
+    for (int dbl = 1; dbl &gt;= 0; dbl--)
+        for (int order = 2; order &lt;= 4; order += 2) {
+            double best = 1e300, u = dbl ? ldexp(1.0, -53) : ldexp(1.0, -24), hs, es;
+            int kb = 0;
+            for (int k = 1; k &lt;= 22; k++) {
+                double r = rel_rms(dbl, order, k);
+                if (r &lt; best) { best = r; kb = k; }
+            }
+            if (order == 2) {                        /* E = h^2/6 + u/h            */
+                hs = cbrt(3 * u);
+                es = hs * hs / 6 + u / hs;
+            } else {                                 /* E = h^4/30 + 1.5 u/h       */
+                hs = pow(11.25 * u, 0.2);
+                es = pow(hs, 4) / 30 + 1.5 * u / hs;
+            }
+            printf("%-7s %-5d %4d %10.2e %9.2e %10.2e\n", dbl ? "double" : "float", order, kb, best, hs, es);
+        }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">rms relative error of f'(x) over 256 points; f = exp
+  k     h=2^-k  double ord2  double ord4   float ord2   float ord4
+  2   2.50e-01     1.04e-02     1.31e-04     1.04e-02     1.31e-04
+  4   6.25e-02     6.51e-04     5.09e-07     6.51e-04     6.83e-07
+  6   1.56e-02     4.07e-05     1.99e-09     4.07e-05     1.88e-06
+  8   3.91e-03     2.54e-06     7.76e-12     5.40e-06     7.40e-06
+ 10   9.77e-04     1.59e-07     6.40e-14     1.91e-05     2.94e-05
+ 12   2.44e-04     9.93e-09     2.21e-13     7.60e-05     1.25e-04
+ 14   6.10e-05     6.21e-10     8.46e-13     2.94e-04     4.51e-04
+ 16   1.53e-05     3.87e-11     3.48e-12     1.19e-03     1.92e-03
+ 18   3.81e-06     9.26e-12     1.45e-11     4.88e-03     7.78e-03
+ 20   9.54e-07     3.16e-11     5.07e-11     1.90e-02     2.97e-02
+ 22   2.38e-07     1.38e-10     2.37e-10     7.17e-02     1.10e-01
+
+minimum over k = 1..22, against the worst-case model
+type    order   k*    min rms  h* model   B* model
+double  2       18   9.26e-12  6.93e-06   2.40e-11
+double  4       10   6.40e-14  1.05e-03   1.99e-13
+float   2        8   5.40e-06  5.63e-03   1.59e-05
+float   4        4   6.83e-07  5.82e-02   1.92e-06</code></pre>
+<p><strong>Reading the output.</strong> At \(h=2^{-2}\) to \(2^{-6}\) the second-order formula has the same error in double and single precision (\(1.04\times10^{-2}\), \(6.51\times10^{-4}\), \(4.07\times10^{-5}\) at \(k=2,4,6\)): the method error alone decides, and 16 digits instead of 7 buy nothing. This is the lecture's first statement, confirmed with these numbers. Consecutive rows differ by 2 in \(k\), which divides \(h\) by 4 and the error by 16, as \(h^2\) predicts. Below some \(h\) the error rises: in double precision the minimum of the table is at \(k^*=18\) (\(9.3\times10^{-12}\)), against the model's \(h^*=6.9\times10^{-6}=2^{-17.1}\); in single precision at \(k^*=8\), against \(2^{-7.5}\). The measured minima are \(2.6\) to \(3.1\) times below the model values \(B^*\) (\(9.3\times10^{-12}\) against \(2.4\times10^{-11}\); \(5.4\times10^{-6}\) against \(1.6\times10^{-5}\)), as expected from a bound that takes every rounding error at its worst. The fourth-order formula reaches \(6.4\times10^{-14}\) in double precision, 145 times below the second-order minimum, and \(6.8\times10^{-7}\) in single precision, 8 times below the second-order minimum. The last number answers the lecture's second statement. In single precision the unit roundoff is \(6.0\times10^{-8}\) and the fourth-order minimum is already 11 times that; a method of order 16 cannot reduce it below the arithmetic floor, which is of the order of \(u_r\), so the lecture is right that high order is wasted beyond the precision. The minimum error of an order-\(m\) formula scales as \(u_r^{m/(m+1)}\): \(u_r^{2/3}\) for the second order, \(u_r^{4/5}\) for the fourth, approaching \(u_r\) as \(m\) grows.</p>
+<p><strong>Boundary.</strong> The experiment measures one smooth function in two precisions. It supports the statement that errors from different stages should be of the same size, and it supports nothing about the modelling error. The section on the iteration adds the iteration error as a fourth entry of (9.3), and shows that a program can be accurate in every stage except the stopping rule.</p>
+
+<h2 id="stencil">The plate problem and the five-point stencil <a class="timestamp" href="https://www.youtube.com/watch?v=z75dO5juDq8&amp;t=808s">W3L2 13:28</a></h2>
+<p><strong>The lecture's plate.</strong> The lecture's example is a square plate whose edges are held at given temperatures. The slide labels three corners \(T_0\) and the bottom-right corner \(T_\infty\); the top and left edges are held at \(T_0\), and the temperature along the right and bottom edges varies from \(T_0\) to \(T_\infty\). The lecture assumes a uniform material (constant conductivity) and a thin plate (no variation across the thickness), models the temperature by Laplace's equation, discretizes the plate at points of uniform spacing chosen by the accuracy wanted (temperature differences 10 m, 100 m or 1 km apart for a flat city heated by a fire at its edge), addresses a point by indices \((i,j)\), writes the discretized equation at a point, and assembles the equations into \(A\mathbf x=\mathbf b\) with the statement, on its slide, "You can choose any Linear Algebra Solver (iterative or Direct). Iterative is more efficient." This chapter keeps the plate and the assumptions and replaces the boundary values by the canonical ones (\(u=1\) on the top edge, 0 on the others), because \(T_0\) and \(T_\infty\) are symbols without values, and one fixed boundary condition lets all the solvers of the book be compared. The replacement changes only the right-hand side \(\mathbf b\) of the system and the boundary fill of the code; the stencil, the matrix \(A\), its spectrum and the iteration count do not depend on the boundary values.</p>
+<p><strong>Deriving the stencil.</strong> The lecture's slide gives the discretized equation as \((T_{i-1,j}-T_{i,j}+T_{i+1,j})/(\Delta x)^2+(T_{i,j-1}-T_{i,j}+T_{i,j+1})/(\Delta y)^2=0\). The coefficient of the centre value in each term should be \(-2\), not \(-1\). A test shows this: a constant temperature \(T\equiv c\) satisfies Laplace's equation, and the slide's expression evaluates to \(c/(\Delta x)^2+c/(\Delta y)^2\ne0\) for it. The derivation gives the correct coefficient. For a function \(u\) with six continuous derivatives, Taylor's theorem gives \(u(x\pm h,y)=u\pm hu_x+\tfrac{h^2}{2}u_{xx}\pm\tfrac{h^3}{6}u_{xxx}+\tfrac{h^4}{24}u_{xxxx}\pm\dots\) with all derivatives at \((x,y)\). The sum of the two values minus \(2u\) leaves the even terms,</p>
+\[
+u(x+h,y)+u(x-h,y)-2u(x,y)=h^2u_{xx}+\frac{h^4}{12}u_{xxxx}+O(h^6),
+\]
+<p>and the same in \(y\). Adding the two and dividing by \(h^2\) defines the five-point operator \(\Delta_h\) and gives its truncation error \(\tau\):</p>
+\[
+\Delta_hu(x,y)=\frac{u(x\!+\!h,y)+u(x\!-\!h,y)+u(x,y\!+\!h)+u(x,y\!-\!h)-4u(x,y)}{h^2}
+=\Delta u+\tau,\quad \tau=\frac{h^2}{12}\bigl(u_{xxxx}+u_{yyyy}\bigr)+O(h^4). \tag{9.6}
+\]
+<p>The five-point scheme sets \(\Delta_hU=0\) at every interior node. Solved for the centre value it says \(U_{ij}\) is the average of its four neighbours, which is the Jacobi update of the model section. With the slide's coefficient the same manipulation would give a centre value equal to half the sum of the neighbours, an operation that doubles a constant field at every step instead of keeping it.</p>
+<p><strong>The linear system.</strong> Number the \(n=N^2\) unknowns row by row, \(m=(i-1)N+(j-1)\). The scheme becomes \(A\mathbf U=\mathbf b\), where \(A\) has 4 on the diagonal and \(-1\) in the columns of the (up to) four neighbouring unknowns, and \(b_m\) is the sum of the boundary values among the neighbours of node \(m\). For the canonical problem \(b_m=1\) for the \(N\) unknowns of row 1, next to the top edge, and 0 otherwise. The matrix is symmetric, has at most 5 nonzeros per row, and has half-bandwidth \(N\): the nonzero entries lie within \(N\) places of the diagonal. Its eigenvalues are \(4\bigl[\sin^2\frac{j\pi h}{2}+\sin^2\frac{l\pi h}{2}\bigr]\), \(1\le j,l\le N\), all positive (<a href="https://www-users.cse.umn.edu/~saad/IterMethBook_2ndEd.pdf">Saad, <em>Iterative Methods for Sparse Linear Systems</em>, 2nd ed., §13.2, eq. 13.14, p. 427</a>), so \(A\) is positive definite and the system has exactly one solution. The lecture's count of \(n^2\) equations in \(n^2\) unknowns is right for the interior unknowns.</p>
+<p><strong>How the error behaves.</strong> The question is how the difference \(e=u-U\) between the exact solution of the plate equation and the exact solution of the five-point equations depends on \(h\). Take a solution \(u\) with bounded fourth derivatives on the closed square, and let \(e_{ij}=u(x_j,y_i)-U_{ij}\) at the nodes. Both \(u\) and \(U\) have the same values on the boundary, so \(e=0\) there. Since \(\Delta_hU=0\) and \(\Delta_hu=\tau\) by (9.6), the error satisfies \(\Delta_he=\tau\) in the interior. A <em>discrete minimum principle</em> turns this into a bound. If \(\Delta_hw\le0\) at every interior node, then each \(w_{ij}\) is at least the average of its neighbours, so a minimum of \(w\) at an interior node would force all four neighbours to equal it; repeating the argument along the grid reaches the boundary, so \(\min w\) is attained on the boundary. Now take \(\varphi(x)=x(1-x)/2\), a quadratic, so that \(\Delta_h\varphi=\varphi''=-1\) exactly at every node, and \(0\le\varphi\le\frac18\). Let \(\tau_{\max}=\max|\tau|\). Then \(\Delta_h(\pm e+\tau_{\max}\varphi)=\pm\tau-\tau_{\max}\le0\), the function \(\pm e+\tau_{\max}\varphi\) is non-negative on the boundary, hence non-negative everywhere, and so \(|e|\le\tau_{\max}\varphi\le\tau_{\max}/8\). With (9.6):</p>
+\[
+\max_{ij}|e_{ij}|\le\frac{1}{8}\max|\tau|\le\frac{h^2}{96}\max\bigl|u_{xxxx}+u_{yyyy}\bigr|+O(h^4). \tag{9.7}
+\]
+<p>The error is of second order in \(h\), with a constant fixed by the fourth derivatives of the solution. The bound is a proof of order, not a prediction of size, because it takes the worst \(\tau\) over the whole square at every node.</p>
+<p><strong>A solution with a known discrete counterpart.</strong> To test (9.7) without a solver, take \(u(x,y)=\sin(\pi x)\sinh(\pi y)/\sinh\pi\). It satisfies Laplace's equation, equals \(\sin\pi x\) on the top edge \(y=1\), and vanishes on the other edges: the structure of the canonical problem with a continuous boundary value. It has \(u_{xxxx}=u_{yyyy}=\pi^4u\), so \(\tau=h^2\pi^4u/6+O(h^4)\), and (9.7) gives \(\max|e|\le h^2\pi^4/48\approx2.03\,h^2\). The five-point equations have the closed-form solution \(U(x_j,y_i)=\sin(\pi x_j)\sinh(\gamma y_i)/\sinh\gamma\) with \(\cosh(\gamma h)=2-\cos(\pi h)\): the factor \(\sin\pi x\) is an eigenfunction of the second difference in \(x\), and the second difference in \(y\) then requires \(\cosh(\gamma h)=2-\cos\pi h\). The listing prints three things: the truncation error of the stencil applied to \(u\) at the centre, divided by \(h^2\pi^4u/6\); the largest error \(|u-U|\) over the interior for \(N=7\) to 127 with the ratio between successive errors (4 if the error is \(O(h^2)\)); and the largest residual of the five-point equations for the closed-form \(U\), which checks the formula. The program is deterministic, so the check is exact.</p>
+<pre><code class="language-python" data-file="order_check.py" data-run="python3 order_check.py">"""Truncation error and global error of the five-point stencil on a problem with a known answer.
+
+Exact solution of Laplace's equation on the unit square:
+    u(x, y) = sin(pi x) sinh(pi y) / sinh(pi),   so  u = sin(pi x) on the top edge y = 1
+and u = 0 on the other three edges. Its discrete counterpart is also known in closed form:
+    u_h(x_j, y_i) = sin(pi x_j) sinh(g y_i) / sinh(g),  with  cosh(g h) = 2 - cos(pi h),
+which satisfies the five-point equations exactly (the residual is printed).
+"""
+from math import cosh, acosh, cos, pi, sin, sinh
+
+
+def exact(x, y):
+    return sin(pi * x) * sinh(pi * y) / sinh(pi)
+
+
+def discrete(x, y, h):
+    g = acosh(2 - cos(pi * h)) / h
+    return sin(pi * x) * sinh(g * y) / sinh(g)
+
+
+def stencil(f, x, y, h):
+    """(f(x-h,y) + f(x+h,y) + f(x,y-h) + f(x,y+h) - 4 f(x,y)) / h^2"""
+    return (f(x - h, y) + f(x + h, y) + f(x, y - h) + f(x, y + h) - 4 * f(x, y)) / h**2
+
+
+print("local truncation error at (0.5, 0.5): stencil applied to the exact u, which has Laplacian 0")
+print(f"{'h':&gt;8} {'tau':&gt;12} {'tau/(h^2 pi^4 u/6)':&gt;20}")
+for n in (8, 16, 32, 64):
+    h = 1 / n
+    tau = stencil(exact, 0.5, 0.5, h)
+    print(f"1/{n:&lt;6d} {tau:12.4e} {tau / (h**2 * pi**4 * exact(0.5, 0.5) / 6):20.6f}")
+
+print("\nglobal error max |u - u_h| over the N x N interior nodes, h = 1/(N+1)")
+print(f"{'N':&gt;5} {'max error':&gt;12} {'ratio':&gt;7} {'error/h^2':&gt;10} {'bound h^2 pi^4/48':&gt;18} {'max residual':&gt;13}")
+prev = None
+for N in (7, 15, 31, 63, 127):
+    h = 1 / (N + 1)
+    err = max(abs(exact(j * h, i * h) - discrete(j * h, i * h, h))
+              for i in range(1, N + 1) for j in range(1, N + 1))
+    res = max(abs(stencil(lambda x, y: discrete(x, y, h), j * h, i * h, h))
+              for i in range(1, N + 1) for j in range(1, N + 1))
+    ratio = "" if prev is None else f"{prev / err:7.3f}"
+    print(f"{N:5d} {err:12.4e} {ratio:&gt;7} {err / h**2:10.4f} {h**2 * pi**4 / 48:18.4e} {res:13.1e}")
+    prev = err
+</code></pre>
+<pre><code class="output">local truncation error at (0.5, 0.5): stencil applied to the exact u, which has Laplacian 0
+       h          tau   tau/(h^2 pi^4 u/6)
+1/8        5.0549e-02             1.000014
+1/16       1.2637e-02             1.000001
+1/32       3.1593e-03             1.000000
+1/64       7.8982e-04             1.000000
+
+global error max |u - u_h| over the N x N interior nodes, h = 1/(N+1)
+    N    max error   ratio  error/h^2  bound h^2 pi^4/48  max residual
+    7   4.3225e-03             0.2766         3.1709e-02       2.8e-14
+   15   1.1088e-03   3.898     0.2839         7.9272e-03       1.1e-13
+   31   2.7796e-04   3.989     0.2846         1.9818e-03       9.1e-13
+   63   6.9627e-05   3.992     0.2852         4.9545e-04       3.6e-12
+  127   1.7410e-05   3.999     0.2852         1.2386e-04       2.2e-11</code></pre>
+<p><strong>Reading the output.</strong> The ratio of the measured truncation error to \(h^2\pi^4u/6\) is 1.000014, 1.000001 and 1.000000 for \(h=1/8,1/16,1/32\): (9.6) has the right coefficient \(1/12\). The error ratios are 3.898, 3.989, 3.992 and 3.999, and the error is \(0.285\,h^2\) at \(N=63\) and 127, 7 times below the bound \(2.03\,h^2\), so (9.7) holds with room. The residuals, \(3\times10^{-14}\) to \(2\times10^{-11}\), are rounding errors amplified by the division by \(h^2\); the closed form is the exact solution of the five-point system. The discretization error at \(N=1000\) is therefore of the order \(0.285\times10^{-6}\), which is why the section on the cost takes a target iteration error of \(10^{-6}\) as the scale of \(h^2\) at that grid size.</p>
+<p><strong>Where the theorem does not apply.</strong> The canonical problem has a boundary value that jumps from 1 to 0 at the two top corners. Its solution has no bounded fourth derivative near those corners, so (9.7) does not cover it. Two statements about the canonical problem can still be proved or checked. First, \(u(\tfrac12,\tfrac12)=\tfrac14\) exactly, for the plate equation and for the five-point system with odd \(N\). The proof: rotate the problem about the centre by 90, 180 and 270 degrees. The five-point system is invariant under these rotations (the corner nodes of the boundary are not used by the stencil), so the four problems with the value 1 on one edge and 0 on the others have the same value \(c\) at the centre node. Their sum is the problem with the value 1 on all four edges, whose solution is the constant 1, because a constant satisfies the five-point equations and the solution is unique. Hence \(4c=1\). Second, the series \(u(x,y)=\sum_{k\ \mathrm{odd}}\frac{4}{k\pi}\sin(k\pi x)\frac{\sinh k\pi y}{\sinh k\pi}\) is the exact solution of the plate problem (a Fourier series in \(x\), with the boundary condition at \(y=1\) expanded in \(\sin k\pi x\)). The next listing solves the five-point system directly (dense LAPACK, so that no iteration error enters) and compares it with the series at the centre, at the point \((\tfrac12,\tfrac34)\), and at every node.</p>
+<pre><code class="language-python" data-file="canonical_check.py" data-run="python3 canonical_check.py">"""The canonical problem (u = 1 on the top edge, 0 on the other edges) against its exact series.
+
+    u(x, y) = sum over odd k of (4 / (k pi)) sin(k pi x) sinh(k pi y) / sinh(k pi),   y = 1 - i h.
+The five-point system A u = b is solved directly (dense LAPACK) so that no iteration error enters.
+"""
+from math import exp, pi, sin
+import numpy as np
+
+
+def exact(x, y, kmax=1200):
+    s = 0.0
+    for k in range(1, kmax, 2):
+        a = k * pi
+        s += 4 / a * sin(a * x) * (exp(a * (y - 1)) - exp(-a * (y + 1))) / (1 - exp(-2 * a))
+    return s
+
+
+def solve(N):
+    """Unknown (i,j) has number (i-1)N + (j-1); b = 1 for the unknowns next to the top edge."""
+    A, b = np.zeros((N * N, N * N)), np.zeros(N * N)
+    for i in range(1, N + 1):
+        for j in range(1, N + 1):
+            m = (i - 1) * N + (j - 1)
+            A[m, m] = 4
+            for di, dj in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                if 1 &lt;= i + di &lt;= N and 1 &lt;= j + dj &lt;= N:
+                    A[m, m + di * N + dj] = -1
+            if i == 1:
+                b[m] = 1
+    return np.linalg.solve(A, b).reshape(N, N)
+
+
+print(f"{'N':&gt;4} {'centre ok':&gt;10} {'err (.5,.75)':&gt;13} {'ratio':&gt;6} {'max err, all nodes':&gt;19} {'at node (i,j)':&gt;14}")
+prev = None
+for N in (7, 15, 31, 63):
+    h = 1 / (N + 1)
+    U = solve(N)
+    centre = abs(U[(N - 1) // 2, (N - 1) // 2] - 0.25) &lt; 1e-13            # u(1/2, 1/2) = 1/4 by symmetry
+    e = abs(U[(N + 1) // 4 - 1, (N - 1) // 2] - exact(0.5, 0.75))           # node i = (N+1)/4, j = (N+1)/2
+    errs = {(i, j): abs(U[i - 1, j - 1] - exact(j * h, 1 - i * h)) for i in range(1, N + 1) for j in range(1, N + 1)}
+    worst = max(errs, key=errs.get)
+    print(f"{N:4d} {str(centre):&gt;10} {e:13.3e} {'' if prev is None else f'{prev / e:6.2f}':&gt;6} "
+          f"{errs[worst]:19.3e} {str(worst):&gt;14}")
+    prev = e
+</code></pre>
+<pre><code class="output">   N  centre ok  err (.5,.75)  ratio  max err, all nodes  at node (i,j)
+   7       True     4.450e-03                  7.907e-03         (1, 6)
+  15       True     1.204e-03   3.70           7.223e-03        (1, 14)
+  31       True     3.071e-04   3.92           7.183e-03        (1, 30)
+  63       True     7.717e-05   3.98           7.180e-03        (1, 62)</code></pre>
+<p>The centre value is correct to \(10^{-13}\) at every grid size, as the symmetry argument requires. At the point \((\tfrac12,\tfrac34)\), away from the corners, the error is \(4.45\times10^{-3}\), \(1.20\times10^{-3}\), \(3.07\times10^{-4}\) and \(7.7\times10^{-5}\), with ratios 3.70, 3.92 and 3.98: second order. The largest error over all nodes does not decrease: \(7.91\times10^{-3}\), \(7.22\times10^{-3}\), \(7.18\times10^{-3}\), \(7.18\times10^{-3}\). It occurs in row 1, next to the top edge, at the second node from the right edge (the node \((1,N-1)\)). Near a point where the boundary value jumps, the solution depends on the angle at the corner, and the five-point error at a node a fixed number of grid spacings from the corner is a fixed fraction of the jump, whatever \(h\) is. This chapter does not prove that the error stays constant; four grid sizes are consistent with it. The consequence for the book is a rule for its running problem. The canonical problem is a benchmark of cost and of agreement between implementations (every implementation must give the same field and the centre value 0.25); a study of accuracy with \(h\) uses interior points or the continuous variant of the previous listing.</p>
+
+<h2 id="jacobi">Jacobi iteration: convergence, iteration count and the serial code <a class="timestamp" href="https://www.youtube.com/watch?v=z75dO5juDq8&amp;t=1080s">W3L2 18:00</a></h2>
+<p><strong>What the lecture says and does not say.</strong> After assembling \(A\mathbf x=\mathbf b\) with \(n^2\) unknowns, the lecture recalls that iterative solvers are more efficient than direct ones for this problem, says that one writes a code that assembles and solves the equations, and shows the plot that the program produces. It names no iterative method and shows no code. This chapter chooses Jacobi iteration, the simplest method, whose sweep treats every node independently of the others, which is what the later parallel versions need, and writes the code that the lecture leaves out. The section on the cost tests the claim of efficiency.</p>
+<p><strong>The iteration and its error.</strong> The Jacobi sweep computes \(U^{k+1}_{ij}=\tfrac14\bigl(U^k_{i-1,j}+U^k_{i+1,j}+U^k_{i,j-1}+U^k_{i,j+1}\bigr)\) at every interior node, where boundary neighbours hold the boundary values. In vector form \(\mathbf U^{k+1}=G\mathbf U^k+\mathbf c\) with \(G=\mathrm{Id}-A/4\) and \(\mathbf c=\mathbf b/4\). The exact solution \(\mathbf U\) of \(A\mathbf U=\mathbf b\) is a fixed point, \(\mathbf U=G\mathbf U+\mathbf c\), so the error \(\mathbf e^k=\mathbf U^k-\mathbf U\) obeys \(\mathbf e^{k+1}=G\mathbf e^k\) and \(\mathbf e^k=G^k\mathbf e^0\). The iteration converges for every starting vector if and only if the spectral radius \(\rho(G)\), the largest modulus of an eigenvalue of \(G\), is below 1 (<a href="https://www-users.cse.umn.edu/~saad/IterMethBook_2ndEd.pdf">Saad, §4.2.1, Theorem 4.1, p. 115</a>). The matrix \(G\) is symmetric, so its eigenvectors can be chosen orthogonal and \(\|G^k\|_2=\rho^k\) in the Euclidean norm.</p>
+<p><strong>The spectrum.</strong> Take the vectors \(\varphi_{jl}\) with entries \(\varphi_{jl}(r,s)=\sin(j\pi rh)\sin(l\pi sh)\), \(1\le r,s\le N\), for \(1\le j,l\le N\), and zero outside the interior. The identity \(\sin((r+1)\theta)+\sin((r-1)\theta)=2\sin(r\theta)\cos\theta\) (Saad eq. 13.5, p. 424) shows that the sum of the two neighbours of \(r\) in the first index is \(2\cos(j\pi h)\varphi_{jl}\), and the same in the second index; the sines vanish at \(r=0\) and \(r=N+1\), so the boundary terms are absent. Dividing the sum of four neighbours by 4:</p>
+\[
+G\varphi_{jl}=\mu_{jl}\varphi_{jl},\qquad \mu_{jl}=\frac{\cos(j\pi h)+\cos(l\pi h)}{2},\qquad \rho(G)=\cos(\pi h)=\cos\frac{\pi}{N+1}. \tag{9.8}
+\]
+<p>The largest modulus is \(\cos\pi h\), attained for \((j,l)=(1,1)\), with eigenvalue \(+\rho\), and also for \((N,N)\), where \(\cos(N\pi h)=-\cos(\pi h)\) gives \(-\rho\). Demmel's 1995 lecture notes state the same result in the 2-norm of the error, \(\rho_{\mathrm{Jacobi}}(n)=\cos(\pi/(n+1))\) (<a href="https://people.eecs.berkeley.edu/~demmel/cs267-1995/lecture24/lecture24.html">CS 267, Lecture 24, 1995</a>). For large \(N\), \(\rho\approx1-\pi^2/(2(N+1)^2)\): the spectral radius approaches 1 as \(h^2\) goes to zero.</p>
+<p><strong>The iteration count.</strong> The component of the error along \(\varphi_{11}\) shrinks by \(\rho\) per sweep, and every other component shrinks at least as fast. After \(k\) sweeps the slowest component dominates. Write the error as \(\mathbf e^k\approx-a_1\rho^k\varphi_{11}\), where \(-a_1\) is the coefficient of the initial error \(\mathbf e^0=-\mathbf U\) along \(\varphi_{11}\), so that \(a_1\gt0\) is the coefficient of \(\mathbf U\). The iteration error \(\|\mathbf e^k\|_\infty\) reaches a target \(\varepsilon\) when \(a_1\rho^k=\varepsilon\), since \(\varphi_{11}\) has the value 1 at the centre. Hence</p>
+\[
+k(\varepsilon)=\frac{\ln(a_1/\varepsilon)}{-\ln\rho}\approx\frac{2(N+1)^2}{\pi^2}\ln\frac{a_1}{\varepsilon},\qquad -\ln\cos\theta=\frac{\theta^2}{2}+\frac{\theta^4}{12}+\dots \tag{9.9}
+\]
+<p>For the canonical problem \(a_1\) can be computed. For large \(N\) the coefficient of \(\mathbf U\) along \(\varphi_{11}\) is \(4\iint u\sin\pi x\sin\pi y\,dx\,dy\), and by orthogonality of \(\sin k\pi x\) only the \(k=1\) term of the series for \(u\) contributes: \(4\cdot\frac{4}{\pi\sinh\pi}\cdot\int_0^1\sin^2\pi x\,dx\cdot\int_0^1\sinh\pi y\sin\pi y\,dy=4\cdot\frac{4}{\pi\sinh\pi}\cdot\frac12\cdot\frac{\sinh\pi}{2\pi}\), so \(a_1=4/\pi^2=0.405\). The factor \(N^2\) in (9.9) is the central fact about the method: doubling the number of points per side multiplies the number of sweeps by 4, whatever the tolerance. Demmel's notes give the same count for a reduction of the error by a factor of 2, \(m\approx((n+1)/\pi)^2\) sweeps. The intuition is that one sweep moves information by one node, so \(N\) sweeps are needed to cross the plate, but Jacobi needs a number of order \(N^2\) to damp the smoothest error.</p>
+<p><strong>The stopping rule is not an error bound.</strong> The code cannot see the iteration error; it sees the <em>change</em> \(d^k=\mathbf U^{k+1}-\mathbf U^k\) and stops when its largest entry is below <code>tol</code>. Two relations connect the two. First, \(d^k=(G-\mathrm{Id})\mathbf e^k\), so \(\mathbf e^{k+1}=G(G-\mathrm{Id})^{-1}d^k\). The eigenvalue of \(G(G-\mathrm{Id})^{-1}\) belonging to \(\mu\) is \(\mu/(\mu-1)\), whose modulus is largest at \(\mu=\rho\), so in the Euclidean norm</p>
+\[
+\|\mathbf e^{k+1}\|_2\le\frac{\rho}{1-\rho}\,\|d^k\|_2,\qquad \frac{\rho}{1-\rho}\approx\frac{2(N+1)^2}{\pi^2}, \tag{9.10}
+\]
+<p>with equality when \(d^k\) lies along \(\varphi_{11}\), which is the case after many sweeps. A change of \(10^{-6}\) can hide an error of up to \(10^{-6}\rho/(1-\rho)\): 207 times larger at \(N=31\), 829 times at \(N=63\), \(2.0\times10^{5}\) times at \(N=1000\). The factor is about the iteration count divided by the logarithm in (9.9). A small change per sweep means slow convergence, so a small change does not imply a small error. Second, the change of the slowest component has the size \((1-\rho)a_1\rho^k\varphi_{11}\), so the sweeps needed for the change to fall below <code>tol</code> are \(k=\ln\bigl(c/\mathrm{tol}\bigr)/(-\ln\rho)\) with \(c=(1-\rho)a_1\), smaller than (9.9) with \(\varepsilon=\mathrm{tol}\) by the factor \((1-\rho)\) inside the logarithm. This single-mode count is valid only when the slowest mode dominates the change at the stop, that is when \(\mathrm{tol}\ll c\), so that the argument \(c/\mathrm{tol}\) of the logarithm is much larger than 1; the equality in (9.10) holds in the same regime. When \(\mathrm{tol}\) is comparable to \(c\), the faster components have not yet decayed, the stop comes later than the count says, and the error is below its bound. The table below the listing measures the boundary. To obtain an iteration error of about \(\varepsilon\), set \(\mathrm{tol}=\varepsilon(1-\rho)/\rho\approx\varepsilon\pi^2/(2(N+1)^2)\); (9.10) is stated in the Euclidean norm of the change and the program tests the maximum norm, and the measurements of this chapter show the same factor in the maximum norm. That agreement is the typical case, not a guarantee. In the maximum norm the guaranteed factor is the largest row sum of \(G(\mathrm{Id}-G)^{-1}\), a matrix with non-negative entries, which is 1.45 times \(\rho/(1-\rho)\) (74.2 against 51.0 at \(N=15\), 300.5 against 206.7 at \(N=31\), 1205.8 against 829.2 at \(N=63\); computed from the matrix at \(N=7,15,31\) and by iteration at \(N=63\), a computation made outside the code lab, as in Chapter 4). Chapter 4 computes the same factor. A tolerance that must guarantee \(\|\mathbf e\|_\infty\le\varepsilon\) is \(\varepsilon(1-\rho)/(1.45\rho)\). A program that fixes <code>tol</code> leaves an error that grows as \(N^2\), and its sweep count grows by less than 4 per doubling of \(N\) once \(\mathrm{tol}\) is no longer small against \(c\), because \(c\) falls by 4 with each doubling. A measured growth below 4 per doubling is therefore not evidence against (9.8); it shows that the stopping rule is loosening. Chapter 4 follows the same iteration through the logarithm of the residual, whose ratio per sweep is \(\cos(\pi/(N+1))\), and this chapter does not repeat its experiments.</p>
+<p><strong>The code.</strong> The listing is the canonical serial program of this book. <code>jacobi_step(N, u, unew)</code> reads the interior and boundary of <code>u</code>, writes the average of the four neighbours into the interior of <code>unew</code>, never writes the boundary, and returns the largest absolute change over the interior. <code>init_canonical</code> fills an array with 1 in row 0 and 0 elsewhere. <code>jacobi_solve</code> sweeps and swaps the two pointers until the change is below <code>tol</code> or <code>max_iter</code> sweeps are done, returns the number of sweeps, and leaves the latest iterate in <code>*pu</code> and the previous one in <code>*punew</code>. Both arrays must hold the boundary values before the first sweep: the kernel never writes the boundary of the array it fills, so an array that held the boundary only in <code>u</code> would give a second sweep that reads zeros at the top edge. The run checks three things for \(N=7,\dots,127\) and <code>tol</code> \(=10^{-8}\): the centre node must be \(\tfrac14\) within the iteration error, the number of sweeps must match the prediction above, and the centre error divided by <code>tol</code> must match \(\rho/(1-\rho)\). For \(N=31\) it also prints the changes of the last sweeps, and a last table sets <code>tol</code> to multiples of the amplitude \(c\) of the next paragraphs. The program is deterministic, so the check is exact.</p>
+<pre><code class="language-c" data-file="jacobi.c" data-build="gcc -O2 jacobi.c -o jacobi -lm" data-run="./jacobi">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+
+#define IDX(i,j) ((i)*(N+2)+(j))     /* (N+2)x(N+2) doubles, row-major; interior is 1..N */
+
+/* One Jacobi sweep. Writes the average of the four neighbours of u into the interior of
+   unew and returns max |unew - u| over the interior. Boundary values are read, never written. */
+double jacobi_step(int N, const double *u, double *unew)
+{
+    double maxdiff = 0.0;
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            double v = 0.25 * (u[IDX(i-1,j)] + u[IDX(i+1,j)] + u[IDX(i,j-1)] + u[IDX(i,j+1)]);
+            double d = fabs(v - u[IDX(i,j)]);
+            if (d &gt; maxdiff) maxdiff = d;
+            unew[IDX(i,j)] = v;
+        }
+    return maxdiff;
+}
+
+/* u = 1 on the top edge (i = 0), u = 0 on the other three edges and in the interior. */
+static void init_canonical(int N, double *u)
+{
+    for (int i = 0; i &lt; N + 2; i++)
+        for (int j = 0; j &lt; N + 2; j++)
+            u[IDX(i,j)] = (i == 0) ? 1.0 : 0.0;
+}
+
+/* Sweep until the change is below tol or max_iter sweeps are done. Both arrays must hold the
+   boundary values. On return *pu is the latest iterate and *punew the one before it. */
+static int jacobi_solve(int N, double **pu, double **punew, double tol, int max_iter, double *change)
+{
+    int k = 0;
+    double d = INFINITY;
+    while (k &lt; max_iter &amp;&amp; d &gt;= tol) {
+        d = jacobi_step(N, *pu, *punew);
+        double *t = *pu; *pu = *punew; *punew = t;
+        k++;
+    }
+    *change = d;
+    return k;
+}
+
+static double *grid(int N)
+{
+    double *u = malloc(sizeof(double) * (size_t)(N + 2) * (N + 2));
+    if (!u) exit(1);
+    init_canonical(N, u);
+    return u;
+}
+
+int main(void)
+{
+    const double pi = 3.14159265358979323846;
+    const double tol = 1e-8;
+
+    printf("tol = %.0e; the first sweep changes u by 1/4, the centre node of odd N has exact value 1/4\n", tol);
+    printf("%4s %9s %8s %10s %10s %14s %12s\n", "N", "rho", "sweeps", "from 1/4", "refined", "|u_c-1/4|/tol", "rho/(1-rho)");
+    for (int N = 7; N &lt;= 127; N = 2 * N + 1) {
+        double *u = grid(N), *unew = grid(N), change;
+        int k = jacobi_solve(N, &amp;u, &amp;unew, tol, 10000000, &amp;change);
+        double rho = cos(pi / (N + 1));
+        double crude = log(0.25 / tol) / -log(rho);                       /* amplitude taken as 1/4 */
+        double refined = log(4 / (pi * pi) * (1 - rho) / tol) / -log(rho); /* amplitude (1-rho) 4/pi^2 */
+        double err = fabs(u[IDX((N + 1) / 2, (N + 1) / 2)] - 0.25);
+        printf("%4d %9.6f %8d %10.0f %10.1f %14.1f %12.1f\n", N, rho, k, crude, refined, err / tol, rho / (1 - rho));
+        free(u); free(unew);
+    }
+
+    int N = 31;
+    double *u = grid(N), *unew = grid(N), rho = cos(pi / (N + 1)), d1 = 0, d2 = 0;
+    printf("\nN = %d, rho = %.6f: successive changes d_k\n%6s %13s %9s %9s\n", N, rho, "k", "d_k", "d_k/d_k-1", "sqrt(d_k/d_k-2)");
+    for (int k = 1; k &lt;= 3000; k++) {
+        double d = jacobi_step(N, u, unew);
+        double *t = u; u = unew; unew = t;
+        if (k &gt;= 2997) printf("%6d %13.6e %9.6f %9.6f\n", k, d, d / d1, sqrt(d / d2));
+        d2 = d1; d1 = d;
+    }
+
+    printf("\nwhen is the single-mode count valid? c = (1-rho) 4/pi^2; tol = c * (tol/c)\n");
+    printf("%4s %6s %8s %12s %8s %14s\n", "N", "tol/c", "sweeps", "single-mode", "ratio", "err/(tol*bound)");
+    const int sizes[3] = {63, 127, 255};
+    for (int s = 0; s &lt; 3; s++) {
+        int N = sizes[s];
+        double rho = cos(pi / (N + 1)), c = (1 - rho) * 4 / (pi * pi), rel[2] = {0.1, 0.501};
+        for (int r = 0; r &lt; 2; r++) {
+            double *a = grid(N), *b = grid(N), change, tl = c * rel[r];
+            int k = jacobi_solve(N, &amp;a, &amp;b, tl, 10000000, &amp;change);
+            double single = log(c / tl) / -log(rho);
+            double err = fabs(a[IDX((N + 1) / 2, (N + 1) / 2)] - 0.25);
+            printf("%4d %6.2f %8d %12.0f %8.3f %14.3f\n", N, rel[r], k, single, k / single, err / tl / (rho / (1 - rho)));
+            free(a); free(b);
+        }
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">tol = 1e-08; the first sweep changes u by 1/4, the centre node of odd N has exact value 1/4
+   N       rho   sweeps   from 1/4    refined  |u_c-1/4|/tol  rho/(1-rho)
+   7  0.923880      190        215      188.7           11.6         12.1
+  15  0.980785      700        878      699.2           50.9         51.0
+  31  0.995185     2524       3529     2523.7          207.0        206.7
+  63  0.998795     8958      14133     8957.2          829.1        829.2
+ 127  0.999699    31240      56550    31238.0         3317.9       3319.3
+
+N = 31, rho = 0.995185: successive changes d_k
+     k           d_k d_k/d_k-1 sqrt(d_k/d_k-2)
+  2997  1.023816e-09  1.000000  0.995185
+  2998  1.013980e-09  0.990393  0.995185
+  2999  1.013980e-09  1.000000  0.995185
+  3000  1.004238e-09  0.990393  0.995185
+
+when is the single-mode count valid? c = (1-rho) 4/pi^2; tol = c * (tol/c)
+   N  tol/c   sweeps  single-mode    ratio err/(tol*bound)
+  63   0.10     1918         1910    1.004          0.992
+  63   0.50      782          573    1.364          0.767
+ 127   0.10     7669         7644    1.003          0.993
+ 127   0.50     3124         2294    1.362          0.767
+ 255   0.10    30678        30578    1.003          0.993
+ 255   0.50    12493         9178    1.361          0.767</code></pre>
+<p><strong>Reading the output.</strong> The first table gives, for each \(N\), the measured number of sweeps and two predictions. "From 1/4" is \(\ln(0.25/\mathrm{tol})/(-\ln\rho)\), which takes the first change, 1/4, as the amplitude of the decay; it overestimates by 13 % at \(N=7\), 25 % at \(N=15\), 40 % at \(N=31\), 58 % at \(N=63\) and 81 % at \(N=127\), because the first changes are not those of the slowest component. "Refined" uses the amplitude \((1-\rho)\,4/\pi^2\) derived above: 188.7, 699.2, 2523.7, 8957.2 and 31,238.0 against the measured 190, 700, 2524, 8958 and 31,240, within 0.7 % at \(N=7\) and 0.01 % from \(N=31\) on. The ratio of the centre error to <code>tol</code> is 11.6, 50.9, 207.0, 829.1 and 3317.9, against \(\rho/(1-\rho)\) of 12.1, 51.0, 206.7, 829.2 and 3319.3. The centre error is dominated by the slowest mode, the case in which (9.10) is an equality in the Euclidean norm; the maximum-norm values agree with the factor to 0.15 % at \(N=31\) and 0.04 % at \(N=127\) (4 % at \(N=7\)). The agreement confirms (9.8) and (9.10), and the centre value \(\tfrac14\) verifies the code against the symmetry argument of the previous section.</p>
+<p>The second table follows the changes \(d_k\) of the last sweeps for \(N=31\). They do not decrease by a constant factor. The ratio of consecutive changes alternates between 0.990393 and 1.000000, and 0.990393 is \(\rho^2\) with \(\rho=0.995185\). The square root of the ratio of changes two sweeps apart is 0.995185, equal to \(\rho\) to six digits. A candidate explanation is that the iteration matrix has the eigenvalue \(-\rho\) as well as \(+\rho\) (the mode \((N,N)\) of (9.8)): the error contains a component that changes sign at every sweep, and the largest change over the grid sits at the centre node on every second sweep and at a neighbouring node, where \(\varphi_{11}\) is smaller by the factor \(\cos\pi h=\rho\), on the others. This chapter does not derive the pattern; the printed numbers do not contradict it. A measurement of the rate of convergence of Jacobi iteration should therefore use two sweeps, not one.</p>
+<p><strong>Where the single-mode count stops being valid.</strong> The last table of the listing sets <code>tol</code> to a multiple of \(c=(1-\rho)\,4/\pi^2\). For \(\mathrm{tol}=0.1\,c\), the logarithm has the argument 10, and the measured sweeps are 1.004, 1.003 and 1.003 times the single-mode count at \(N=63,127,255\), with the centre error 0.99 of \(\mathrm{tol}\,\rho/(1-\rho)\). For \(\mathrm{tol}=0.50\,c\), the logarithm has the argument 2, and the measured sweeps are 1.36 times the single-mode count at all three sizes (782 against 573, 3124 against 2294, 12,493 against 9178), with the centre error 0.77 of the bound; the largest error over all nodes, measured against a solution converged much further, is 0.82 of the bound (a computation made outside the code lab, as in Chapter 4). The numbers 1.36, 0.77 and 0.82 do not change with \(N\), because the ratio \(\mathrm{tol}/c\) fixes how far the faster components have decayed. The case \(N=1000\), \(\mathrm{tol}=10^{-6}\) has \(1-\rho=4.92\times10^{-6}\), \(c=2.0\times10^{-6}\) and \(\mathrm{tol}/c=0.50\): it lies outside the range of validity. The single-mode count gives \(1.40\times10^{5}\) sweeps. Multiplied by 1.36, it gives \(1.91\times10^{5}\). The largest error is \(0.82\times10^{-6}\times2.03\times10^{5}=0.17\). Chapter 4 measured 191,001 sweeps and a maximum error of 0.167 for this run. The two estimates agree with these measurements to 0.1 % and 1 %, and the 26 % by which the single-mode count is low is the 26.5 % that Chapter 4 reports for its own count. The extrapolation by these constants rests on three grid sizes and on the value of the ratio; it is not a general law of the iteration.</p>
+<p><strong>The three errors, measured.</strong> The next listing separates the errors of (9.9) for the continuous variant of the problem, \(u=\sin\pi x\) on the top edge, whose exact solution and exact five-point solution are known in closed form (the section on the stencil). It reuses the kernel and the solver unchanged; only the boundary fill differs. For \(N=31\) it prints the discretization error \(\max|u-U|\), and for four tolerances the number of sweeps, the iteration error \(\max|\mathbf U^k-\mathbf U|\) against the closed-form five-point solution, and the total error \(\max|\mathbf U^k-u|\) against the plate solution. The program is deterministic, so the check is exact.</p>
+<pre><code class="language-c" data-file="jacobi_error.c" data-build="gcc -O2 jacobi_error.c -o jacobi_error -lm" data-run="./jacobi_error">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+
+#define IDX(i,j) ((i)*(N+2)+(j))     /* (N+2)x(N+2) doubles, row-major; interior is 1..N */
+
+/* One Jacobi sweep. Writes the average of the four neighbours of u into the interior of
+   unew and returns max |unew - u| over the interior. Boundary values are read, never written. */
+double jacobi_step(int N, const double *u, double *unew)
+{
+    double maxdiff = 0.0;
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            double v = 0.25 * (u[IDX(i-1,j)] + u[IDX(i+1,j)] + u[IDX(i,j-1)] + u[IDX(i,j+1)]);
+            double d = fabs(v - u[IDX(i,j)]);
+            if (d &gt; maxdiff) maxdiff = d;
+            unew[IDX(i,j)] = v;
+        }
+    return maxdiff;
+}
+
+/* Sweep until the change is below tol or max_iter sweeps are done. Both arrays must hold the
+   boundary values. On return *pu is the latest iterate and *punew the one before it. */
+static int jacobi_solve(int N, double **pu, double **punew, double tol, int max_iter, double *change)
+{
+    int k = 0;
+    double d = INFINITY;
+    while (k &lt; max_iter &amp;&amp; d &gt;= tol) {
+        d = jacobi_step(N, *pu, *punew);
+        double *t = *pu; *pu = *punew; *punew = t;
+        k++;
+    }
+    *change = d;
+    return k;
+}
+
+static const double pi = 3.14159265358979323846;
+
+/* Same boundary structure as the canonical problem (top edge i = 0 nonzero, other edges 0,
+   interior 0), but with u = sin(pi x) on the top edge, which is continuous at the corners. */
+static double *grid_sin(int N)
+{
+    double h = 1.0 / (N + 1);
+    double *u = calloc((size_t)(N + 2) * (N + 2), sizeof(double));
+    if (!u) exit(1);
+    for (int j = 0; j &lt; N + 2; j++) u[IDX(0,j)] = sin(pi * j * h);
+    return u;
+}
+
+int main(void)
+{
+    const int N = 31;
+    const double h = 1.0 / (N + 1);
+    const double rho = cos(pi * h);
+    const double g = acosh(2 - cos(pi * h)) / h;                /* discrete decay rate in y */
+    double disc = 0.0;                                           /* max |u - u_h| */
+    double *uh = malloc(sizeof(double) * (N + 2) * (N + 2));
+    if (!uh) exit(1);
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            double x = j * h, y = 1.0 - i * h;                   /* row i = 0 is the top edge y = 1 */
+            double ex = sin(pi * x) * sinh(pi * y) / sinh(pi);
+            uh[IDX(i,j)] = sin(pi * x) * sinh(g * y) / sinh(g);
+            if (fabs(ex - uh[IDX(i,j)]) &gt; disc) disc = fabs(ex - uh[IDX(i,j)]);
+        }
+    printf("N = %d, rho = %.6f, rho/(1-rho) = %.1f, discretization error max|u-u_h| = %.2e\n", N, rho, rho / (1 - rho), disc);
+    printf("%8s %8s %14s %14s %14s\n", "tol", "sweeps", "iteration err", "total error", "iter err/tol");
+    for (double tol = 1e-3; tol &gt; 1e-10; tol /= 100) {
+        double *u = grid_sin(N), *unew = grid_sin(N), change, it = 0.0, tot = 0.0;
+        int k = jacobi_solve(N, &amp;u, &amp;unew, tol, 10000000, &amp;change);
+        for (int i = 1; i &lt;= N; i++)
+            for (int j = 1; j &lt;= N; j++) {
+                double x = j * h, y = 1.0 - i * h;
+                double ex = sin(pi * x) * sinh(pi * y) / sinh(pi);
+                if (fabs(u[IDX(i,j)] - uh[IDX(i,j)]) &gt; it) it = fabs(u[IDX(i,j)] - uh[IDX(i,j)]);
+                if (fabs(u[IDX(i,j)] - ex) &gt; tot) tot = fabs(u[IDX(i,j)] - ex);
+            }
+        printf("%8.0e %8d %14.2e %14.2e %14.1f\n", tol, k, it, tot, it / tol);
+        free(u); free(unew);
+    }
+    free(uh);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">N = 31, rho = 0.995185, rho/(1-rho) = 206.7, discretization error max|u-u_h| = 2.78e-04
+     tol   sweeps  iteration err    total error   iter err/tol
+   1e-03      164       1.56e-01       1.56e-01          156.3
+   1e-05     1044       2.06e-03       1.83e-03          206.0
+   1e-07     1998       2.06e-05       2.62e-04          206.1
+   1e-09     2952       2.06e-07       2.78e-04          206.2</code></pre>
+<p>The discretization error is \(2.78\times10^{-4}\) and does not depend on the tolerance. With <code>tol</code> \(=10^{-3}\) the solver stops after 164 sweeps with an iteration error of 0.156, as large as the solution itself (the solution at the centre is 0.20). With \(10^{-5}\) the iteration error is \(2.06\times10^{-3}\), 7.4 times the discretization error, and the total error is \(1.83\times10^{-3}\). With \(10^{-7}\) the iteration error is \(2.06\times10^{-5}\), the total error is \(2.62\times10^{-4}\), slightly below the discretization error because the two errors have opposite signs at the worst node, and a further factor of 100 in the tolerance changes the total error only to \(2.78\times10^{-4}\), the discretization error alone. The last column converges to \(\rho/(1-\rho)=206.7\): 156.3, 206.0, 206.1, 206.2. The sweeps grow by 954 for every factor of 100 in <code>tol</code> (1044, 1998, 2952), as \(\ln100/(-\ln\rho)=954\) predicts: the cost of accuracy is logarithmic in the tolerance and quadratic in \(N\).</p>
+<p>The balance of the lecture can now be stated as a rule for the stopping criterion. The iteration error should be a fraction of the discretization error, \(\varepsilon\approx0.1\times0.285h^2\), and (9.10) then requires \(\mathrm{tol}\approx\varepsilon\pi^2h^2/2\approx0.14\,h^4\). The tolerance must fall like \(h^4\): about \(1.3\times10^{-7}\) at \(N=31\), as the table found, and about \(1.4\times10^{-13}\) at \(N=1000\). A tolerance of \(10^{-6}\) that is adequate for a coarse grid leaves an error of about 0.15 at \(N=1000\) (the previous paragraph and the last table of the listing; Chapter 4 measured 0.167). The role of <code>max_iter</code> is to stop a run whose tolerance cannot be reached, for instance because rounding keeps the change above it.</p>
+<p><strong>Boundary of the results.</strong> The rate \(\cos\pi h\) and the spectrum (9.8) belong to the five-point operator on a square with Dirichlet boundary values. The amplitude \(a_1=4/\pi^2\) belongs to the canonical boundary values, and it changes the iteration count by an additive constant in the logarithm, not the rate. Gauss–Seidel iteration, successive over-relaxation, conjugate gradients and multigrid reach the same error in fewer operations (the table of the section on the cost), and Jacobi iteration is a reference whose merit is a sweep that is independent at every node. Chapter 29 treats libraries and faster methods.</p>
+
+<h2 id="cost">What the iteration costs, and why one core cannot keep up <a class="timestamp" href="https://www.youtube.com/watch?v=z75dO5juDq8&amp;t=1080s">W3L2 18:00</a></h2>
+<p><strong>The work.</strong> A solve of \(k\) sweeps on an \(N\times N\) grid performs \(W=5N^2k\) operations. Inserting the sweep count (9.9) with the amplitude \(a_1=4/\pi^2\):</p>
+\[
+W(N,\varepsilon)=5N^2\,k(\varepsilon)\approx\frac{10}{\pi^2}\,N^4\ln\frac{a_1}{\varepsilon}\;\approx\;13.1\,N^4\quad(\varepsilon=10^{-6}). \tag{9.11}
+\]
+<p>The work grows as \(N^4\) at a fixed tolerance, not as the number of unknowns \(N^2\): there are \(N^2\) point updates per sweep and \(N^2\) sweeps. Doubling \(N\) multiplies the work by 16 (the logarithm does not change at fixed \(\varepsilon\)), and the memory by 4. If the tolerance follows the discretization error, \(\varepsilon\propto h^2\), the logarithm grows with \(N\) and the work is of order \(N^4\ln N\). The accuracy of the answer sets \(N\). For a smooth solution with discretization error \(0.285\,h^2\) (the continuous variant of the previous section), an error \(\delta\) needs \(N\approx0.53/\sqrt\delta\), and the work is proportional to \(N^4\), that is to \(\delta^{-2}\): one more correct digit, \(\delta\to\delta/10\), multiplies the work by about 100. The lecture states that the accuracy required "has direct impact on the effort"; (9.11) gives the size of the impact for this problem.</p>
+<p><strong>The speed of one core.</strong> To turn (9.11) into time, the time of a point update is needed. The next listing is the canonical code of the previous section. It times a fixed number of sweeps for five grid sizes and takes the best of five batches, which suppresses interference at the cost of hiding it. Then it solves the problem completely for \(N=100\) and \(N=200\) to an iteration error of \(10^{-6}\), with \(\mathrm{tol}=10^{-6}(1-\rho)/\rho\) as (9.10) requires, and compares the sweep count with (9.9). The run checks only its return code. The printed output is one sample on the machine of the model section, taken while other jobs ran on it.</p>
+<pre><code class="language-c" data-file="jacobi_time.c" data-build="gcc -O2 jacobi_time.c -o jacobi_time -lm" data-run="./jacobi_time" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+#include &lt;time.h&gt;
+
+#define IDX(i,j) ((i)*(N+2)+(j))     /* (N+2)x(N+2) doubles, row-major; interior is 1..N */
+
+/* One Jacobi sweep. Writes the average of the four neighbours of u into the interior of
+   unew and returns max |unew - u| over the interior. Boundary values are read, never written. */
+double jacobi_step(int N, const double *u, double *unew)
+{
+    double maxdiff = 0.0;
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            double v = 0.25 * (u[IDX(i-1,j)] + u[IDX(i+1,j)] + u[IDX(i,j-1)] + u[IDX(i,j+1)]);
+            double d = fabs(v - u[IDX(i,j)]);
+            if (d &gt; maxdiff) maxdiff = d;
+            unew[IDX(i,j)] = v;
+        }
+    return maxdiff;
+}
+
+/* u = 1 on the top edge (i = 0), u = 0 on the other three edges and in the interior. */
+static void init_canonical(int N, double *u)
+{
+    for (int i = 0; i &lt; N + 2; i++)
+        for (int j = 0; j &lt; N + 2; j++)
+            u[IDX(i,j)] = (i == 0) ? 1.0 : 0.0;
+}
+
+/* Sweep until the change is below tol or max_iter sweeps are done. Both arrays must hold the
+   boundary values. On return *pu is the latest iterate and *punew the one before it. */
+static int jacobi_solve(int N, double **pu, double **punew, double tol, int max_iter, double *change)
+{
+    int k = 0;
+    double d = INFINITY;
+    while (k &lt; max_iter &amp;&amp; d &gt;= tol) {
+        d = jacobi_step(N, *pu, *punew);
+        double *t = *pu; *pu = *punew; *punew = t;
+        k++;
+    }
+    *change = d;
+    return k;
+}
+
+static double *grid(int N)
+{
+    double *u = malloc(sizeof(double) * (size_t)(N + 2) * (N + 2));
+    if (!u) exit(1);
+    init_canonical(N, u);
+    return u;
+}
+
+static double now(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &amp;t);
+    return t.tv_sec + 1e-9 * t.tv_nsec;
+}
+
+int main(void)
+{
+    const double pi = 3.14159265358979323846;
+    const int sizes[] = {100, 250, 500, 1000, 2000};
+
+    printf("time per sweep (best of 5 batches)\n");
+    for (int s = 0; s &lt; 5; s++) {
+        int N = sizes[s], sweeps = (int)(4e7 / ((double)N * N));   /* about 4e7 point updates */
+        double *u = grid(N), *unew = grid(N), best = 1e30;
+        for (int rep = 0; rep &lt; 5; rep++) {
+            double t0 = now();
+            for (int k = 0; k &lt; sweeps; k++) {
+                jacobi_step(N, u, unew);
+                double *t = u; u = unew; unew = t;
+            }
+            double dt = (now() - t0) / sweeps;
+            if (dt &lt; best) best = dt;
+        }
+        printf("N=%5d  %6.1f MB  %9.4f ms/sweep  %5.2f ns/point  %5.2f Gflop/s\n",
+               N, 2.0 * (N + 2) * (N + 2) * 8 / 1e6, best * 1e3, best / ((double)N * N) * 1e9,
+               5.0 * N * N / best / 1e9);
+        free(u); free(unew);
+    }
+
+    printf("\ncomplete solves to iteration error 1e-6, tol = 1e-6 (1-rho)/rho\n");
+    for (int N = 100; N &lt;= 200; N += 100) {
+        double rho = cos(pi / (N + 1)), tol = 1e-6 * (1 - rho) / rho, change;
+        double *u = grid(N), *unew = grid(N);
+        double t0 = now();
+        int k = jacobi_solve(N, &amp;u, &amp;unew, tol, 100000000, &amp;change);
+        double dt = now() - t0;
+        double model = log(4 / (pi * pi) / 1e-6) / -log(rho);
+        printf("N=%4d  sweeps %7d (model %9.0f)  %6.2f s  %5.2f ns/point\n", N, k, model, dt, dt / k / ((double)N * N) * 1e9);
+        free(u); free(unew);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">time per sweep (best of 5 batches)
+N=  100     0.2 MB     0.0151 ms/sweep   1.51 ns/point   3.31 Gflop/s
+N=  250     1.0 MB     0.0967 ms/sweep   1.55 ns/point   3.23 Gflop/s
+N=  500     4.0 MB     0.3919 ms/sweep   1.57 ns/point   3.19 Gflop/s
+N= 1000    16.1 MB     2.3698 ms/sweep   2.37 ns/point   2.11 Gflop/s
+N= 2000    64.1 MB     8.9275 ms/sweep   2.23 ns/point   2.24 Gflop/s
+
+complete solves to iteration error 1e-6, tol = 1e-6 (1-rho)/rho
+N= 100  sweeps   26687 (model     26688)    0.52 s   1.94 ns/point
+N= 200  sweeps  105708 (model    105708)    6.16 s   1.46 ns/point</code></pre>
+<p><strong>Reading the output.</strong> In this sample a point update takes 1.5 to 1.6 ns for the grids that fit in cache (\(N\le500\), at most 4 MB for the two arrays), 3.2 to 3.3 Gflop/s by the count of five operations, and 2.2 to 2.4 ns for \(N=1000\) and 2000 (16 and 64 MB, above the 12 MB level-3 cache), 2.1 to 2.2 Gflop/s. Over seven runs made while writing this chapter the in-cache values lay between 1.0 and 1.6 ns and the values at \(N=1000\) between 1.6 and 2.6 ns per point; one run during heavy use of the machine by other jobs gave 4.3 to 5.3 ns in cache and 4.9 ns at \(N=1000\). The step from 4 MB to 16 MB is the transition from cache to main memory; chapter 10 analyses the memory traffic of the sweep, and this chapter takes the measured rate as given. The two complete solves took 26,687 and 105,708 sweeps; the model (9.9) gives 26,688 and 105,708. Their ratio, 3.96, is close to the 4 that \(N^2\) predicts. The times, 0.52 s and 6.16 s in this sample (0.33 s and 5.5 s in an earlier one), equal the sweeps times \(N^2\) times a time per point update of 1.9 ns and 1.5 ns, inside the range of the first table.</p>
+<p>The next listing evaluates (9.9) and (9.11) for larger grids and converts the work to time with a time per point update of \(t_{\mathrm{pt}}=1.1\) ns for \(N\le500\) and 2.0 ns beyond; these are the rounded lower and middle values of the ranges above, not a prediction for another machine. The first block of columns uses the iteration error of \(10^{-6}\), the second the iteration error \(h^2/10\), a tenth of the scale of the discretization error. The program is deterministic, so the check is exact.</p>
+<pre><code class="language-python" data-file="cost_model.py" data-run="python3 cost_model.py">"""Cost of the canonical Jacobi solve on one core: sweeps, flops, time, memory."""
+from math import cos, log, pi
+
+def t_pt(N):
+    """Seconds per point update on one core, from the timing listing: 1.1 ns while the two arrays
+    fit in cache (N up to 500), 2.0 ns beyond (N = 1000 and 2000: 1.6-2.6 ns over seven runs)."""
+    return 1.1e-9 if N &lt;= 500 else 2.0e-9
+
+FLOPS_PER_POINT = 5   # 3 additions + 1 multiplication for the average, 1 subtraction for the change
+A1 = 4 / pi**2        # amplitude of the slowest error mode, canonical problem (derived in the text)
+
+
+def sweeps(N, eps):
+    """Sweeps until the iteration error of the slowest mode is below eps."""
+    return log(A1 / eps) / -log(cos(pi / (N + 1)))
+
+
+def human(sec):
+    for unit, size in (("years", 365 * 86400), ("days", 86400), ("hours", 3600), ("min", 60)):
+        if sec &gt;= size:
+            return f"{sec / size:6.1f} {unit}"
+    return f"{sec:6.1f} s"
+
+
+print(f"{'':&gt;6} {'':&gt;8} | {'iteration error 1e-6':^34} | {'iteration error h^2/10':^28}")
+print(f"{'N':&gt;6} {'MB':&gt;8} | {'sweeps':&gt;10} {'flops':&gt;10} {'time':&gt;12} | {'sweeps':&gt;10} {'time':&gt;12}")
+times = {}
+for N in (100, 200, 500, 1000, 2000, 4000, 10000):
+    k, k2 = sweeps(N, 1e-6), sweeps(N, 0.1 / (N + 1) ** 2)
+    times[N] = k * N * N * t_pt(N)
+    print(f"{N:6d} {2 * (N + 2)**2 * 8 / 1e6:8.1f} | {k:10.3g} {FLOPS_PER_POINT * N * N * k:10.2e} {human(times[N]):&gt;12} | "
+          f"{k2:10.3g} {human(k2 * N * N * t_pt(N)):&gt;12}")
+print(f"\nT(200)/T(100) = {times[200] / times[100]:.1f}, T(2000)/T(1000) = {times[2000] / times[1000]:.1f}; N^4 gives 16")
+</code></pre>
+<pre><code class="output">                |        iteration error 1e-6        |    iteration error h^2/10   
+     N       MB |     sweeps      flops         time |     sweeps         time
+   100      0.2 |   2.67e+04   1.33e+09        0.3 s |    2.2e+04        0.2 s
+   200      0.7 |   1.06e+05   2.11e+10        4.7 s |   9.83e+04        4.3 s
+   500      4.0 |   6.57e+05   8.21e+11      3.0 min |   7.04e+05      3.2 min
+  1000     16.1 |   2.62e+06   1.31e+13    1.5 hours |   3.09e+06    1.7 hours
+  2000     64.1 |   1.05e+07   2.10e+14   23.3 hours |   1.35e+07     1.2 days
+  4000    256.3 |   4.19e+07   3.35e+15    15.5 days |   5.84e+07    21.6 days
+ 10000   1600.6 |   2.62e+08   1.31e+17    1.7 years |   4.02e+08    2.5 years
+
+T(200)/T(100) = 15.8, T(2000)/T(1000) = 16.0; N^4 gives 16</code></pre>
+<p><strong>Reading the table.</strong> At \(N=1000\), a spacing of 10 m over a plate 10 km wide (the lecture considers spacings of 10 m, 100 m and 1 km), the solve takes \(2.6\times10^{6}\) sweeps and \(1.3\times10^{13}\) operations, about 1.5 hours. It takes 23 hours at \(N=2000\), 15.5 days at \(N=4000\) and 1.7 years at \(N=10^4\) (spacing 1 m, \(10^8\) unknowns, 1.6 GB for the two arrays, which fits in the memory of this machine). Doubling \(N\) multiplies the time by 15.8 and 16.0; the second block, whose logarithm grows with \(N\), grows slightly faster and reaches 2.5 years at \(N=10^4\). The numbers for \(N\ge4000\) are extrapolations: no run of that length was made, and the time per point update was measured only up to \(N=2000\).</p>
+<p><strong>What parallelism must deliver.</strong> Suppose the goal is the \(N=1000\) solve in one minute. The speedup required is \(S=T_1/T_p\approx5240\ \mathrm{s}/60\ \mathrm{s}=87\). For \(N=10^4\) in one day it is \(1.7\times365=620\). By Amdahl's law (9.2), a speedup \(S\) on \(p\) workers needs a serial fraction \(f\le(1/S-1/p)/(1-1/p)\) (chapter 11 derives this form): for \(S=620\) and \(p=1000\), \(f\le6.1\times10^{-4}\), and for unlimited \(p\), \(f\le1/620=1.6\times10^{-3}\). This is a necessary condition only. In the work–span notation of this book the work is \(W=5N^2k\) and the span \(D\) is at least \(k\) sweeps, because sweep \(j+1\) reads the values written by sweep \(j\). The parallelism \(W/D\) is at most the \(5N^2\) operations of one sweep, \(5\times10^6\) at \(N=1000\): the iteration offers parallelism inside each sweep and none between sweeps. What decides whether a machine reaches \(S=620\) is the memory bandwidth (chapter 10), the cost of the global maximum that stops the iteration, and the communication of boundary rows between processors (chapters 15 and 16). The part of the code that no worker can share in a parallel version, the boundary fill, takes of the order of \(N\) operations against \(5N^2k\) in total, a fraction below \(10^{-9}\) at \(N=1000\); the Amdahl bound from it is not the binding limit.</p>
+<p><strong>Is iterative more efficient?</strong> The lecture says that iterative solvers are more efficient than direct ones for this problem. The listing below tests it against the most direct competitor that exploits the structure of the matrix, banded Cholesky factorization. The unknowns are numbered row by row, so the matrix has half-bandwidth \(b=N\), and the factorization \(A=\Gamma\Gamma^{T}\) fills only the band: it stores \(n(b+1)=N^2(N+1)\) numbers and performs about \(nb^2=N^4\) operations. The listing builds the band, factors it, solves the canonical problem and counts every multiply-subtract (2 operations), division and square root (1 each) as it executes them. It then runs the Jacobi code for an iteration error of \(10^{-6}\) with the tolerance of (9.10) and prints the count of operations of both, the storage of the band, and the largest difference between the two solutions. The program is deterministic, so the check is exact.</p>
+<pre><code class="language-c" data-file="band_solve.c" data-build="gcc -O2 band_solve.c -o band_solve -lm" data-run="./band_solve">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+
+#define IDX(i,j) ((i)*(N+2)+(j))     /* (N+2)x(N+2) doubles, row-major; interior is 1..N */
+
+/* One Jacobi sweep. Writes the average of the four neighbours of u into the interior of
+   unew and returns max |unew - u| over the interior. Boundary values are read, never written. */
+double jacobi_step(int N, const double *u, double *unew)
+{
+    double maxdiff = 0.0;
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            double v = 0.25 * (u[IDX(i-1,j)] + u[IDX(i+1,j)] + u[IDX(i,j-1)] + u[IDX(i,j+1)]);
+            double d = fabs(v - u[IDX(i,j)]);
+            if (d &gt; maxdiff) maxdiff = d;
+            unew[IDX(i,j)] = v;
+        }
+    return maxdiff;
+}
+
+/* u = 1 on the top edge (i = 0), u = 0 on the other three edges and in the interior. */
+static void init_canonical(int N, double *u)
+{
+    for (int i = 0; i &lt; N + 2; i++)
+        for (int j = 0; j &lt; N + 2; j++)
+            u[IDX(i,j)] = (i == 0) ? 1.0 : 0.0;
+}
+
+/* Sweep until the change is below tol or max_iter sweeps are done. Both arrays must hold the
+   boundary values. On return *pu is the latest iterate and *punew the one before it. */
+static int jacobi_solve(int N, double **pu, double **punew, double tol, int max_iter, double *change)
+{
+    int k = 0;
+    double d = INFINITY;
+    while (k &lt; max_iter &amp;&amp; d &gt;= tol) {
+        d = jacobi_step(N, *pu, *punew);
+        double *t = *pu; *pu = *punew; *punew = t;
+        k++;
+    }
+    *change = d;
+    return k;
+}
+
+static double *grid(int N)
+{
+    double *u = malloc(sizeof(double) * (size_t)(N + 2) * (N + 2));
+    if (!u) exit(1);
+    init_canonical(N, u);
+    return u;
+}
+
+/* Direct solve of the same problem. Unknown (i,j) has number m = (i-1)*N + (j-1); the matrix has
+   4 on the diagonal and -1 for the four neighbours, so its half-bandwidth is b = N. Banded
+   Cholesky A = Gamma Gamma^T stores Gamma in n rows of b+1 numbers: Gamma(i,j) at fac[i*(b+1) + j - i + b]. */
+static double flops;                                            /* counted, not estimated */
+
+static double *band_solve(int N)
+{
+    int n = N * N, b = N, w = b + 1;
+    double *fac = calloc((size_t)n * w, sizeof(double)), *x = calloc(n, sizeof(double));
+    if (!fac || !x) exit(1);
+    #define FAC(i,j) fac[(size_t)(i) * w + (j) - (i) + b]
+    for (int m = 0; m &lt; n; m++) {
+        FAC(m,m) = 4.0;
+        if (m % N) FAC(m,m-1) = -1.0;                            /* west neighbour */
+        if (m &gt;= N) FAC(m,m-N) = -1.0;                           /* north neighbour */
+        x[m] = (m &lt; N) ? 1.0 : 0.0;                             /* top edge u = 1 moves to the right side */
+    }
+    for (int i = 0; i &lt; n; i++)
+        for (int j = (i - b &gt; 0 ? i - b : 0); j &lt;= i; j++) {
+            double s = FAC(i,j);
+            for (int k = (i - b &gt; 0 ? i - b : 0); k &lt; j; k++) {
+                s -= FAC(i,k) * FAC(j,k);
+                flops += 2;
+            }
+            if (i == j) FAC(i,i) = sqrt(s);
+            else FAC(i,j) = s / FAC(j,j);
+            flops += 1;
+        }
+    for (int i = 0; i &lt; n; i++) {                               /* Gamma y = rhs */
+        double s = x[i];
+        for (int k = (i - b &gt; 0 ? i - b : 0); k &lt; i; k++) { s -= FAC(i,k) * x[k]; flops += 2; }
+        x[i] = s / FAC(i,i); flops += 1;
+    }
+    for (int i = n - 1; i &gt;= 0; i--) {                          /* Gamma^T x = y */
+        double s = x[i];
+        for (int k = i + 1; k &lt; n &amp;&amp; k &lt;= i + b; k++) { s -= FAC(k,i) * x[k]; flops += 2; }
+        x[i] = s / FAC(i,i); flops += 1;
+    }
+    free(fac);
+    return x;
+}
+
+int main(void)
+{
+    const double pi = 3.14159265358979323846, eps = 1e-6;       /* target iteration error */
+    printf("%4s %7s %12s %12s %10s %12s %12s %9s %12s\n", "N", "n=N^2", "band flops", "n b^2", "band MB",
+           "Jacobi sweeps", "Jacobi flops", "J/band", "max |J-band|");
+    for (int N = 15; N &lt;= 127; N = 2 * N + 1) {
+        flops = 0;
+        double *x = band_solve(N);
+        double band_flops = flops, rho = cos(pi / (N + 1));
+        double tol = eps * (1 - rho) / rho;                      /* change that gives error eps once the slowest mode dominates */
+        double *u = grid(N), *unew = grid(N), change;
+        int k = jacobi_solve(N, &amp;u, &amp;unew, tol, 100000000, &amp;change);
+        double diff = 0.0;
+        for (int i = 1; i &lt;= N; i++)
+            for (int j = 1; j &lt;= N; j++)
+                diff = fmax(diff, fabs(u[IDX(i,j)] - x[(i - 1) * N + (j - 1)]));
+        double jflops = 5.0 * N * N * k;
+        printf("%4d %7d %12.3e %12.3e %10.2f %12d %12.3e %9.1f %12.1e\n", N, N * N, band_flops, (double)N * N * N * N,
+               (double)N * N * (N + 1) * 8 / 1e6, k, jflops, jflops / band_flops, diff);
+        free(x); free(u); free(unew);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">   N   n=N^2   band flops        n b^2    band MB Jacobi sweeps Jacobi flops    J/band max |J-band|
+  15     225    6.847e+04    5.062e+04       0.03          666    7.492e+05      10.9      9.8e-07
+  31     961    1.082e+06    9.235e+05       0.25         2676    1.286e+07      11.9      9.9e-07
+  63    3969    1.708e+07    1.575e+07       2.03        10714    2.126e+08      12.4      1.0e-06
+ 127   16129    2.711e+08    2.601e+08      16.52        42866    3.457e+09      12.8      1.0e-06</code></pre>
+<p><strong>Reading the output.</strong> The counted operations of the factorization are \(6.8\times10^4\), \(1.1\times10^6\), \(1.7\times10^7\) and \(2.7\times10^8\) for \(N=15,31,63,127\), against \(N^4=5.1\times10^4,\ 9.2\times10^5,\ 1.6\times10^7,\ 2.6\times10^8\): the ratio falls from 1.35 to 1.04, so \(N^4\) is the asymptote. Jacobi iteration needs 10.9, 11.9, 12.4 and 12.8 times as many operations; (9.11) gives the limit 13.1. Both methods are of order \(N^4\), and Jacobi is about 13 times more expensive at this tolerance. The two solutions differ by \(0.98\times10^{-6}\) to \(1.00\times10^{-6}\), the iteration error that the tolerance of (9.10) was chosen to give, so in this case the maximum-norm error equals the value that (9.10) gives for the slowest mode. The advantage of Jacobi iteration is memory: the band takes 16.5 MB at \(N=127\) against 0.26 MB for two grids (a factor of 62), and it grows as \(N^3\), 8 GB at \(N=1000\) against 16 MB. At \(N=1000\) the factorization needs about \(10^{12}\) operations, a tenth of Jacobi's \(1.3\times10^{13}\); this extrapolation was not run.</p>
+<p>The lecture's statement therefore needs refinement. Dense Cholesky factorization needs about \(n^3/3=N^6/3\) operations and \(N^4\) numbers of storage, against about \(13N^4\) operations for Jacobi iteration: a factor of about \(N^2/39\), \(2.6\times10^{4}\) at \(N=1000\). Against banded elimination, plain Jacobi iteration takes the same order of operations with a larger constant and saves memory. Demmel's table of the serial cost of solving the discrete Poisson equation with \(n=N^2\) unknowns lists dense LU \(n^3\), band LU \(n^2\), Jacobi \(n^2\), sparse LU \(n^{3/2}\), conjugate gradients \(n^{3/2}\), successive over-relaxation \(n^{3/2}\), FFT \(n\log n\) and multigrid \(n\) (<a href="https://people.eecs.berkeley.edu/~demmel/cs267-1995/lecture24/lecture24.html">CS 267, Lecture 24, 1995</a>; the notes write \(N\) for the number of unknowns). Jacobi is as costly as band LU, and a sparse direct solver, conjugate gradients, over-relaxation, an FFT solver and multigrid all need fewer operations. So the statement holds for the better iterative methods and for memory, and not for the plain Jacobi iteration of this chapter. Chapter 29 treats these methods and their libraries.</p>
+<p><strong>Why one core cannot keep up.</strong> The work for a fixed accuracy grows with the fourth power of the number of grid points per side, and one more digit of accuracy costs a factor of 100. A better algorithm changes the exponent (conjugate gradients and multigrid reduce \(N^4\) to \(N^3\) and \(N^2\)) but does not remove the growth, and every realistic simulation (three dimensions, time stepping, many cases) multiplies the work again. The hardware has one lever left: the clock of a single core has not risen since 2004, and the extra transistors arrive as cores. A solve that needs 1.7 years on one core can finish in a day only on a machine that delivers a speedup of 620, and only a parallel program can use such a machine. The lecture's conclusion is correct, and (9.11) with the measured rate of one core supplies the numbers.</p>
+
+<h2 id="stack">From source code to instructions <a class="timestamp" href="https://www.youtube.com/watch?v=z75dO5juDq8&amp;t=1147s">W3L2 19:07</a></h2>
+<p><strong>The lecture.</strong> After the plot, the lecture asks what happens between the code and the plot. A computer understands only zeros and ones; a microprocessor has logic circuits for add, multiply and subtract on binary numbers; each operation of a program consists of "instructions", a calculation is broken into "thousands or even millions" of them, and all this is hidden from the user. A slide with a punch card recalls when instructions were punched into cards. The slide on system layers lists application software in a high-level language; system software, namely the compiler, which translates the language into machine code, and the operating system, which handles input and output, manages memory and storage, and schedules tasks and shares resources; and the hardware. A slide on abstraction defines the <em>instruction set architecture</em> (ISA) as the abstract interface between the hardware and the lowest-level software, which "encompasses all the information necessary to write a machine language program that will run correctly, including instructions, registers, memory access, I/O", with the examples x86, x86-64, IA-32, ARM, SPARC, Motorola 68K and MIPS; and the <em>application binary interface</em> (ABI) as "the user portion of the instruction set plus the operating system interfaces used by application programmers", which "defines a standard for binary portability across computers". The lecture adds that a program that runs on one machine only is of little use, and that sometimes only the executable can be shared.</p>
+<p><strong>The layers, observed on the Jacobi kernel.</strong> The session below compiles the canonical program of this chapter on the machine of the model section and looks at the result. Every line was run. The commands that print the build identifier or addresses are filtered by <code>sed</code> to keep the output stable, as their text shows, and the tab characters of the assembler output are shown as spaces. This session is not part of the code lab.</p>
+<pre><code class="language-bash">$ gcc -O2 jacobi.c -o jacobi -lm
+$ file jacobi | sed 's/BuildID\[sha1\]=[0-9a-f]*, //'
+jacobi: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, not stripped
+$ ldd jacobi | sed 's/ (0x[0-9a-f]*)//'
+        linux-vdso.so.1
+        libm.so.6 =&gt; /lib/x86_64-linux-gnu/libm.so.6
+        libc.so.6 =&gt; /lib/x86_64-linux-gnu/libc.so.6
+        /lib64/ld-linux-x86-64.so.2
+$ gcc -O2 -S jacobi.c -o jacobi.s
+$ awk '/^jacobi_step:/{p=1} p' jacobi.s | sed -n '/^\.L21:/,/jne\t\.L21/p'
+.L21:
+        movsd   8(%rdx,%rax), %xmm0
+        addsd   8(%rsi,%rax), %xmm0
+        addsd   (%rcx,%rax), %xmm0
+        addsd   16(%rcx,%rax), %xmm0
+        mulsd   %xmm4, %xmm0
+        movapd  %xmm0, %xmm1
+        subsd   8(%rcx,%rax), %xmm1
+        movsd   %xmm0, 8(%r8,%rax)
+        addq    $8, %rax
+        andpd   %xmm3, %xmm1
+        maxsd   %xmm2, %xmm1
+        movapd  %xmm1, %xmm2
+        cmpq    %rdi, %rax
+        jne     .L21
+$ awk '/^jacobi_step:/{p=1} p' jacobi.s | sed -n '/^\.L21:/,/jne\t\.L21/p' | grep -c -E '^\s+[a-z]'
+14
+$ gcc -march=native -dM -E - &lt;/dev/null | grep -c -E "__AVX2__|__FMA__"
+2
+$ gcc -dM -E - &lt;/dev/null | grep -c -E "__AVX2__|__FMA__"
+0
+$ gcc -O2 -ftree-parallelize-loops=4 -fopt-info-loop -c jacobi.c -o /dev/null
+jacobi.c:25:23: optimized: parallelizing outer loop 1
+jacobi.c:26:27: optimized: loop unrolled 1 times
+jacobi.c:86:72: optimized: basic block part vectorized using 16 byte vectors
+jacobi.c:86:72: optimized: basic block part vectorized using 16 byte vectors
+$ gcc -O3 -fopt-info-vec-missed -c jacobi.c -o /dev/null 2&gt;&amp;1 | grep "^jacobi.c:1[0-9]:"
+jacobi.c:12:23: missed: couldn't vectorize loop
+jacobi.c:14:33: missed: not vectorized: complicated access pattern.
+jacobi.c:13:27: missed: couldn't vectorize loop
+jacobi.c:12:23: missed: couldn't vectorize loop
+jacobi.c:14:33: missed: not vectorized: complicated access pattern.
+jacobi.c:13:27: missed: couldn't vectorize loop
+$ gcc -O2 -ftree-parallelize-loops=4 -DRESTRICT=restrict -fopt-info-loop -c autopar.c -o /dev/null
+autopar.c:40:23: optimized: parallelizing inner loop 1
+autopar.c:51:26: optimized: loop vectorized using 16 byte vectors
+$ gcc -O2 -ftree-parallelize-loops=4 -DRESTRICT=restrict autopar.c -o ap
+$ objdump -d ap --no-show-raw-insn | awk '/&lt;sweep&gt;:/{p=1} /^$/{p=0} p' | grep -c GOMP
+0</code></pre>
+<p><strong>Reading the session.</strong> The file is an ELF (Executable and Linkable Format) 64-bit object for x86-64: the ISA is named in the file, together with the operating-system interface ("GNU/Linux 3.2.0") and the dynamic loader. It is linked dynamically against <code>libm</code> and <code>libc</code>, so a copy runs on another x86-64 Linux machine only if that machine has compatible versions of these libraries, and it does not run on an ARM machine or, natively, on Windows. This is the content of the lecture's ABI statement: portability holds across machines with the same ISA, operating-system interface and library conventions. The System V AMD64 ABI that governs the file applies to programs running in the 64-bit "long" mode of the architecture (<a href="https://refspecs.linuxfoundation.org/elf/x86_64-abi-0.99.pdf">System V Application Binary Interface, AMD64 Architecture Processor Supplement, draft 0.99.6, 2012</a>, §1, p. 9), and its calling convention is visible in the code. <code>jacobi_step(int N, const double *u, double *unew)</code> receives \(N\) in <code>%edi</code> (the test at its start), <code>u</code> in <code>%rsi</code> and <code>unew</code> in <code>%rdx</code> (copied to <code>%rcx</code> and <code>%r8</code>), and returns its <code>double</code> in <code>%xmm0</code>, as §3.2.3 prescribes for arguments of the integer class and a result of the SSE class (the register sequence is in §A.2.1, p. 124 of the draft).</p>
+<p>The inner loop answers the lecture's claim about instructions. One iteration of the loop over \(j\), one point update, executes 14 instructions: one load (<code>movsd</code>); three additions and one subtraction that each read one operand from memory, so that five values are read, the four neighbours and the centre; one multiplication; one store; the absolute value (<code>andpd</code>); the maximum (<code>maxsd</code>); two register copies (<code>movapd</code>); and three instructions of loop control (<code>addq</code>, <code>cmpq</code>, <code>jne</code>). The five floating-point operations of \(F=5N^2\) are 5 of the 14. One sweep at \(N=1000\) executes \(1.4\times10^{7}\) instructions in the inner loop, and the solve of the first paragraph of this chapter, with \(2.6\times10^{6}\) sweeps, about \(3.7\times10^{13}\). The lecture's "thousands or even millions" fits one sweep; the whole solve executes about \(4\times10^{7}\) times a million instructions. The instructions handle one double each (<code>movsd</code>, <code>addsd</code>): the baseline x86-64 set with SSE2, although the processor has wider vector instructions. At <code>-O3</code> the compiler did not vectorize the loop and reports "complicated access pattern" at the loads of line 14. The maximum is a chain: <code>maxsd %xmm2,%xmm1</code> followed by <code>movapd %xmm1,%xmm2</code> makes each point's maximum depend on that of the previous point. The same sweep without the maximum (the plain build of the next listing) takes 0.15 to 0.22 ms at \(N=500\) in six runs, against 0.26 to 0.39 ms with the maximum in the timing listing; the chain is a candidate explanation, and this chapter did not isolate it. Chapter 6 treats vector instructions and the dependences that limit them, and chapter 12 the OpenMP reduction clause that handles this maximum.</p>
+<p>The two counts, with <code>-march=native</code> and with the default build, show where binary portability ends. With <code>-march=native</code> the compiler defines the macros for AVX2 and FMA, which this processor supports; without it, none. The GCC manual states that <code>-march=cpu-type</code> "allows GCC to generate code that may not run at all on processors other than the one indicated", and that with <code>native</code> "the result might not run on different machines" (<a href="https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html">GCC manual, x86 Options</a>). A binary built for the ABI is portable across x86-64 machines only if its instruction set level is also available on them. The programs of this book are built without <code>-march</code>, so that the output of a listing does not depend on the processor that compiles it.</p>
+<p><strong>Does the compiler parallelize the sweep?</strong> The first lecture of the week argues that automatic parallelization has been "a disaster" (<a class="timestamp" href="https://www.youtube.com/watch?v=PXmMDWzebGE&amp;t=575s">W3L1 9:35</a>) and tells an anecdote from about 20 years earlier: a code compiled with an automatically parallelizing compiler on a dual-core machine ran 50 percent slower instead of twice as fast, because the compiler did not understand the algorithm (<a class="timestamp" href="https://www.youtube.com/watch?v=PXmMDWzebGE&amp;t=606s">W3L1 10:06</a>). The anecdote cannot be tested here, since compiler and machine differ, but the claim can be tested with gcc 13.3 on the Jacobi sweep. The session shows that <code>-ftree-parallelize-loops=4</code> parallelizes the outer loop of <code>init_canonical</code> (line 25) and leaves the sweep (lines 12–17), whose maximum is a reduction, serial. The GCC manual states that parallelization "is only possible for loops whose iterations are independent and can be arbitrarily reordered" and "is only profitable on multiprocessor machines, for loops that are CPU-intensive, rather than constrained e.g. by memory bandwidth" (<a href="https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html">GCC manual, Optimize Options</a>). The next listing removes the maximum, so that every iteration is independent, and times the sweep at \(N=500\) in three builds: plain; with <code>-ftree-parallelize-loops=4</code>; and with <code>#pragma omp parallel for</code> on the outer loop (chapter 12), 4 threads. All three print the same sum of the field, which checks that they compute the same result. The run checks only its return code, and the output is one sample.</p>
+<pre><code class="language-c" data-file="autopar.c" data-build="gcc -O2 autopar.c -o plain &amp;&amp; gcc -O2 -ftree-parallelize-loops=4 -DRESTRICT=restrict autopar.c -o autopar &amp;&amp; gcc -O2 -fopenmp -DPRAGMA -DRESTRICT=restrict autopar.c -o omp" data-run="echo &quot;gcc -O2:&quot;; ./plain; echo &quot;gcc -O2 -ftree-parallelize-loops=4:&quot;; ./autopar; echo &quot;#pragma omp parallel for, 4 threads:&quot;; OMP_NUM_THREADS=4 ./omp" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+#include &lt;time.h&gt;
+
+#define IDX(i,j) ((i)*(N+2)+(j))
+
+#ifndef NN
+#define NN 500
+#endif
+
+#ifndef RESTRICT
+#define RESTRICT
+#endif
+
+/* Jacobi sweep without the max reduction, so that every iteration is independent.
+   RESTRICT is empty or `restrict`: the programmer's promise that u and unew do not overlap. */
+void sweep(int N, const double *RESTRICT u, double *RESTRICT unew)
+{
+#ifdef PRAGMA
+    #pragma omp parallel for
+#endif
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++)
+            unew[IDX(i,j)] = 0.25 * (u[IDX(i-1,j)] + u[IDX(i+1,j)] + u[IDX(i,j-1)] + u[IDX(i,j+1)]);
+}
+
+static double now(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &amp;t);
+    return t.tv_sec + 1e-9 * t.tv_nsec;
+}
+
+int main(void)
+{
+    const int N = NN, sweeps = (int)(4e8 / ((double)NN * NN));
+    size_t n = (size_t)(N + 2) * (N + 2);
+    double *u = calloc(n, sizeof(double)), *unew = calloc(n, sizeof(double)), best = 1e30;
+    for (int j = 0; j &lt; N + 2; j++) u[IDX(0,j)] = unew[IDX(0,j)] = 1.0;
+    for (int rep = 0; rep &lt; 5; rep++) {
+        double t0 = now();
+        for (int k = 0; k &lt; sweeps; k++) {
+            sweep(N, u, unew);
+            double *t = u; u = unew; unew = t;
+        }
+        double dt = (now() - t0) / sweeps;
+        if (dt &lt; best) best = dt;
+    }
+    double check = 0.0;
+    for (size_t m = 0; m &lt; n; m++) check += u[m];
+    printf("%7.2f ms/sweep   sum of u = %.6f\n", best * 1e3, check);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">gcc -O2:
+   0.19 ms/sweep   sum of u = 22988.084683
+gcc -O2 -ftree-parallelize-loops=4:
+   0.16 ms/sweep   sum of u = 22988.084683
+#pragma omp parallel for, 4 threads:
+   0.07 ms/sweep   sum of u = 22988.084683</code></pre>
+<p>In six runs the plain build took 0.15 to 0.22 ms per sweep, the automatically parallelized build 0.14 to 0.17 ms (inside the plain build's range), and the directive 0.06 to 0.09 ms, 2.1 to 2.7 times as fast. The compiler's report for this build (<code>-fopt-info-loop</code>, shown in the session above) names one parallelized loop, the fill of the top edge in <code>main</code> (line 40 of the listing). The sweep stays serial, without the reduction and with <code>restrict</code>: the disassembly of the sweep contains no call into the OpenMP runtime. The automatic build runs the same serial sweep as the plain build, and its times lie inside the plain build's range. The directive parallelizes the outer loop, one region per sweep. An earlier test at \(N=1000\) and \(N=2000\) (two runs per size, not reproduced by a listing) gave 0.9 to 1.0 times the speed of the plain build for the automatic build and 1.1 to 1.7 times for the directive, limited by memory bandwidth. The measurements neither reproduce nor refute the 50 percent slowdown of the anecdote. They support the lecture's conclusion that the choice of what to parallelize is the programmer's. gcc 13.3 left the sweep serial with and without the reduction, and it parallelized only the initialization loops, whose work is of the order of \(N\) operations.</p>
+
+<h2 id="limits">What the model establishes and what it does not</h2>
+<p>The table lists the statements of the two lectures that this chapter tested, with the status that the tests gave them.</p>
+<div class="table-wrap"><table>
+<caption>Table 9.1. Statements of the lectures and their status in this chapter.</caption>
+<thead><tr><th scope="col">Statement of the lecture</th><th scope="col">Status</th><th scope="col">Evidence in this chapter</th></tr></thead>
+<tbody>
+<tr><td>Transistors per unit area double roughly every 18 months; the slide's caption says "approximately every two years".</td><td>The slide is right; 18 months holds for the 1970s and 1980s (Bohr 2007)</td><td>Rupp's data: 27.3 months (1971–1999), 23.9 months (2000–2021). Moore 1965: yearly; Moore 1975: two years. Bohr 2007: 18 months in the 1970s and 1980s, 2 years since the mid-1990s.</td></tr>
+<tr><td>Moore's law means that computing power doubles every 18 months.</td><td>Refined</td><td>The law is about component count. The listed clock frequency has a slope of \(-0.011\) doublings per year after 2004.</td></tr>
+<tr><td>Dennard scaling: dimension, voltage, current, capacitance and delay fall by \(1/K\), power per circuit by \(1/K^2\).</td><td>Confirmed</td><td>Dennard et al. 1974, Table I and text, p. 265; power density constant (listing <code>moore_fit.py</code>, ideal column).</td></tr>
+<tr><td>Dennard scaling broke because a finite voltage is needed to tell 0 from 1.</td><td>Refined</td><td>Bohr 2007, p. 12: the threshold voltage cannot scale because sub-threshold leakage rose from below \(10^{-10}\) to above \(10^{-7}\) A/µm; with the voltage fixed, power per area doubles per generation (32 after five).</td></tr>
+<tr><td>Clock frequencies have stopped rising.</td><td>Confirmed</td><td>Slope \(-0.011\) per year after 2004; highest clock among entries since 2010: 4.0 GHz; turbo clock of this machine's performance cores: 4.40 GHz.</td></tr>
+<tr><td>Today's computers are built in "3 nanometer technology".</td><td>Not assessed</td><td>The slide plots gate lengths of 50 to 15 nm; the dimension denoted by a node name was not checked.</td></tr>
+<tr><td>10,000 integers: 1010 s with 10 people, 200 s with 100 people, a speedup of 50.</td><td>Confirmed for \(T=M/p+p\); not a fixed-fraction Amdahl case</td><td>Equation (9.1); the best team is \(\sqrt M=100\); \(f_{\mathrm{eff}}\) grows from 0.0011 to 0.1001 for \(p=10\) to 1000; pairwise addition gives 107 s at \(p=100\).</td></tr>
+<tr><td>Amdahl's law gives limits of 2, 20 and about 100 for 50, 95 and 99 percent parallel portions.</td><td>Confirmed</td><td>Equation (9.2), listing <code>bag_of_integers.py</code>; the slide's curves reach 2, 4, 10, 20 for 50, 75, 90, 95 percent.</td></tr>
+<tr><td>Machines with millions of cores are useless if the speedup stops near 1000 processors.</td><td>True only for a fixed problem size</td><td>Gustafson 1988: scaled speedups of 1016 to 1021 on 1024 processors with serial fractions of 0.4 to 0.8 percent. For Jacobi the sweep count grows as \(N^2\), so scaled speedup needs care.</td></tr>
+<tr><td>Automatic parallelization has been a disaster; a code ran 50 percent slower on a dual-core machine.</td><td>Anecdote not testable; claim partly supported</td><td>gcc 13.3 left the Jacobi sweep serial, with and without the reduction; it parallelized only initialization loops. The directive was 2.1 to 2.7 times as fast as the plain build (<code>autopar.c</code>, seven runs).</td></tr>
+<tr><td>The central difference is second-order accurate by a Taylor expansion.</td><td>Confirmed, with the constant</td><td>Equation (9.4): error \(h^2f'''/6\); the lecture writes the expansion loosely.</td></tr>
+<tr><td>No use in a precision of \(10^{-100}\) if the method error is \(10^{-2}\); no use in a 16th-order method on a computer that works to \(10^{-8}\).</td><td>Confirmed</td><td>Listing <code>error_balance.c</code>: equal double and single results for \(k\le6\); the fourth-order minimum in single precision is already 11 times the unit roundoff.</td></tr>
+<tr><td>Discretized equation: \((T_{i-1,j}-T_{i,j}+T_{i+1,j})/(\Delta x)^2+(\dots)/(\Delta y)^2=0\) (slide).</td><td>Incorrect: the coefficient of the centre is \(-2\)</td><td>Equation (9.6); a constant temperature does not satisfy the slide's expression.</td></tr>
+<tr><td>Iterative solvers are more efficient than direct solvers.</td><td>True against dense elimination and in memory; false in operations against banded elimination for plain Jacobi</td><td>Listing <code>band_solve.c</code>: Jacobi takes 10.9 to 12.8 times the operations of banded Cholesky, both \(N^4\); Demmel's table: Jacobi \(n^2\), band LU \(n^2\), CG, SOR and sparse LU \(n^{3/2}\), multigrid \(n\).</td></tr>
+<tr><td>The accuracy required has a direct impact on the cost of the computation.</td><td>Confirmed and quantified</td><td>Equation (9.11): work \(\propto N^4\ln(a_1/\varepsilon)\); one more digit of accuracy costs about 100 times the work.</td></tr>
+<tr><td>The ABI defines a standard for binary portability across computers.</td><td>True within one instruction set, operating-system interface and library convention</td><td>The session: an x86-64 ELF executable linked to <code>libm</code> and <code>libc</code>; <code>-march=native</code> may not run elsewhere (GCC manual).</td></tr>
+</tbody></table></div>
+<p>The model of this chapter establishes four things. The five-point scheme has an error of order \(h^2\) for smooth solutions, proved by a discrete minimum principle and checked in closed form. Jacobi iteration has the spectral radius \(\cos(\pi/(N+1))\), an iteration count \(2(N+1)^2\ln(a_1/\varepsilon)/\pi^2\) that the programs reproduce to 0.01 % for \(N\ge31\), and a factor \(\rho/(1-\rho)\) between change and error that they reproduce to 0.2 %. The work grows as \(N^4\), and at the measured 1.0 to 2.6 ns per point update one core needs 1.5 hours at \(N=1000\) and 1.7 years at \(N=10^4\). The speedup a parallel machine must deliver follows: 87 for the \(N=1000\) solve in one minute, 620 for the \(N=10^4\) solve in one day. Three quantitative statements of the lectures need correction: the 18-month doubling time, the discretized equation of the slide, and the efficiency of iterative solvers.</p>
+<p>The model leaves out most of what a parallel solution needs. It contains no parallel program, so the required speedups are requirements, not measurements; chapters 12, 16, 20 and 24 measure them. It does not model the memory system; the time per point update at \(N\ge1000\) is a measured number whose cause, the move from cache to main memory, chapter 10 analyses. The iteration count (9.9) and the amplitude \(4/\pi^2\) belong to the five-point operator on a square with the canonical boundary values, and the single-mode count for the change holds only when \(\mathrm{tol}\ll(1-\rho)4/\pi^2\); at \(N=1000\) with \(\mathrm{tol}=10^{-6}\) (\(\mathrm{tol}/c=0.50\)) it underestimates the sweeps by 26 %, and for larger \(N\) at the same tolerance it does not apply at all, because \(\mathrm{tol}/c\gt1\) (they are 1.36 times the count, as in Chapter 4), and the stair-step of the successive changes was observed, not derived. The accuracy statements hold for solutions with bounded fourth derivatives; the canonical problem jumps at the corners, and its largest error over the grid was \(7.9\times10^{-3}\) at \(N=7\) and \(7.2\times10^{-3}\) at \(N=15\), 31 and 63. The modelling error of the pipeline was not estimated, and the fits of the trend data say nothing about causes. The timing samples were captured while other jobs ran, on an unknown core of the hybrid processor. The times for \(N\ge4000\) are extrapolations: the largest grid timed was \(N=2000\) and the longest solve run took 16.7 s (\(N=255\)). The node name "3 nm" was not checked, and the ABI discussion covers the x86-64 Linux case of the session.</p>
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> In the model of the bag of integers with pairwise addition of the partial sums, \(T(p)=M/p+\log_2p\) (the ceilings dropped), find the team size \(p^*\) that minimizes \(T\), the minimum time and the speedup. Evaluate them for \(M=10^4\), and compare with the model with the ceilings and with the flat combination of (9.1). Say why \(p^*\) grows as \(M\) here and as \(\sqrt M\) in (9.1).</p>
+<details><summary>Solution</summary>
+<p>\(dT/dp=-M/p^2+1/(p\ln2)\) is zero at \(p^*=M\ln2\). The second derivative is \(2M/p^3-1/(p^2\ln2)\), which at \(p^*\) equals \(1/(M^2\ln^32)\gt0\), so this is a minimum. The minimum time is \(T(p^*)=1/\ln2+\log_2(M\ln2)\). For \(M=10^4\): \(p^*=6931\), \(T=1.44+12.76=14.2\) s, speedup \(S=10^4/14.2=704\). The model with the ceilings, \(\lceil M/p\rceil+\lceil\log_2p\rceil\), has the minimum 15 s (speedup 667) for \(3334\le p\le4096\), for \(5000\le p\le8192\) and at \(p=10^4\); just above each power of 2, where \(\lceil\log_2p\rceil\) rises by one, the time is 16 s. The ceilings make the optimum flat and ragged. The flat combination of (9.1) has its minimum of 200 s at \(p=100\): pairwise addition is 13 times faster at its best and uses a team 69 times larger. The optimum grows as \(M\) here because the cost of combining is logarithmic in \(p\). One more person saves about \(M/p^2\) seconds of compute time and adds about \(1/(p\ln2)\) seconds of combining, and the two balance at \(p=M\ln2\). In (9.1) each added person adds a whole second (one more partial sum to add), and the balance \(M/p^2=1\) gives \(p=\sqrt M\). The serial part of a parallel program depends on the algorithm for combining results.</p>
+</details>
+<p><strong>Exercise 2 (compute).</strong> For the canonical problem on a grid with \(N=255\), compute the spectral radius, the tolerance <code>tol</code> that, by (9.10), gives an iteration error of \(10^{-8}\) once the slowest mode dominates, the number of sweeps, the number of floating-point operations and the time at 1.1 ns per point update.</p>
+<details><summary>Solution</summary>
+<p>\(h=1/256\), \(\rho=\cos(\pi/256)\), \(1-\rho=7.53\times10^{-5}\) (the approximation \(\pi^2/(2\cdot256^2)=7.53\times10^{-5}\) agrees), \(\rho/(1-\rho)=1.33\times10^{4}\). By (9.10), \(\mathrm{tol}=\varepsilon(1-\rho)/\rho=10^{-8}/13{,}280=7.5\times10^{-13}\) (a guarantee in the maximum norm needs \(5.2\times10^{-13}\), 1.45 times smaller). By (9.9), \(k=\ln(0.405/10^{-8})/(-\ln\rho)=17.52/7.53\times10^{-5}=2.33\times10^{5}\) sweeps. The work is \(W=5N^2k=5\times65{,}025\times2.33\times10^{5}=7.6\times10^{10}\) operations, and the time \(k\,N^2\,t_{\mathrm{pt}}=2.33\times10^{5}\times65{,}025\times1.1\ \mathrm{ns}=16.6\) s. The program of the chapter, run with these values, took 232,634 sweeps (the model gives 232,633), 16.7 s on this machine, and the centre value was within \(1.0\times10^{-8}\) of \(\tfrac14\), the iteration error that the tolerance was chosen to give.</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> A student claims: "If no value of the field changes by more than \(10^{-6}\) in a sweep, the iterate is accurate to about \(10^{-6}\)." Construct a starting vector for the plate problem on \(N=999\) for which the first sweep changes nothing by more than \(10^{-6}\) while the error is 0.2.</p>
+<details><summary>Solution</summary>
+<p>Let \(\mathbf U\) be the exact solution of the five-point system and start from \(\mathbf U^0=\mathbf U+\delta\varphi_{11}\), with \(\varphi_{11}(p,q)=\sin(\pi ph)\sin(\pi qh)\) and \(\delta=0.2\). The error is \(\mathbf e^0=\delta\varphi_{11}\), and its largest entry is \(\delta\) at the centre node (\(N=999\) is odd). The eigenvalue of \(G\) for \(\varphi_{11}\) is \(\rho\), so \(\mathbf e^1=\rho\mathbf e^0\) and the change of the first sweep is \(\mathbf U^1-\mathbf U^0=(\rho-1)\delta\varphi_{11}\), with largest entry \((1-\rho)\delta\). For \(N=999\), \(h=10^{-3}\) and \(1-\rho=\pi^2/(2\times10^6)=4.9\times10^{-6}\), so the change is \(0.2\times4.9\times10^{-6}=9.9\times10^{-7}\), below \(10^{-6}\). The solver stops after one sweep with the error \(\rho\delta=0.2\). The ratio of error to change is \(\rho/(1-\rho)=2.0\times10^{5}\), the factor of (9.10). The claim is true only if the factor is of order 1, which it is for a method with a spectral radius far from 1 and not for Jacobi iteration at large \(N\). The measurements of the chapter show the same on a natural start: with \(10^{-3}\) as the tolerance and \(N=31\) the error was 0.156.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> A student runs the program of the chapter with \(N=63\) and <code>tol</code> \(=10^{-8}\), counts 8958 sweeps, and compares it with the prediction \(\ln(0.25/\mathrm{tol})/(-\ln\rho)=14{,}133\). The student concludes that the formula \(\rho=\cos(\pi/(N+1))\) is wrong. Find the assumption that is wrong, and compute the difference between the two counts.</p>
+<details><summary>Solution</summary>
+<p>The rate is not at fault: the later changes of the program shrink by \(\rho\) per sweep (the two-sweep ratio of the table is \(\rho\) to six digits). The wrong assumption is that the decay of the change starts from the size of the first change, 1/4. The first changes belong to the fast components of the error. The change that remains after those have decayed is that of the slowest component, \((1-\rho)a_1\rho^k\) with \(a_1=4/\pi^2\). For \(N=63\), \(1-\rho=1.205\times10^{-3}\) and \((1-\rho)a_1=4.88\times10^{-4}\), which is 512 times smaller than 1/4. The difference of the counts is \(\ln(512)/(-\ln\rho)=6.238/1.2053\times10^{-3}=5176\) sweeps, equal to \(14{,}133-8958=5175\) up to the rounding of the printed counts. With the amplitude \(4.88\times10^{-4}\) the prediction is 8957.2, within 0.01 % of the measured count. The sum of the lesson: a rate, here \(\rho\), and an amplitude, here \(a_1\), both enter a count, and the amplitude must be that of the slowest component, not that of the first change.</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> A group wants the canonical problem on \(N=4000\) (spacing 1/4001) in one hour, with an iteration error of \(10^{-6}\). Use the table of the chapter. State what the machine must deliver, assuming at least 16 bytes of memory traffic per point update (one 8-byte read and one 8-byte write per node, the other neighbours coming from cache), and decide whether the group should buy a larger machine.</p>
+<details><summary>Solution</summary>
+<p>From the table, \(N=4000\) takes \(4.19\times10^{7}\) sweeps and \(3.35\times10^{15}\) operations, 15.5 days on one core at 2.0 ns per point update. The speedup needed for one hour is \(15.5\times24=372\). By (9.2) with \(p=1000\) workers the serial fraction must be at most \((1/372-1/1000)/(1-1/1000)=1.7\times10^{-3}\). The sustained rate is \(3.35\times10^{15}/3600=0.93\) Tflop/s. The memory traffic is \(16N^2=2.6\times10^{8}\) bytes per sweep at \(4.19\times10^{7}/3600=1.16\times10^{4}\) sweeps per second, \(3.0\times10^{12}\) bytes per second. Chapter 10 measures the memory bandwidth of the machine of this book; the requirement is the number to compare with, and for a sweep with 5 operations on 16 bytes the bandwidth decides before the flop rate does. Buying more cores raises the flop rate and not the bandwidth of a node, so it does not solve the problem; a cluster with many nodes does, if the exchange of boundary rows is cheap enough (chapter 16).</p>
+<p>The better decision is to ask what accuracy is needed. For the canonical problem itself the largest error is \(7.2\times10^{-3}\) at the nodes next to the top corners, at every size tested (the section on the stencil). Refining from 1000 to 4000 is not expected to reduce it, and an iteration error of \(10^{-6}\) is already 7000 times below it. The argument that follows uses the error away from the corners, or a problem with a smooth solution. The discretization error of a smooth solution is about \(0.285h^2=1.8\times10^{-8}\) at \(N=4000\), far below the requested iteration error of \(10^{-6}\), so the grid is finer than the accuracy requires. Take \(N=1000\): the discretization error is \(2.8\times10^{-7}\), the same order as \(10^{-6}\), and the solve takes 1.5 hours on one core, a speedup of 1.5 for one hour. The work falls by \(4^4=256\) when \(N\) falls by 4. A better algorithm changes the exponent as well (conjugate gradients, multigrid; chapter 29). Resolution should be chosen from the accuracy needed, and the machine from the work that results.</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement).</strong> Change the program of the chapter to Gauss–Seidel iteration, which updates <code>u</code> in place in row order so that the north and west neighbours are already new. For the symmetric five-point matrix in natural ordering the Gauss–Seidel iteration matrix has the spectral radius \(\rho^2\), the square of the Jacobi value. Predict the ratio of the sweep counts and the factor between change and error, and measure both for \(N=15,31,63\) with <code>tol</code> \(=10^{-8}\).</p>
+<details><summary>Solution</summary>
+<p>Theorem 4.16 of Saad (§4.2, p. 126) relates the eigenvalues \(\lambda\) of the SOR iteration matrix with relaxation parameter \(\omega\) to those \(\mu\) of the Jacobi matrix of a consistently ordered matrix by \((\lambda+\omega-1)^2=\lambda\omega^2\mu^2\). Gauss–Seidel iteration is \(\omega=1\), which gives \(\lambda=\mu^2\) for the nonzero eigenvalues, so \(\rho_{\mathrm{GS}}=\rho^2\). The five-point matrix in natural ordering is consistently ordered (this chapter relies on that classical fact and checks it only through the measurement below). Each sweep then damps the slowest error component by \(\rho^2\), so the sweeps for the same reduction are about half. Because \(-\ln\rho^2=2(-\ln\rho)\) and the amplitudes differ, the ratio is slightly above 1/2. For the dominant eigenvector of the Gauss–Seidel matrix, with eigenvalue \(\rho^2\), the change is \((1-\rho^2)\) times the error and the next error \(\rho^2\) times it, so the ratio of error to change is \(\rho^2/(1-\rho^2)\) once that mode dominates. The bound (9.10) itself used the symmetry of \(G\) and does not carry over, because the Gauss–Seidel matrix is not symmetric. The program is deterministic, so the check is exact.</p>
+<pre><code class="language-c" data-file="gauss_seidel.c" data-build="gcc -O2 gauss_seidel.c -o gauss_seidel -lm" data-run="./gauss_seidel">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+
+#define IDX(i,j) ((i)*(N+2)+(j))
+
+/* Jacobi: reads u, writes unew (the kernel of the chapter). */
+static double jacobi_step(int N, const double *u, double *unew)
+{
+    double maxdiff = 0.0;
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            double v = 0.25 * (u[IDX(i-1,j)] + u[IDX(i+1,j)] + u[IDX(i,j-1)] + u[IDX(i,j+1)]);
+            maxdiff = fmax(maxdiff, fabs(v - u[IDX(i,j)]));
+            unew[IDX(i,j)] = v;
+        }
+    return maxdiff;
+}
+
+/* Gauss-Seidel: updates u in place, row by row, so the north and west neighbours are already new. */
+static double gs_step(int N, double *u)
+{
+    double maxdiff = 0.0;
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            double v = 0.25 * (u[IDX(i-1,j)] + u[IDX(i+1,j)] + u[IDX(i,j-1)] + u[IDX(i,j+1)]);
+            maxdiff = fmax(maxdiff, fabs(v - u[IDX(i,j)]));
+            u[IDX(i,j)] = v;
+        }
+    return maxdiff;
+}
+
+static double *grid(int N)
+{
+    double *u = calloc((size_t)(N + 2) * (N + 2), sizeof(double));
+    if (!u) exit(1);
+    for (int j = 0; j &lt; N + 2; j++) u[IDX(0,j)] = 1.0;           /* canonical: top edge 1 */
+    return u;
+}
+int main(void)
+{
+    const double tol = 1e-8, pi = 3.14159265358979323846;
+    printf("%4s %10s %12s %10s %14s %12s\n", "N", "Jacobi", "Gauss-Seidel", "GS/Jacobi", "|u_c-1/4|/tol", "r2/(1-r2)");
+    for (int N = 15; N &lt;= 63; N = 2 * N + 1) {
+        double *a = grid(N), *b = grid(N), *g = grid(N), d = 1;
+        int kj = 0, kg = 0;
+        while (d &gt;= tol) { d = jacobi_step(N, a, b); double *t = a; a = b; b = t; kj++; }
+        d = 1;
+        while (d &gt;= tol) { d = gs_step(N, g); kg++; }
+        double r2 = pow(cos(pi / (N + 1)), 2);                  /* Gauss-Seidel factor = rho_Jacobi^2 */
+        printf("%4d %10d %12d %10.3f %14.1f %12.1f\n", N, kj, kg, (double)kg / kj,
+               fabs(g[IDX((N + 1) / 2, (N + 1) / 2)] - 0.25) / tol, r2 / (1 - r2));
+        free(a); free(b); free(g);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">   N     Jacobi Gauss-Seidel  GS/Jacobi  |u_c-1/4|/tol    r2/(1-r2)
+  15        700          365      0.521           25.1         25.3
+  31       2524         1328      0.526          102.1        103.1
+  63       8958         4752      0.530          413.9        414.3</code></pre>
+<p>The measured ratios are 0.521, 0.526 and 0.530: just above 1/2, as predicted, and rising slowly with \(N\) because the amplitude of the slowest component differs from that of Jacobi iteration. The error at the centre divided by <code>tol</code> is 25.1, 102.1 and 413.9, against \(\rho^2/(1-\rho^2)=25.3\), 103.1 and 414.3: the stopping-rule factor of Gauss–Seidel is the same expression with \(\rho^2\), 207 at \(N=31\) for Jacobi and 103 for Gauss–Seidel. Gauss–Seidel halves the work, and its sweep cannot be divided among workers as written, because each value needs the new value of its predecessor in the row and in the column above; Demmel's notes state that this update order "cannot be straightforwardly parallelized" and use a red–black ordering instead (<a href="https://people.eecs.berkeley.edu/~demmel/cs267-1995/lecture24/lecture24.html">CS 267, Lecture 24</a>). The faster method is less parallel, which is the reason for the choice of Jacobi iteration in this book.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li>Recordings: <a href="https://www.youtube.com/watch?v=PXmMDWzebGE">W3L1, Need for Parallel Computing</a> (slides: Moore's law, the MOSFET, MOSFET scaling, Dennard scaling table, 35 years of microprocessor trend data, parallel computing, Amdahl's law); <a href="https://www.youtube.com/watch?v=z75dO5juDq8">W3L2, Role of Numerical Models in Solving Complex Problems on Computers</a> (slides: numerical modelling and errors, steady-state heat conduction, discretized equation, "Is it that simple?", computer system layers, abstractions), NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay, 2025.</li>
+<li>G. E. Moore, "Cramming more components onto integrated circuits", <em>Electronics</em> 38(8), 19 April 1965, from p. 114, <a href="https://www.cs.princeton.edu/courses/archive/fall14/cos109/mooreslaw.pdf">reprint</a>. Author's affiliation Fairchild Semiconductor; complexity for minimum component cost increased by roughly a factor of two per year, expected to continue for at least 10 years, 65,000 components in 1975 (reprint p. 2 of 4).</li>
+<li>G. E. Moore, "Progress in digital integrated electronics", IEDM Technical Digest 1975, pp. 11–13, <a href="https://www.eng.auburn.edu/~agrawvd/COURSE/E7770_Spr07/READ/Gordon_Moore_1975_Speech.pdf">text of the speech</a>. Complexity approximately doubled every year since the introduction of integrated circuits; a new slope that "might approximate a doubling every two years, rather than every year, by the end of the decade".</li>
+<li>R. H. Dennard, F. H. Gaensslen, H.-N. Yu, V. L. Rideout, E. Bassous and A. R. LeBlanc, <a href="https://www.eng.auburn.edu/~agrawvd/COURSE/READING/LOWP/Design%20of%20ion-implanted%20MOSFETs%20with%20very%20small%20physical%20dimensions.pdf">"Design of ion-implanted MOSFET's with very small physical dimensions"</a>, IEEE J. Solid-State Circuits SC-9(5), October 1974, pp. 256–268. Table I and the text beside it, p. 265: delay per circuit falls by \(K\), power per circuit by \(K^2\), power density constant.</li>
+<li>M. Bohr, <a href="https://sscs.ieee.org/images/files/newsletter_archive/sscs_newsletter_200701.pdf">"A 30 year retrospective on Dennard's MOSFET scaling paper"</a>, IEEE SSCS Newsletter, Winter 2007, pp. 11–13. A generation with 0.7 times the feature size gives about twice the density (p. 11); transistor counts doubled every 18 months in the 1970s and 1980s and every 2 years since the mid-1990s (p. 11); sub-threshold leakage limits the scaling of the threshold voltage and so of the supply voltage (p. 12).</li>
+<li>K. Rupp, <a href="https://github.com/karlrupp/microprocessor-trend-data">microprocessor-trend-data</a>, <code>50yrs/transistors.dat</code> (99 entries) and <code>50yrs/frequency.dat</code> (101 entries), CC BY 4.0, retrieved 2026-10-26. The data of the fits.</li>
+<li>G. M. Amdahl, <a href="https://www3.cs.stonybrook.edu/~rezaul/Spring-2019/CSE613/reading/Amdahl-1967.pdf">"Validity of the single processor approach to achieving large scale computing capabilities"</a>, AFIPS Conference Proceedings 30 (1967) 483–485, 2007 reprint. Housekeeping at 40 percent of executed instructions; overhead alone limits throughput to five to seven times; the reprint's editors state that the paper has no equations.</li>
+<li>J. L. Gustafson, <a href="http://johngustafson.net/pubs/pub13/amdahl.pdf">"Reevaluating Amdahl's law"</a>, Communications of the ACM 31(5), 1988, pp. 532–533. Scaled speedup \(p+(1-p)s'\) (Gustafson writes \(N\) for \(p\); formula credited to E. Barsis); speedups of 1021, 1020 and 1016 on 1024 processors for serial fractions of 0.4 to 0.8 percent.</li>
+<li>D. Goldberg, <a href="https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html">"What every computer scientist should know about floating-point arithmetic"</a>, ACM Computing Surveys 23(1), 1991, pp. 5–48 (Oracle reprint), section "Relative Error and Ulps". Machine epsilon \(\varepsilon=(\beta/2)\beta^{-p}\) bounds the relative error of rounding to nearest.</li>
+<li>Y. Saad, <a href="https://www-users.cse.umn.edu/~saad/IterMethBook_2ndEd.pdf"><em>Iterative Methods for Sparse Linear Systems</em></a>, 2nd ed., SIAM 2003. §4.2.1, Theorem 4.1, p. 115: convergence of \(x^{k+1}=Gx^k+f\) if and only if \(\rho(G)\lt1\); §4.2, Theorem 4.16, p. 126: relation between SOR and Jacobi eigenvalues for consistently ordered matrices; §13.2, pp. 424–427, eqs. 13.5, 13.14: eigenvalues of the one- and two-dimensional model problems.</li>
+<li>J. Demmel, <a href="https://people.eecs.berkeley.edu/~demmel/cs267-1995/lecture24/lecture24.html">CS 267, Lecture 24: solving the discrete Poisson equation using Jacobi, SOR and the FFT</a>, 1995. The table of serial costs of dense LU, band LU, Jacobi, sparse LU, conjugate gradients, SOR, FFT and multigrid; \(\rho_{\mathrm{Jacobi}}(n)=\cos(\pi/(n+1))\) in the 2-norm of the error; the statement that Gauss–Seidel in row order cannot be straightforwardly parallelized.</li>
+<li>NIST, <a href="https://physics.nist.gov/cgi-bin/cuu/Value?k">CODATA value of the Boltzmann constant</a>: \(1.380649\times10^{-23}\) J/K, exact.</li>
+<li>GNU Project (online manual of the current release, retrieved 2026-10-26), <a href="https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html">GCC manual, Optimize Options</a>, <code>-ftree-parallelize-loops</code>: possible only for independent iterations, profitable for CPU-bound loops; and <a href="https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html">x86 Options</a>, <code>-march</code>: code "may not run at all on processors other than the one indicated".</li>
+<li>M. Matz, J. Hubicka, A. Jaeger and M. Mitchell (eds.), <a href="https://refspecs.linuxfoundation.org/elf/x86_64-abi-0.99.pdf">System V Application Binary Interface, AMD64 Architecture Processor Supplement</a>, draft 0.99.6, 2012. §1 (p. 9): scope of the ABI; §3.2.3: passing of arguments and returning of values; §A.2.1: register sequence.</li>
+<li>Intel, <a href="https://www.intel.com/content/www/us/en/products/sku/132222/intel-core-i512450h-processor-12m-cache-up-to-4-40-ghz/specifications.html">Intel Core i5-12450H processor specifications (ARK)</a>, retrieved 2026-10-26, and <a href="https://techpowerup.com/cpu-specs/core-i5-12450h.c2533">TechPowerUp</a>: 4 performance cores with 2 threads and 4 efficient cores with 1 thread, 12 threads; maximum turbo 4.40 GHz and 3.30 GHz.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-08-concurrency-and-synchronization.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>
