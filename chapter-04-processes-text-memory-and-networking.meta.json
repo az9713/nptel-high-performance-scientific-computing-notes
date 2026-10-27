@@ -1,0 +1,383 @@
+{
+  "chapter": 4,
+  "title": "Processes, text processing, memory and networking from the command line",
+  "status": "revised after review round 2",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "S4XYOjSoAQE",
+      "label": "W1L5",
+      "playlist_index": 7,
+      "duration_seconds": 2303
+    },
+    {
+      "video_id": "TNlzx44rR88",
+      "label": "W1L6",
+      "playlist_index": 8,
+      "duration_seconds": 718
+    }
+  ],
+  "frames_viewed": {
+    "S4XYOjSoAQE": [
+      "f0002",
+      "f0005",
+      "f0008",
+      "f0012",
+      "f0014",
+      "f0018",
+      "f0020",
+      "f0023",
+      "f0025",
+      "f0029",
+      "f0031",
+      "f0033",
+      "f0034",
+      "f0037",
+      "f0043",
+      "f0045",
+      "f0047",
+      "f0049",
+      "f0051",
+      "f0053",
+      "f0055",
+      "f0057",
+      "f0059",
+      "f0061",
+      "f0062",
+      "f0063",
+      "f0065",
+      "f0067",
+      "f0069",
+      "f0070",
+      "f0071",
+      "f0074",
+      "f0075"
+    ],
+    "TNlzx44rR88": [
+      "f0002",
+      "f0004",
+      "f0005",
+      "f0006",
+      "f0007",
+      "f0008",
+      "f0010",
+      "f0013",
+      "f0015",
+      "f0017",
+      "f0018",
+      "f0019"
+    ]
+  },
+  "source_uncertainties": [
+    "Thompson (1968), CACM 11(6) 419-422: the ACM page returned a bot-check page and the paper could not be opened; the chapter cites it only as described by Cox (2007). Brzozowski (1964) was not opened; the derivative rules are cited from Owens, Reppy and Turon (2009), which attributes them to him.",
+    "Man pages were read from man7.org, which tracks the current man-pages release; the installed versions on the test machine (procps-ng 4.0.4, iputils, OpenSSH 9.6p1) may differ in detail. The definition of used in free(1) (total minus available) is the one of the current man page; the version of procps that matches the lecture's top screen is unknown.",
+    "The test machine (WSL 2, Ubuntu 24.04) has no sshd, no locale other than C, C.utf8 and POSIX, and no interactive terminal in the code lab. fg, an interactive top session, a remote ssh or scp, password or key authentication and locale-dependent sorting were not run.",
+    "Bibliographic data of Thompson (1968, CACM 11(6) 419-422, DOI 10.1145/363347.363387) and Brzozowski (1964, JACM 11(4) 481-494, DOI 10.1145/321239.321249) were checked in Crossref on 2026-10-26; neither paper was opened.",
+    "machine.sh (tool versions) is checked by return code only, so that a package upgrade does not break the code lab; the printed output is the version list of the test machine on 2026-10-26.",
+    "Timing listings (blowup.py, meminfo_check.py, loopback.sh) are checked by return code only; the printed samples are frozen runs of the final build and the prose gives ranges from the other runs. The ranges quoted from other runs come from the same programs run during development and are not reproduced by a listing. The ping slope (1/beta between 4.4 and 10.8 GB/s over six runs) is not resolved by a measurement with 1 microsecond resolution; the wget rate is a lower bound that includes the Python server.",
+    "Runs outside the code lab, reported in the text: the C solver with the iteration limit raised for N = 200 (31,946 sweeps), N = 500 (106,269 sweeps, 37 s) and N = 1000 (191,001 sweeps, 634 s); the check that the coefficient of the mode p = q = N is below 1e-17 for N = 16 and 32; the solutions of exercises 1 to 6. The residuals of the N = 1000 run are copied into modal_big.py.",
+    "The modal check and end_prediction.py use NumPy; sweep counts agree with the C solver for N = 8, 16, 32, 64 (and N = 100 and 200 in separate runs). The constant a = 4/pi^2 = 0.40528 is the limit of A/(1-rho) (0.410, 0.406, 0.406, 0.405 for N = 8 to 64); the derivation of the limit is given in the text and checked against the exact discrete c_11 values reported by the reviewer. Equation (4.7) with a = 4/pi^2 fails at N = 1000 (26.5 percent low) because the stop precedes the end of the transient; this attribution is supported by the leading-mode residual at the stop (7.79e-7 against 1.00e-6) but the transient length was not derived exactly.",
+    "Equation (4.8), the error as residual over (1 - rho), was tested at N = 16 (1.7 percent above the exact error) and N = 1000 (22 percent above); it is an asymptotic-range estimate and not a bound. The max-norm constant of (I - B)^-1 (23.15, 84.43, 320.18, 1244.31 for N = 8, 16, 32, 64) was recomputed by the author in a separate run and agrees with the reviewer.",
+    "POSIX.1-2017 XBD 11.1.10, the Bash manual (Signals, Exit Status), proc_pid_statm(5), clone(2) and POSIX.1-2024 section 2.9.2 were opened for review round 1 and are cited for the statements listed in the references.",
+    "The lecture's wc output 4 11 61 for file2: the four lines as displayed have 60 bytes; the extra byte of the slide is unresolved.",
+    "ASR errors in the machine transcript corrected from slides: 'Ved' (transcript: 'with'), 'grape' = grep, 'short' = sort, 'unique' = uniq, 'seek top' = SIGSTOP, 'SWA upon' = swapon, 'secure cell' = secure shell, 'PS' = ps, 'slip' = sleep, 'Yello' is the slide's own spelling. The slide spells 'tallented' and 'Pitter'; the chapter's file3 uses 'talented' for a line that no output prints.",
+    "Timestamps are section anchors from local speech-recognition segment times and locate topic changes to within a few seconds. The W1L5 title says 'Text Processing and File Management' but its spoken content is process management and text processing; file management belongs to W1L3 and W1L4."
+  ],
+  "lecture_corrections": [
+    "sleep does not put the CPU into an idle state; the process blocks (state S).",
+    "A preempted process stays in state R; sleeping means waiting for an event (the spoken explanation differs from the slide).",
+    "A zombie owns no user memory; it holds a process-table slot and kernel bookkeeping with PID, status and resource usage (spoken explanation differs from the slide).",
+    "ps -e lists existing processes only; a reaped killed process is not listed.",
+    "grep -r PATTERN * skips names that begin with a dot; use . instead of *.",
+    "awk '/M/' is a substring match on the whole line, not a test of the third field.",
+    "meminfo is the file /proc/meminfo, not a command (df is listed with the memory commands but reports disk space, as the slide says).",
+    "The used column of the lecture's top screen is total - free - buff/cache; current free(1) defines it as total - available.",
+    "wc on the lecture's file2: 60 bytes for the displayed text against the slide's 61 (unresolved)."
+  ],
+  "lecture_extensions": [
+    "sort -n ignores exponents; residual logs need sort -g (the lecture mentions numerical sorting without detail).",
+    "The loopback block is 127.0.0.0/8; the lecture names 127.0.0.1 as the default address.",
+    "one process or thread per core is a binding choice made with the affinity mask; the default allows all processors.",
+    "multitasking, multiprocessing and multithreading are defined with the Linux mechanisms (clone(2))."
+  ],
+  "sections": [
+    {
+      "section": "The objects of the chapter and the running case",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None; the running case (residual history of a solver run) is not in the lectures.",
+      "research_extension": "POSIX.1-2017 Base Definitions 3.206 (line).",
+      "teaching_construction": "Formal model: byte stream, line, filter, pipeline as composition, process, signal; Jacobi running case; jacobi_log.c; machine and tool versions.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "Processes, states and signals",
+      "video_id": "S4XYOjSoAQE",
+      "start": 6.0,
+      "end": 1247.0,
+      "lecture_material": "Process definition and attributes; background and foreground, & and fg; states R, S, T, Z; ps, ps -e, ps -ef; top; kill and signals; multitasking, multiprocessing, multithreading.",
+      "research_extension": "POSIX shell sections 2.8.2, 2.9.3; ps(1), top(1), kill(1), signal(7), wait(2), sched_setaffinity(2), proc_pid_stat(5), GNU coreutils nohup.",
+      "teaching_construction": "Multitasking, multiprocessing and multithreading defined with the kernel mechanisms; jobs_demo.sh (background job, nohup, SIGHUP, exit statuses 129 and 143); states.c (states R, S, T, Z, signals, handler, sigaction on SIGKILL and SIGSTOP, two busy loops on one processor); arithmetic check of the lecture's top screen; state diagram.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "grep and the language of a regular expression",
+      "video_id": "S4XYOjSoAQE",
+      "start": 1316.0,
+      "end": 1531.0,
+      "lecture_material": "grep PATTERN file, -n, -r with *.",
+      "research_extension": "POSIX Base Definitions chapter 9; GNU grep manual 3.5, 3.6; Owens, Reppy and Turon 2009; Cox 2007 (Thompson 1968 only through Cox).",
+      "teaching_construction": "Language of a regular expression, search against whole-line match, derivative matcher (regex_derivative.py) compared with grep -E on 127 strings; backtracking against automata timing (blowup.py); back-references and non-regular languages.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "awk: records, fields and pattern-action pairs",
+      "video_id": "S4XYOjSoAQE",
+      "start": 1531.0,
+      "end": 1829.0,
+      "lecture_material": "awk columns, filtering rows, arithmetic, pattern matching on file.txt.",
+      "research_extension": "GNU awk manual chapter 1, 4.5.1, 7.1.4; POSIX awk (arithmetic, comparison of numeric strings).",
+      "teaching_construction": "Pattern-action model; lecture_files.sh reproduces the four lecture programs and shows the /M/ pitfall, field splitting and string against number comparison.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Sorting, counting and the pipeline",
+      "video_id": "S4XYOjSoAQE",
+      "start": 1829.0,
+      "end": 2303.0,
+      "lecture_material": "sort, sort -r, numerical sort, uniq, pipe, wc, head, tail, names diff, paste, tr, sed.",
+      "research_extension": "POSIX Shell Command Language 2.9.2; POSIX sort and uniq; GNU coreutils sort and uniq; GNU grep manual 2.1.6, 2.3; pipe(7).",
+      "teaching_construction": "pipes.sh (SIGPIPE and PIPESTATUS, pipefail, stdout against stderr, uniq adjacency, sort -n against -g, grep statuses, leftmost-longest, BRE against ERE, glob and dot files, back-reference, pipe capacity); logsummary.sh (pipelines on the solver log).",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "From the residual history to the convergence rate",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "Demmel CS267 1996 notes (rho_Jacobi = cos(pi/(n+1)), Gauss-Seidel rho squared).",
+      "teaching_construction": "Eigenmodes of the Jacobi iteration, residual expansion, estimator q_last, rate_check.sh, modal_check.py, end_prediction.py, modal_big.py, error against residual (4.8), N = 1000 run.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Memory: virtual and resident size, and what free reports",
+      "video_id": "TNlzx44rR88",
+      "start": 6.0,
+      "end": 148.0,
+      "lecture_material": "Memory concepts (physical, virtual, swap, paging); free, vmstat, df, swapon, meminfo.",
+      "research_extension": "free(1), proc_meminfo(5), proc_pid_status(5), vmstat(8), swapon(8), kernel proc documentation, GNU coreutils df.",
+      "teaching_construction": "Memory prediction 16 (N+2)^2 bytes; memory_model.c (VmSize against VmRSS, first touch); meminfo_check.py (columns of free from /proc/meminfo); used definition against the lecture's top numbers.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Networking: interfaces, round-trip time and remote login",
+      "video_id": "TNlzx44rR88",
+      "start": 148.0,
+      "end": 718.0,
+      "lecture_material": "Loopback and physical interfaces; ping, ip, ssh, wget, scp; remote login example.",
+      "research_extension": "RFC 1122 3.2.1.3, RFC 792, RFC 4251, ping(8), ip(8), ssh(1), scp(1), OpenSSH 9.0 release notes.",
+      "teaching_construction": "Loopback round-trip fit of alpha and beta (loopback.sh), wget through http.server on loopback, ssh -G and local scp (ssh_tools.sh).",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "What the chapter establishes and what it does not",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "None.",
+      "teaching_construction": "Table 4.1 of lecture claims and their status; list of what is established and left out.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Exercises",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "None.",
+      "teaching_construction": "Six exercises with full solutions: derive, compute, counterexample, diagnose an assumption, design judgment, implementation and measurement.",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "Lecture W1L5 recording",
+      "url": "https://www.youtube.com/watch?v=S4XYOjSoAQE",
+      "supports": "Process management, text processing commands.",
+      "page_checked": "slide frames listed in frames_viewed"
+    },
+    {
+      "title": "Lecture W1L6 recording",
+      "url": "https://www.youtube.com/watch?v=TNlzx44rR88",
+      "supports": "Memory and networking commands.",
+      "page_checked": "slide frames listed in frames_viewed"
+    },
+    {
+      "title": "POSIX.1-2017 Base Definitions, chapter 9 Regular Expressions and section 3.206",
+      "url": "https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap09.html",
+      "supports": "9.1 leftmost-longest matching rule; 9.3.5 range expressions specified only in the POSIX locale; BRE back-references; ERE grammar without back-references; 3.206 definition of a line (V1_chap03).",
+      "page_checked": "9.1, 9.3, 9.3.5, 9.4, 9.5.3 and 3.206 read as text"
+    },
+    {
+      "title": "POSIX.1-2017 Shell Command Language, 2.8.2, 2.9.2, 2.9.3",
+      "url": "https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html",
+      "supports": "Pipeline: stdout to stdin as if by creating a pipe; exit status of last command; shell may wait for all commands; asynchronous lists, stdin from /dev/null when job control is disabled, $!; exit status greater than 128 for a signal-terminated command.",
+      "page_checked": "2.8.2, 2.9.2, 2.9.3"
+    },
+    {
+      "title": "POSIX.1-2017 utilities awk, sort, uniq, grep",
+      "url": "https://pubs.opengroup.org/onlinepubs/9699919799/utilities/awk.html",
+      "supports": "awk arithmetic follows ISO C floating point; sort -n initial numeric string.",
+      "page_checked": "text sections on expressions and options"
+    },
+    {
+      "title": "GNU grep manual",
+      "url": "https://www.gnu.org/software/grep/manual/grep.html",
+      "supports": "2.1.6 -r searches the working directory without a file operand; 2.3 exit status 0, 1, 2; 3.5 back-references; 3.6 BRE against ERE differences.",
+      "page_checked": "2.1.6, 2.3, 3.5, 3.6"
+    },
+    {
+      "title": "GNU awk manual",
+      "url": "https://www.gnu.org/software/gawk/manual/gawk.html",
+      "supports": "Chapter 1 pattern-action rules; 4.5.1 default field splitting; 7.1.4 BEGIN and END; uninitialized variables are zero.",
+      "page_checked": "chapter 1, 4.5.1, 7.1.4"
+    },
+    {
+      "title": "GNU coreutils manual: sort, uniq, nohup, df",
+      "url": "https://www.gnu.org/software/coreutils/manual/html_node/sort-invocation.html",
+      "supports": "sort -n does not recognize exponential notation, -g converts a prefix to floating point; uniq detects only adjacent repeats; nohup ignores hangup and writes nohup.out; df reports file-system space.",
+      "page_checked": "sort, uniq, nohup, df invocation pages"
+    },
+    {
+      "title": "Owens, Reppy and Turon, Regular-expression derivatives re-examined, J. Funct. Program. 19(2) 2009, 173-190",
+      "url": "https://www.ccs.neu.edu/home/turon/re-deriv.pdf",
+      "supports": "Definitions 2.1 and 2.2 (syntax, language); section 3.1 derivative rules due to Brzozowski; section 3.2 matching by derivatives.",
+      "page_checked": "sections 1 to 3 read from the PDF; bibliographic data checked in Crossref"
+    },
+    {
+      "title": "Cox, Regular Expression Matching Can Be Simple And Fast, 2007",
+      "url": "https://swtch.com/~rsc/regexp/regexp1.html",
+      "supports": "Backtracking against Thompson NFA on a?^n a^n; Thompson NFA O(mn); GNU grep and GNU awk build DFAs; back-references are not regular and need exponential search in the worst case; Thompson 1968 described.",
+      "page_checked": "whole article text"
+    },
+    {
+      "title": "Linux man-pages: ps(1), top(1), kill(1), signal(7), wait(2), pipe(7), sched_setaffinity(2), proc_pid_stat(5), proc_pid_status(5), proc_meminfo(5), free(1), vmstat(8), swapon(8), ip(8), ping(8), ssh(1), scp(1)",
+      "url": "https://man7.org/linux/man-pages/man1/ps.1.html",
+      "supports": "Process state codes; default ps selection; %CPU and %MEM; kill default SIGTERM; SIGKILL and SIGSTOP cannot be caught and signal numbers by architecture; zombie definition and NOTES; pipe capacity 65,536 bytes and SIGPIPE; affinity mask; stat state field; VmSize and VmRSS; MemAvailable since 3.14; free columns; vmstat, swapon, ip descriptions; ping default payload; ssh -G; scp uses SFTP.",
+      "page_checked": "each page read as text from man7.org"
+    },
+    {
+      "title": "POSIX.1-2017 Base Definitions 11.1.10 (Modem Disconnect)",
+      "url": "https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap11.html",
+      "supports": "SIGHUP is sent to the controlling process of the terminal.",
+      "page_checked": "11.1.10"
+    },
+    {
+      "title": "GNU Bash manual",
+      "url": "https://www.gnu.org/software/bash/manual/bash.html",
+      "supports": "Signals: an interactive shell resends SIGHUP to all jobs, running or stopped. Exit Status: a command killed by a fatal signal N has status 128+N.",
+      "page_checked": "Signals and Exit Status sections"
+    },
+    {
+      "title": "POSIX.1-2024 Shell Command Language 2.9.2",
+      "url": "https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html",
+      "supports": "The pipefail option and the exit-status rule of a pipeline: zero if all commands returned 0, otherwise the status of the rightmost command that returned non-zero.",
+      "page_checked": "2.9.2 exit status table"
+    },
+    {
+      "title": "proc_pid_statm(5) and clone(2)",
+      "url": "https://man7.org/linux/man-pages/man5/proc_pid_statm.5.html",
+      "supports": "statm values are inaccurate; /proc/pid/smaps and smaps_rollup give accurate values; CLONE_THREAD makes the new task a thread of the caller process.",
+      "page_checked": "statm: field notes; clone: CLONE_THREAD"
+    },
+    {
+      "title": "Linux kernel documentation, The /proc filesystem",
+      "url": "https://docs.kernel.org/filesystems/proc.html",
+      "supports": "MemAvailable estimate and its inputs.",
+      "page_checked": "meminfo section"
+    },
+    {
+      "title": "RFC 1122, Requirements for Internet Hosts",
+      "url": "https://www.rfc-editor.org/rfc/rfc1122.txt",
+      "supports": "3.2.1.3 (p. 31): {127, any} internal host loopback address must not appear outside a host.",
+      "page_checked": "3.2.1.3"
+    },
+    {
+      "title": "RFC 792, Internet Control Message Protocol",
+      "url": "https://www.rfc-editor.org/rfc/rfc792.txt",
+      "supports": "Echo type 8, echo reply type 0 (p. 14); data of the echo must be returned in the reply (p. 15).",
+      "page_checked": "echo or echo reply message"
+    },
+    {
+      "title": "RFC 4251, The Secure Shell (SSH) Protocol Architecture",
+      "url": "https://www.rfc-editor.org/rfc/rfc4251.txt",
+      "supports": "Section 1: transport layer, user authentication and connection protocols.",
+      "page_checked": "section 1"
+    },
+    {
+      "title": "OpenSSH 9.0 release notes",
+      "url": "https://www.openssh.com/txt/release-9.0",
+      "supports": "scp switches from the legacy scp/rcp protocol to SFTP by default; the legacy protocol expanded remote wildcards through the remote shell.",
+      "page_checked": "full notes"
+    },
+    {
+      "title": "Demmel, CS267 notes for lectures 15 and 16 (1996), Solving the Discrete Poisson Equation using Jacobi, SOR, Conjugate Gradients, and the FFT",
+      "url": "https://people.eecs.berkeley.edu/~demmel/cs267/lecture24/lecture24.html",
+      "supports": "Jacobi iteration; rho_Jacobi(n) = cos(pi/(n+1)); approximation 1 - 0.5 (pi/(n+1))^2; Gauss-Seidel rate rho squared.",
+      "page_checked": "section on Jacobi's method"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "N, tol, r_k, u^k, u*, e^k, d^k",
+      "first_section": "model",
+      "definition": "Interior points per side; stopping tolerance 1e-6; residual (largest change in sweep k); iterate after k sweeps; fixed point; error; change per sweep."
+    },
+    {
+      "symbol": "f_i, f_k o ... o f_1",
+      "first_section": "model",
+      "definition": "Filters and the composition that a pipeline computes on streams."
+    },
+    {
+      "symbol": "Sigma, \\mathcal L(r), nu, d_a, |r|",
+      "first_section": "regex",
+      "definition": "Alphabet, language of an expression, empty-string test, derivative by a character, length of an expression."
+    },
+    {
+      "symbol": "theta, v^(s,t), mu_st, c_st, rho",
+      "first_section": "rate",
+      "definition": "pi/(N+1); sine eigenvectors with mode indices s, t; eigenvalues of the Jacobi iteration; modal coefficients; spectral radius cos(pi/(N+1))."
+    },
+    {
+      "symbol": "A, a, rho_hat, rho_hat_window, rho_hat_last, k_end, delta, upright A, b",
+      "first_section": "rate",
+      "definition": "Asymptotic amplitude of the residual; a = A/(1-rho) tends to 4/pi^2; observed factor per sweep and its two estimators; stopping sweep; error target delta; the matrix of the linear system and its right-hand side."
+    },
+    {
+      "symbol": "alpha, beta, m, T_msg, m_1/2",
+      "first_section": "network",
+      "definition": "Latency, inverse bandwidth, message size, time of one message, half-bandwidth message size alpha/beta."
+    }
+  ],
+  "exercises": 6,
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "REVISE (2 blocking, 9 major, 17 minor; extended to 4 blocking, 10 major)",
+      "changes": "B1 SIGHUP goes to the controlling process (POSIX XBD 11.1.10); Bash resends it to its jobs (Bash manual); jobs_demo.sh comment changed. B2 accurate memory values are in smaps and smaps_rollup, not statm. M1 new subsection defining multitasking, multiprocessing and multithreading (W1L5 16:30). M2 hinge step L(d_a r) = d_a L(r) proved for concatenation and star. M3 d^k = (1/4)(b - A u^k) stated; boundary sentence on mixed residual measures rewritten. M4 eq. 4.8 called an estimate; exact 2-norm bound and the max-norm constant 1.40 to 1.45 times 1/(1-rho) added. M5 a = 4/pi^2 derived as a limit; end_prediction.py uses it; predictions restated (0.34, 0.07, 0.01 percent; N = 1000 26.5 percent low). M6 eq. 4.8 referenced as derived in the next subsection; end_prediction.py header renamed. M7 three summary sentences rewritten to match the numbers. M8 observed factor written rho-hat, mode indices s and t, language written mathcal L, error target delta, expression length |r|; rate_check.sh header renamed. M9 the claim that the lecture says top shows GPU use removed (text, Table 4.1, sidecar). Minor: m1 lead, m2 ip wording (neutral form; the older-page claim is not verified), m3 zombie kernel bookkeeping, m4 monotonic sentence, m5 df placement, m6 lecture_extensions, m7 grep -E wording and process-start-up caveat, m8 fifth grid, m9 source edits for exercise 5, m10 clause on rho in 4.6, m11 chapter 5 sentence, m12 identity sentence, m14 POSIX.1-2024 pipefail and Bash exit status, m15 slopes with their printed decimals, m16 dates, m17 least solution of the star equation. m13 length not trimmed: the prose stays at about 14,500 words, near the accepted pilot, and the added derivations are new content; no number was removed. Also: the transcript is no longer mentioned in Table 4.1 text."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT WITH FIXES (0 blocking, 2 major, 7 minor)",
+      "changes": "M1 the per-core remark is refined: the lecture describes an HPC run with one process or thread per core, which is a binding choice and not a scheduler default (text, Table 4.1, lecture_extensions). M2 the three reconstructed phrases (sleep idles the CPU, ps -e lists killed processes, one process per core) are paraphrased without quotation marks in the text and in Table 4.1. m1 multitasking subsection moved after Monitoring. m2 runnable processes wait in R. m3 four symbols renamed to mathcal L and O(|r| n) in the sources. m4 x and y defined. m5 ln(4.053e5) and 2.62e6. m6 beta factor 2.8, half-bandwidth size 13 to 133 kB, wget rate stated as load dependent (1.07 GB/s under load). m7 length not trimmed (the lead said no change needed)."
+    }
+  ],
+  "code_check": {
+    "command": "python code_lab.py --chapter 4",
+    "listings": 17,
+    "all_passed": true
+  }
+}

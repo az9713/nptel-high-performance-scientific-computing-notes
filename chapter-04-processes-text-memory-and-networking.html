@@ -1,0 +1,1367 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="a7a808bfd37b6cae9deb3616cb50f51fe9754ab4f601a66a6a32727b77793419"><title>Processes, text processing, memory and networking from the command line · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>Processes, text processing, memory and networking from the command line</h1>
+<p class="lead">A Jacobi solver for the Laplace problem on an interior grid of \(N=16\) points per side needs 515 sweeps to bring the largest change per sweep below \(10^{-6}\) and writes a log of 12 lines. The same solver at \(N=1000\) holds two grids of 15.3 MiB. In a separate run on this machine it stopped after 191,001 sweeps, 10.6 minutes at 3.3 ms per sweep, with a maximum error of 0.17 (the mode expansion of this chapter gives that error exactly), because its stopping rule bounds the change per sweep and not the error. A run that brings the error itself below \(10^{-6}\) needs about 2.6 million sweeps by the estimate derived in this chapter, which is 2.4 hours at the same speed. A person who starts such a run from a terminal on a shared login node must answer four questions with commands. Is the process alive, and in which state? How fast does the residual fall, and when will the run end? How much memory does the process hold? How do the log and the result reach another machine? The two lectures give the commands (<code>ps</code>, <code>kill</code>, <code>grep</code>, <code>awk</code>, <code>sort</code>, <code>free</code>, <code>ping</code>, <code>ssh</code>, <code>scp</code> and others) and illustrate the process and text commands on small files. This chapter defines the objects that the commands act on, runs the commands on the solver's own log, and tests the lectures' statements against the specifications and against runs on one machine. Among the tests: the residual ratio read from the log agrees with \(\cos(\pi/(N+1))\) to \(2\times10^{-7}\) in relative terms, and the mode expansion of the iteration reproduces the logged residuals in every printed digit, for \(N=16\) and for a separate 10-minute run at \(N=1000\).</p>
+<p class="source-note">Grounded in two recordings of the NPTEL course <em>High Performance Scientific Computing</em> (Prof. Shivasubramanian Gopalakrishnan, IIT Bombay): <a href="https://www.youtube.com/watch?v=S4XYOjSoAQE">W1L5, Mastering Linux Text Processing and File Management</a> (its spoken content is process management followed by text processing), and <a href="https://www.youtube.com/watch?v=TNlzx44rR88">W1L6, Linux Memory and Networking Commands</a>. <strong>Lecture material:</strong> the definition of a process and its attributes; background and foreground processes, <code>&amp;</code> and <code>fg</code>; the process states running, sleeping, stopped and zombie; <code>ps</code>, <code>ps -e</code>, <code>ps -ef</code>, <code>top</code> and <code>kill</code> with the signals SIGTERM, SIGKILL, SIGSTOP and SIGCONT; multitasking, multiprocessing and multithreading; <code>grep</code> with <code>-n</code> and <code>-r</code>; <code>awk</code> for columns, conditions, arithmetic and patterns; <code>sort</code> and <code>uniq</code>; the pipe; <code>wc</code>, <code>head</code>, <code>tail</code>; the names <code>diff</code>, <code>paste</code>, <code>tr</code> and <code>sed</code>; the memory concepts virtual memory, swap space and paging with <code>free</code>, <code>vmstat</code>, <code>df</code>, <code>swapon</code> and <code>meminfo</code>; the loopback and physical network interfaces with <code>ping</code>, <code>ip</code>, <code>ssh</code>, <code>wget</code> and <code>scp</code>. <strong>Research extensions:</strong> POSIX.1-2017 (regular expressions, the shell pipeline and asynchronous list, <code>grep</code>, <code>awk</code>, <code>sort</code>, <code>uniq</code>); the GNU manuals for grep, gawk and coreutils; the Linux man-pages and the kernel documentation of <code>/proc</code> (process states, signals, pipes, <code>wait</code>, memory fields); Owens, Reppy and Turon (2009) for regular-expression derivatives; Cox (2007) for automata against backtracking, with Thompson (1968) known only through Cox; RFC 1122, RFC 792 and RFC 4251; the OpenSSH 9.0 release notes; Demmel's 1996 notes for the Jacobi spectral radius. <strong>Original teaching constructions:</strong> the formal model of streams, filters and pipelines; the derivative matcher and its comparison with <code>grep</code>; the awk estimator of the contraction factor and its derivation from the eigenmodes of the iteration; all programs, measurements and the six exercises.</p>
+
+<h2 id="model">The objects of the chapter and the running case</h2>
+<p>The chapter studies what a person can learn about a running numerical program from the command line. Seven kinds of object occur. A <em>byte stream</em> is a finite sequence of bytes read or written in order. A <em>line</em> is a sequence of zero or more bytes other than the newline byte, followed by one newline byte (POSIX.1-2017, Base Definitions §3.206). A <em>text file</em> is a stream that is a concatenation of lines. A <em>filter</em> is a program that reads one stream (standard input) and writes one stream (standard output); it also has an exit status and may write a second stream (standard error), which this section sets aside. A <em>pipeline</em> of filters \(f_1,\dots,f_k\) is the program that feeds the standard output of \(f_i\) to the standard input of \(f_{i+1}\) for \(i=1,\dots,k-1\). Viewed as a map on streams, its action is the composition \(f_k\circ\cdots\circ f_1\). A <em>process</em> is an executing instance of a program. It has a process identifier (PID), the identifier of its parent (PPID), the identifier of its user (UID) and a <em>state</em>. A <em>signal</em> is a numbered notification that the kernel or another process delivers to a process. The model of this section has one limit that later sections lift: the composition describes which bytes flow, and says nothing about timing, exit statuses, standard error or the concurrency of the stages.</p>
+<p>The running case is the book's Jacobi iteration for the Laplace equation on the unit square. The grid has \((N+2)\times(N+2)\) points of type <code>double</code>, of which the \(N\times N\) interior points are updated. The value is 1 on the top edge and 0 on the other three edges, and the interior starts at 0. One sweep replaces each interior value by the mean of its four neighbours, and the <em>residual</em> \(r_k\) after \(k\) sweeps is the largest absolute change of any interior value in sweep \(k\). The solver stops when \(r_k\lt\mathrm{tol}\) with \(\mathrm{tol}=10^{-6}\). The listing below is the serial kernel of the book with a driver that writes a progress line at a fixed interval of sweeps. Its inputs are \(N\) and that interval, the second argument. Its outputs are the log on standard output and one diagnostic line on standard error. It has no other effect. The run in the listing sends the two streams to two files and prints both, so that the two streams stay visible as two streams.</p>
+<pre><code class="language-c" data-file="jacobi_log.c" data-build="gcc -O2 jacobi_log.c -o jacobi_log" data-run="./jacobi_log 16 50 &gt; solver.log 2&gt; solver.err; echo &quot;--- solver.err&quot;; cat solver.err; echo &quot;--- solver.log&quot;; cat solver.log">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+#define IDX(i, j) ((i) * (N + 2) + (j))
+
+/* One Jacobi sweep: write the 5-point average into the interior of unew,
+   return max |unew - u| over the interior. */
+static double jacobi_step(int N, const double *u, double *unew)
+{
+    double change = 0.0;
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            unew[IDX(i, j)] = 0.25 * (u[IDX(i - 1, j)] + u[IDX(i + 1, j)] +
+                                      u[IDX(i, j - 1)] + u[IDX(i, j + 1)]);
+            double d = unew[IDX(i, j)] - u[IDX(i, j)];
+            if (d &lt; 0.0) d = -d;
+            if (d &gt; change) change = d;
+        }
+    return change;
+}
+
+int main(int argc, char **argv)
+{
+    int N = argc &gt; 1 ? atoi(argv[1]) : 16;
+    int every = argc &gt; 2 ? atoi(argv[2]) : 50;
+    double tol = 1.0e-6;
+    int max_iter = 20000;
+    size_t cells = (size_t)(N + 2) * (N + 2);
+    double *u = calloc(cells, sizeof *u), *unew = calloc(cells, sizeof *unew);
+    if (!u || !unew) return 1;
+    for (int j = 0; j &lt; N + 2; j++) u[IDX(0, j)] = unew[IDX(0, j)] = 1.0;   /* top edge */
+
+    fprintf(stderr, "jacobi_log: two grids of %zu doubles, %zu bytes\n", cells, 2 * cells * sizeof(double));
+    printf("# jacobi N=%d tol=%.1e max_iter=%d\n", N, tol, max_iter);
+    int k = 0;
+    double r = 1.0;
+    while (k &lt; max_iter &amp;&amp; r &gt;= tol) {
+        r = jacobi_step(N, u, unew);
+        double *t = u; u = unew; unew = t;
+        k++;
+        if (k % every == 0) printf("iter %5d residual %.6e\n", k, r);
+    }
+    printf("# %s iter=%d residual=%.6e\n", r &lt; tol ? "converged" : "stopped", k, r);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">--- solver.err
+jacobi_log: two grids of 324 doubles, 5184 bytes
+--- solver.log
+# jacobi N=16 tol=1.0e-06 max_iter=20000
+iter    50 residual 3.960505e-03
+iter   100 residual 1.296030e-03
+iter   150 residual 5.303838e-04
+iter   200 residual 2.235469e-04
+iter   250 residual 9.458274e-05
+iter   300 residual 4.006077e-05
+iter   350 residual 1.697280e-05
+iter   400 residual 7.191545e-06
+iter   450 residual 3.047196e-06
+iter   500 residual 1.291163e-06
+# converged iter=515 residual=9.979422e-07</code></pre>
+<p>The log has a header line that records \(N\), the tolerance and the iteration limit; ten progress lines, one per 50 sweeps; and a final line that records that the run converged after 515 sweeps with residual \(9.979422\times10^{-7}\). The diagnostic line on standard error reports the memory of the two grids: \(324=18^2\) values per grid and \(5184=2\cdot324\cdot8\) bytes. Every later section works on this log or on the process that wrote it.</p>
+<p>All measurements in the chapter come from one machine: an Intel Core i5-12450H laptop under Windows 11, a hybrid processor with 4 performance cores (two hardware threads each) and 4 efficiency cores (one thread each), that is 8 cores and 12 logical processors (Intel ARK). The programs run in a WSL 2 Ubuntu 24.04 guest, which presents the processor as 6 cores of 2 threads; that view is synthetic. The guest sees 15 GB of memory, and the programs were built with gcc 13.3. The lectures ran on a different system: the prompts in the slides read <code>root@localhost</code> and the <code>top</code> screen reports 3,861,052 KiB of memory. The tool versions below matter in two places, the definition of <code>used</code> in <code>free</code> and the behaviour of <code>scp</code>. The listing prints them as of 26 October 2026.</p>
+<pre><code class="language-bash" data-file="machine.sh" data-run="bash machine.sh" data-check="returncode">echo "kernel:  $(uname -sr)"
+echo "gawk:    $(awk --version | head -n 1)"
+echo "grep:    $(grep --version | head -n 1)"
+echo "sed:     $(sed --version | head -n 1)"
+echo "sort:    $(sort --version | head -n 1)"
+echo "ps:      $(ps --version 2&gt; /dev/null)"
+echo "ssh:     $(ssh -V 2&gt;&amp;1)"
+echo "locales: $(locale -a | tr '\n' ' ')"
+echo "page size: $(getconf PAGESIZE) bytes"
+free -m | awk 'NR == 2 || NR == 3 {print $1, $2}'
+if command -v meminfo &gt; /dev/null; then echo "meminfo: a command"; else echo "meminfo: not a command; the fields are in /proc/meminfo"; fi
+</code></pre>
+<pre><code class="output">kernel:  Linux 6.6.87.2-microsoft-standard-WSL2
+gawk:    GNU Awk 5.2.1, API 3.2, PMA Avon 8-g1, (GNU MPFR 4.2.1, GNU MP 6.3.0)
+grep:    grep (GNU grep) 3.11
+sed:     sed (GNU sed) 4.9
+sort:    sort (GNU coreutils) 9.4
+ps:      ps from procps-ng 4.0.4
+ssh:     OpenSSH_9.6p1 Ubuntu-3ubuntu13.19, OpenSSL 3.0.13 30 Jan 2024
+locales: C C.utf8 POSIX 
+page size: 4096 bytes
+Mem: 15829
+Swap: 4096
+meminfo: not a command; the fields are in /proc/meminfo</code></pre>
+<p>Programs whose output cannot vary are checked byte for byte. Four listings report timings, memory readings or version strings that change from run to run or from machine to machine; they are checked only by their return code, and the output printed under them is one sample run on this machine. The prose says so at each of the timing and memory listings and gives the range that repeated runs produced.</p>
+
+<h2 id="processes">Processes, states and signals <a class="timestamp" href="https://www.youtube.com/watch?v=S4XYOjSoAQE&amp;t=6s">W1L5 0:06</a></h2>
+<p>The lecture defines a process as an executing instance of a program and lists its attributes: the PID, the PPID, the UID and the state (slide at W1L5 0:40). Process management, in the lecture's words, consists of creation, monitoring and control. This chapter treats monitoring and control. Chapter 2 treats creation (<code>fork</code>, <code>exec</code>, <code>wait</code>) and the kernel's scheduler, and chapter 5 uses exit statuses and <code>$!</code> inside shell scripts; signals and job control are treated only here.</p>
+
+<h3>Background and foreground</h3>
+<p>The lecture distinguishes two kinds of process. A foreground process occupies the terminal until it ends. A background process lets the terminal accept further commands. The lecture starts a background process by ending a command with <code>&amp;</code>, as in <code>sleep 100 &amp;</code>, and the shell answers with a job number and a PID (<code>[1] 19883</code> on the slide). It brings the job back with <code>fg %1</code>. POSIX defines the mechanism. A command terminated by <code>&amp;</code> runs as an <em>asynchronous list</em>: the shell does not wait for it, and the PID of its last command becomes available as <code>$!</code> (POSIX.1-2017, Shell Command Language §2.9.3). If job control is disabled, as in a script, the standard input of the asynchronous command is <code>/dev/null</code>; if job control is enabled, as in an interactive shell, the standard input remains the terminal. A background process that then reads the terminal receives SIGTTIN, whose default action is to stop it (signal(7)). The lecture describes <code>sleep</code> as putting the CPU into an idle state; that needs one correction. <code>sleep</code> blocks the calling process until the time has passed. The process uses no processor time and is in the sleeping state, but the processor is idle only if no other process is runnable.</p>
+<p>A background process still belongs to the terminal's session. When the terminal closes, the kernel sends SIGHUP to the controlling process of the terminal, the shell (POSIX.1-2017, General Terminal Interface §11.1.10). An interactive Bash then resends SIGHUP to all its jobs, running or stopped (Bash manual, "Signals"), and the default action of SIGHUP is to terminate. <code>nohup</code> runs a command with hangup signals ignored, so that it continues after logout; if its standard output is a terminal, the output goes to <code>nohup.out</code> (GNU coreutils manual, <code>nohup</code>). The script below starts one ordinary background job and one job under <code>nohup</code>, sends SIGHUP to both, and reports what happens. It inspects only processes that it started, through the PIDs it captured in <code>$!</code>. Its outputs do not vary from run to run, so the check is exact. The lecture's <code>fg</code> is not part of the script, because <code>fg</code> needs an interactive terminal with job control, which the code lab does not provide.</p>
+<pre><code class="language-bash" data-file="jobs_demo.sh" data-run="bash jobs_demo.sh">cd "$(mktemp -d /tmp/hpsc-demo.XXXXXX)"
+
+sleep 30 &amp;                      # an ordinary background job
+plain=$!
+nohup sleep 30 &gt; /dev/null 2&gt;&amp;1 &amp;   # the same job, started under nohup
+immune=$!
+sleep 0.2
+
+echo "parent of the background job is this shell: $([ "$(ps -o ppid= -p $plain | tr -d ' ')" = "$$" ] &amp;&amp; echo yes || echo no)"
+echo "state of the two jobs: $(ps -o state= -p $plain) $(ps -o state= -p $immune)"
+echo "standard input of the background job: $(readlink /proc/$plain/fd/0)"
+
+kill -HUP $plain $immune        # what the shell sends its jobs when the terminal closes
+sleep 0.2
+for name in plain immune; do
+    pid=${!name}
+    if kill -0 $pid 2&gt; /dev/null; then echo "$name job after SIGHUP: alive"; else echo "$name job after SIGHUP: gone"; fi
+done
+wait $plain 2&gt; /dev/null; echo "wait status of the plain job: $?"
+
+kill $immune                    # SIGTERM, the default signal of kill
+wait $immune 2&gt; /dev/null; echo "wait status of the nohup job after SIGTERM: $?"
+</code></pre>
+<pre><code class="output">parent of the background job is this shell: yes
+state of the two jobs: S S
+standard input of the background job: /dev/null
+plain job after SIGHUP: gone
+immune job after SIGHUP: alive
+wait status of the plain job: 129
+wait status of the nohup job after SIGTERM: 143</code></pre>
+<p>The five reports match the definitions. The parent of the background job is the shell that started it. Both jobs are in the sleeping state. The standard input of the job in a script is <code>/dev/null</code>. After SIGHUP the plain job is gone and the <code>nohup</code> job is alive. POSIX requires the exit status of a command that a signal terminated to be greater than 128 (POSIX.1-2017, Shell Command Language §2.8.2), and Bash reports 128 plus the signal number (Bash manual, "Exit Status"): 129 for SIGHUP and 143 for SIGTERM (\(128+15\)). The same rule explains the status 141 in a later section. For a run of hours on a cluster, <code>nohup</code> is the minimum, and chapter 30 treats the batch scheduler, which a shared login node requires for long jobs.</p>
+
+<h3>States</h3>
+<p>The lecture's slide at W1L5 6:40 lists four states with their <code>ps</code> letters: running (R), sleeping (S), stopped (T) and zombie (Z). The slide's definitions are correct: running means running or ready to run; sleeping means waiting for an event such as the completion of input or output; stopped means stopped by a signal such as SIGSTOP; a zombie has finished but still has an entry in the process table, awaiting cleanup by its parent. The spoken explanation differs from the slide in two places. The speaker says that a process goes to the waiting state because a higher-priority process arrives, and that a zombie is a finished process whose memory has not been cleaned. Both statements are tested below. The <code>ps</code> manual lists further codes: D, uninterruptible sleep, usually input or output; I, an idle kernel thread; and t, stopped by a debugger.</p>
+<figure>
+<svg viewBox="0 0 740 252" role="img" aria-labelledby="fig-states-title fig-states-desc" font-family="system-ui, sans-serif" font-size="12" fill="currentColor">
+<title id="fig-states-title">States of a Linux process and the events that change them</title>
+<desc id="fig-states-desc">Five boxes. A new process becomes running or runnable (R). R goes to interruptible sleep (S) when it blocks on a read, a pause or a sleep, and S returns to R when the event or a signal arrives. R goes to stopped (T) on SIGSTOP or SIGTSTP and returns on SIGCONT. R goes to zombie (Z) when the process exits and its parent has not yet called wait. A call to wait by the parent removes the entry.</desc>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+<g fill="none" stroke="currentColor" stroke-width="1.4">
+<rect x="20" y="108" width="100" height="34" rx="4"/>
+<rect x="275" y="104" width="170" height="42" rx="4"/>
+<rect x="275" y="14" width="170" height="42" rx="4"/>
+<rect x="275" y="194" width="170" height="42" rx="4"/>
+<rect x="560" y="104" width="170" height="42" rx="4"/>
+<rect x="560" y="194" width="170" height="42" rx="4"/>
+</g>
+<g text-anchor="middle">
+<text x="70" y="130">new process</text>
+<text x="360" y="130">R  running or runnable</text>
+<text x="360" y="40">S  interruptible sleep</text>
+<text x="360" y="220">T  stopped</text>
+<text x="645" y="130">Z  zombie</text>
+<text x="645" y="220">entry removed</text>
+</g>
+<g stroke="currentColor" stroke-width="1.4" fill="none" marker-end="url(#arr)">
+<line x1="120" y1="125" x2="273" y2="125"/>
+<line x1="330" y1="104" x2="330" y2="58"/>
+<line x1="390" y1="58" x2="390" y2="102"/>
+<line x1="330" y1="148" x2="330" y2="192"/>
+<line x1="390" y1="192" x2="390" y2="148"/>
+<line x1="447" y1="125" x2="558" y2="125"/>
+<line x1="645" y1="148" x2="645" y2="192"/>
+</g>
+<g font-size="11">
+<text x="196" y="118" text-anchor="middle">fork</text>
+<text x="324" y="84" text-anchor="end">blocks: read, pause, sleep</text>
+<text x="396" y="84">event or signal arrives</text>
+<text x="324" y="174" text-anchor="end">SIGSTOP, SIGTSTP</text>
+<text x="396" y="174">SIGCONT</text>
+<text x="502" y="118" text-anchor="middle">exit, no wait yet</text>
+<text x="651" y="174">parent calls wait</text>
+</g>
+</svg>
+<figcaption>Figure 4.1. The four states of the lecture and the events that connect them. A process in S also stops on SIGSTOP and leaves T on SIGCONT; the figure draws that transition from R only. A parent that ends before it has waited for a zombie leaves it to init, which waits for it (wait(2), NOTES).</figcaption>
+</figure>
+<p>The program below creates one child per state and reads each state the way <code>ps</code> does, from the third field of <code>/proc/PID/stat</code> (proc_pid_stat(5)). A busy loop never blocks. A process in <code>pause()</code> sleeps until a signal arrives. SIGSTOP and SIGCONT stop and resume the sleeper. A child that exits at once and is not waited for becomes a zombie, and the program also tests whether its <code>/proc/PID/status</code> has a <code>VmRSS</code> line, the line that reports resident memory. The second part sends SIGTERM and SIGKILL, shows a SIGTERM that a process handles, and asks the kernel to install a handler for SIGKILL and for SIGSTOP. The third part pins two busy loops to logical processor 0 with <code>sched_setaffinity</code> and reads their states. Every output line is the same in every run, because each state is read 200 ms after the event that causes it and nothing else competes for the states. The check is exact.</p>
+<pre><code class="language-c" data-file="states.c" data-build="gcc -O2 states.c -o states" data-run="./states">#define _GNU_SOURCE
+#include &lt;errno.h&gt;
+#include &lt;sched.h&gt;
+#include &lt;signal.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;sys/wait.h&gt;
+#include &lt;time.h&gt;
+#include &lt;unistd.h&gt;
+
+/* State letter of a process: the field after the command name in /proc/PID/stat. */
+static char state_of(pid_t pid)
+{
+    char path[64], buf[512];
+    snprintf(path, sizeof path, "/proc/%d/stat", (int)pid);
+    FILE *f = fopen(path, "r");
+    if (!f) return '?';
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    char *p = strrchr(buf, ')');          /* the command name may contain blanks */
+    return p ? p[2] : '?';
+}
+
+/* 1 if /proc/PID/status has a VmRSS line (a process that still owns user memory), else 0. */
+static int has_vmrss(pid_t pid)
+{
+    char path[64], line[256];
+    int found = 0;
+    snprintf(path, sizeof path, "/proc/%d/status", (int)pid);
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    while (fgets(line, sizeof line, f))
+        if (strncmp(line, "VmRSS:", 6) == 0) found = 1;
+    fclose(f);
+    return found;
+}
+
+static void settle(void)                  /* give the children 200 ms to reach their steady state */
+{
+    struct timespec ts = {0, 200 * 1000 * 1000};
+    nanosleep(&amp;ts, NULL);
+}
+
+static volatile sig_atomic_t got_term;
+static void on_term(int sig) { (void)sig; got_term = 1; }
+
+static pid_t spawn(int kind)
+{
+    pid_t pid = fork();
+    if (pid) return pid;
+    if (kind == 0) { volatile unsigned long x = 0; for (;;) x++; }      /* busy */
+    if (kind == 1) { for (;;) pause(); }                                /* sleeping */
+    if (kind == 2) _exit(0);                                            /* ends at once */
+    signal(SIGTERM, on_term);                                           /* kind 3: handles SIGTERM */
+    while (!got_term) pause();
+    _exit(7);
+}
+
+static void report(const char *what, pid_t pid)
+{
+    int st;
+    waitpid(pid, &amp;st, 0);
+    if (WIFSIGNALED(st))
+        printf("%-28s killed by signal %d (%s)\n", what, WTERMSIG(st), strsignal(WTERMSIG(st)));
+    else
+        printf("%-28s exited with status %d\n", what, WEXITSTATUS(st));
+}
+
+int main(void)
+{
+    pid_t busy = spawn(0), sleeper = spawn(1);
+    settle();
+    printf("busy loop: %c   waiting in pause(): %c\n", state_of(busy), state_of(sleeper));
+    kill(sleeper, SIGSTOP); settle();
+    printf("after SIGSTOP: %c\n", state_of(sleeper));
+    kill(sleeper, SIGCONT); settle();
+    printf("after SIGCONT: %c\n", state_of(sleeper));
+
+    pid_t zombie = spawn(2);
+    settle();
+    printf("child that exited, not waited for: %c, has a VmRSS line: %s\n",
+           state_of(zombie), has_vmrss(zombie) ? "yes" : "no");
+    report("zombie after waitpid:", zombie);
+    printf("/proc entry of the zombie after waitpid: %s\n", state_of(zombie) == '?' ? "gone" : "present");
+
+    kill(sleeper, SIGTERM); report("sleeper, SIGTERM:", sleeper);
+    kill(busy, SIGKILL);    report("busy loop, SIGKILL:", busy);
+
+    pid_t handler = spawn(3);
+    settle();
+    kill(handler, SIGTERM); report("handler installed, SIGTERM:", handler);
+
+    struct sigaction sa;
+    memset(&amp;sa, 0, sizeof sa);
+    sa.sa_handler = on_term;
+    errno = 0; sigaction(SIGKILL, &amp;sa, NULL); printf("sigaction(SIGKILL): %s\n", strerror(errno));
+    errno = 0; sigaction(SIGSTOP, &amp;sa, NULL); printf("sigaction(SIGSTOP): %s\n", strerror(errno));
+
+    pid_t a = spawn(0), b = spawn(0);               /* two busy loops share one logical processor */
+    cpu_set_t one;
+    CPU_ZERO(&amp;one); CPU_SET(0, &amp;one);
+    sched_setaffinity(a, sizeof one, &amp;one);
+    sched_setaffinity(b, sizeof one, &amp;one);
+    settle(); settle();
+    printf("two busy loops on processor 0: %c %c\n", state_of(a), state_of(b));
+    kill(a, SIGKILL); kill(b, SIGKILL); waitpid(a, NULL, 0); waitpid(b, NULL, 0);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">busy loop: R   waiting in pause(): S
+after SIGSTOP: T
+after SIGCONT: S
+child that exited, not waited for: Z, has a VmRSS line: no
+zombie after waitpid:        exited with status 0
+/proc entry of the zombie after waitpid: gone
+sleeper, SIGTERM:            killed by signal 15 (Terminated)
+busy loop, SIGKILL:          killed by signal 9 (Killed)
+handler installed, SIGTERM:  exited with status 7
+sigaction(SIGKILL): Invalid argument
+sigaction(SIGSTOP): Invalid argument
+two busy loops on processor 0: R R</code></pre>
+<p>The first block confirms the slide: R for the busy loop, S for the process in <code>pause()</code>, T after SIGSTOP and S again after SIGCONT, since the process is still waiting. The zombie shows the correction of the spoken statement. The child has finished, its state is Z, and its status file has no <code>VmRSS</code> line: it owns no user memory. The kernel keeps its PID, its termination status and its resource-usage information so that the parent can collect them with <code>wait</code>, and the zombie occupies one slot of the process table until then; when the table is full, no process can be created (wait(2), NOTES). After <code>waitpid</code> the <code>/proc</code> entry is gone. A zombie therefore costs a process-table slot and its kernel bookkeeping, and no user memory, and the remedy is to make the parent wait, or to end the parent so that init waits (wait(2)).</p>
+<p>The second block shows the lecture's signals. <code>kill</code> without an argument sends SIGTERM, number 15, whose default action is to terminate the process; <code>kill</code>(1) advises SIGTERM before SIGKILL because a process may install a handler for SIGTERM and clean up, as the fourth child does, which exits with status 7 instead of dying. SIGKILL, number 9, cannot be caught, blocked or ignored, and neither can SIGSTOP (signal(7)): <code>sigaction</code> fails with <code>EINVAL</code>, "Invalid argument", for both. The lecture's numbers 15, 9, and the pair of stop and continue agree with the manual for x86 and ARM: SIGSTOP is 19 and SIGCONT is 18, and the numbers differ on Alpha, SPARC, MIPS and PA-RISC (signal(7)), so scripts should use the names.</p>
+<p>The third block tests the other spoken statement. Two busy loops share one logical processor, so at any instant at most one of them runs, and both are in state R. A preempted process stays runnable; it does not enter the sleeping state. The sleeping state means waiting for an event, and the scheduler's preference for another process does not create such an event. The same block makes precise the lecture's description of an HPC run in which each process, or each thread, works on one core. That layout is a choice, not a default: the affinity mask of a thread is the set of processors on which it may run, and the default allows all of them; <code>sched_setaffinity</code> narrows it (sched_setaffinity(2)). Without such a call, the kernel places and moves runnable threads among the allowed processors. Chapter 11 returns to the choice of binding for OpenMP threads, and chapter 8 treats concurrency.</p>
+
+<h3>Monitoring</h3>
+<p>The lecture's monitoring commands are <code>ps</code>, <code>ps -e</code>, <code>ps -ef</code> and <code>top</code>. By default <code>ps</code> selects the processes that have the same effective user ID as the caller and the same terminal; <code>-e</code> selects all processes, and <code>-f</code> adds columns including the parent PID and the command arguments (ps(1)). The slide's <code>ps -e</code> output begins with <code>systemd</code> as PID 1 and <code>kthreadd</code> as PID 2, with kernel threads below it. The lecture presents <code>ps -e</code> as listing all processes, including killed, stopped and zombie ones; that is right for stopped and zombie processes, which exist, and wrong for killed processes once their parent has waited for them, because they no longer exist.</p>
+<p>The <code>top</code> screen on the slide at W1L5 11:26 can be checked against itself. The task line reads 207 total, 1 running, 206 sleeping, 0 stopped, 0 zombie, and \(1+206+0+0=207\). The processor line reads 1.7 us, 0.7 sy, 0.0 ni, 97.3 id, 0.3 wa, 0.0 hi, 0.0 si, 0.0 st, and the eight values add to 100.0. The memory line gives 3,861,052 KiB total, 1,373,776 free, 1,064,472 used and 1,422,804 buffers and cache, and \(1{,}373{,}776+1{,}064{,}472+1{,}422{,}804=3{,}861{,}052\). The first process, <code>gnome-shell</code>, has a resident size of 183,760 KiB, and \(183{,}760/3{,}861{,}052=4.76\,\%\), which the screen prints as 4.8 in the <code>%MEM</code> column. The <code>top</code> manual defines <code>%MEM</code> as the resident size as a share of physical memory, and <code>%CPU</code> as the task's share of the elapsed processor time since the last screen update; for a multi-threaded process that <code>top</code> shows as one task, the value can exceed 100 % (top(1)). The screen has no column for the graphics processor, and the <code>top</code> manual describes none. GPU utilization has its own tools, which chapter 17 introduces.</p>
+
+<h3>Multitasking, multiprocessing and multithreading <a class="timestamp" href="https://www.youtube.com/watch?v=S4XYOjSoAQE&amp;t=990s">W1L5 16:30</a></h3>
+<p>The lecture closes the process topic with three terms, presented as the operating-system support on which OpenMP and MPI programs rest. <em>Multitasking</em> is the execution of several processes over the same period: the kernel switches a processor from one runnable process to another (a context switch), so on \(p\) logical processors at most \(p\) processes run at any instant and the other runnable processes wait in state R. <em>Multiprocessing</em>, in the lecture's sense, is an application made of several processes, each with its own address space, which the kernel schedules and which exchange data through inter-process communication (pipes, signals, sockets, shared memory); an MPI program (chapter 14) has this structure. The word also has a hardware sense, a machine with several processors. <em>Multithreading</em> is one process that contains several threads: the threads share the address space and the open files of the process, and each has its own registers, stack and scheduling state; Linux schedules each thread as a separate task (clone(2), <code>CLONE_THREAD</code>). An OpenMP program (chapter 11) has this structure. The third block of <code>states.c</code> shows multitasking on one processor: two runnable processes share processor 0 and both are in state R.</p>
+
+<h2 id="regex">grep and the language of a regular expression <a class="timestamp" href="https://www.youtube.com/watch?v=S4XYOjSoAQE&amp;t=1316s">W1L5 21:56</a></h2>
+<p>The lecture introduces <code>grep</code> as the command that searches for a string or pattern in files or input streams. Its example file has four lines, two of which contain the word <code>Ved</code>; <code>grep "Ved" file3</code> prints those two lines, <code>grep -n</code> prefixes each with its line number, and <code>grep -r "Ved" *</code> searches the files and directories below the current directory. The lecture calls the argument a string or pattern and does not say what patterns exist. This section defines them.</p>
+
+<h3>The language of an expression</h3>
+<p>Let \(\Sigma\) be a finite alphabet, here the set of characters. A <em>regular expression</em> is built by the grammar \(r,s::=\varnothing\mid\varepsilon\mid a\mid rs\mid r+s\mid r^{*}\) with \(a\in\Sigma\). Its <em>language</em> \(\mathcal L(r)\subseteq\Sigma^{*}\) is the set of strings given by \(\mathcal L(\varnothing)=\varnothing\), \(\mathcal L(\varepsilon)=\{\varepsilon\}\), \(\mathcal L(a)=\{a\}\), \(\mathcal L(rs)=\{uv: u\in \mathcal L(r),\,v\in \mathcal L(s)\}\), \(\mathcal L(r+s)=\mathcal L(r)\cup \mathcal L(s)\) and \(\mathcal L(r^{*})=\{\varepsilon\}\cup \mathcal L(rr^{*})\), an equation whose least solution is \(\mathcal L(r^{*})=\bigcup_{n\ge0}\mathcal L(r)^{n}\) with \(\mathcal L^{0}=\{\varepsilon\}\) and \(\mathcal L^{n+1}=\{uv:u\in \mathcal L,\,v\in \mathcal L^{n}\}\) (Owens, Reppy and Turon 2009, Definitions 2.1 and 2.2). The notation of <code>grep -E</code> abbreviates these operators: \(r|s\) is \(r+s\); \(r?\) is \(\varepsilon+r\); \(r^{+}\) is \(rr^{*}\); <code>.</code> is the sum of all characters; a bracket expression such as <code>[ab]</code> is the sum of its members; an interval such as <code>a{2,3}</code> is a finite sum of concatenations. POSIX writes the same constructs as the extended regular expression (ERE) grammar and, with other escapes, as the basic regular expression (BRE) grammar (POSIX.1-2017, Base Definitions §9.3 to §9.5). The anchors <code>^</code> and <code>$</code> do not describe sets of strings but positions at the start and end of a line.</p>
+<p>What <code>grep</code> does with a language is a search. A line \(\ell\) is <em>selected</em> if \(\ell=xyz\) for some strings \(x,y,z\) with \(y\in \mathcal L(r)\). With the option <code>-x</code> the line is selected only if \(\ell\in \mathcal L(r)\). The two statements are connected by \(\ell\) being selected by \(r\) exactly when \(\ell\in \mathcal L(\texttt{.*(}r\texttt{).*})\). For an expression whose match is wanted, not only the decision, POSIX adds a rule: the search starts at the beginning of the string and stops at the first sequence that matches, "first" meaning "begins earliest", and if several sequences begin there, the longest is matched (POSIX.1-2017, Base Definitions §9.1). The rule matters for <code>grep -o</code> and for <code>sed</code>, which print or replace the match; it does not change which lines <code>grep</code> selects.</p>
+
+<h3>A matcher that is the definition</h3>
+<p>The decision "is \(u\in \mathcal L(r)\)" can be computed from the definition by derivatives. The <em>derivative</em> of a language \(\mathcal L\) by a character \(a\) is \(\partial_a \mathcal L=\{w: aw\in \mathcal L\}\). Two functions on expressions compute it. The function \(\nu\) tests whether \(\varepsilon\in \mathcal L(r)\): \(\nu(\varepsilon)=\nu(r^{*})=\mathrm{true}\), \(\nu(\varnothing)=\nu(a)=\mathrm{false}\), \(\nu(rs)=\nu(r)\wedge\nu(s)\), \(\nu(r+s)=\nu(r)\vee\nu(s)\). The derivative of an expression is</p>
+\[
+\partial_a(\varnothing)=\partial_a(\varepsilon)=\varnothing,\quad
+\partial_a(b)=\begin{cases}\varepsilon&b=a\\ \varnothing&b\ne a,\end{cases}\quad
+\partial_a(r+s)=\partial_a r+\partial_a s,\quad
+\partial_a(r^{*})=(\partial_a r)\,r^{*},
+\tag{4.1}
+\]
+\[
+\partial_a(rs)=\begin{cases}(\partial_a r)\,s+\partial_a s&\nu(r)\\ (\partial_a r)\,s&\text{otherwise,}\end{cases}
+\tag{4.2}
+\]
+<p>(Owens, Reppy and Turon 2009, §3.1, due to Brzozowski 1964; the paper of 1964 was not opened, and its bibliographic data were checked in Crossref). For a string \(u=a_1\cdots a_n\), \(u\in \mathcal L(r)\) exactly when \(\nu(\partial_{a_n}\cdots\partial_{a_1}r)\) holds (§3.2 of the same paper). Two facts carry the proof. The first is the definition: \(u\in \mathcal L(r)\iff\varepsilon\in\partial_u \mathcal L(r)\), where \(\partial_{a_1\cdots a_n}=\partial_{a_n}\circ\cdots\circ\partial_{a_1}\). The second is that the rules compute the derivative of the language, \(\mathcal L(\partial_a r)=\partial_a \mathcal L(r)\), by induction on \(r\). Only concatenation and star need care. If \(aw\in \mathcal L(r)\mathcal L(s)\), either the part from \(\mathcal L(r)\) is \(au'\) with \(u'v=w\) and \(v\in \mathcal L(s)\), so that \(w\in(\partial_a\mathcal L(r))\mathcal L(s)\), or the part from \(\mathcal L(r)\) is empty, which requires \(\varepsilon\in \mathcal L(r)\) and gives \(w\in\partial_a\mathcal L(s)\); this is (4.2). A string of \(\mathcal L(r)^{*}\) that begins with \(a\) has a first non-empty factor \(au'\in \mathcal L(r)\) followed by a string of \(\mathcal L(r)^{*}\), so \(\partial_a\mathcal L(r^{*})=(\partial_a\mathcal L(r))\,\mathcal L(r^{*})\), the last rule of (4.1). Since \(\nu(r)\) is true exactly when \(\varepsilon\in \mathcal L(r)\), the two facts give the matching rule. The listing implements (4.1) and (4.2) for the subset of ERE with characters, <code>.</code>, grouping, <code>|</code>, <code>*</code>, <code>+</code> and <code>?</code>. It enumerates all 127 strings of length 0 to 6 over \(\{a,b\}\), and for seven expressions it compares the set accepted by the derivative matcher with the set of lines that <code>grep -E -x</code> selects. It also compares the lines that plain <code>grep -E</code> selects with the language of \(\texttt{.*(}r\texttt{).*}\), which tests the search identity of the previous subsection. The program is deterministic, so the check is exact. The check covers the strings of length at most 6 and the listed expressions; it is not a proof that <code>grep</code> implements the definition for every expression.</p>
+<pre><code class="language-python" data-file="regex_derivative.py" data-run="python3 regex_derivative.py">"""Check the formal definition of a regular expression against grep -E.
+
+The matcher implements the definition directly: nullable(r) tests whether the empty
+string is in L(r), and deriv(r, a) is the expression for { w : a w in L(r) }.
+A string u is in L(r) exactly when the derivative of r by the characters of u is nullable.
+"""
+import itertools
+import subprocess
+
+# Abstract syntax: ('empty',) no string; ('eps',) the empty string; ('chr', c);
+# ('any',) any one character of the alphabet; ('cat', r, s); ('alt', r, s); ('star', r).
+ALPHABET = "ab"
+
+
+def parse(p):
+    """Parse the ERE subset  a b . ( ) | * + ?  into the syntax above."""
+    pos = 0
+
+    def peek():
+        return p[pos] if pos &lt; len(p) else None
+
+    def alt():
+        nonlocal pos
+        r = cat()
+        while peek() == "|":
+            pos += 1
+            r = ("alt", r, cat())
+        return r
+
+    def cat():
+        r = ("eps",)
+        while peek() not in (None, "|", ")"):
+            r = rep() if r == ("eps",) else ("cat", r, rep())
+        return r
+
+    def rep():
+        nonlocal pos
+        if peek() == "(":
+            pos += 1
+            r = alt()
+            pos += 1                                   # the closing parenthesis
+        elif peek() == ".":
+            pos += 1
+            r = ("any",)
+        else:
+            r = ("chr", p[pos])
+            pos += 1
+        while peek() in ("*", "+", "?"):
+            op = p[pos]
+            pos += 1
+            r = ("star", r) if op == "*" else ("cat", r, ("star", r)) if op == "+" else ("alt", r, ("eps",))
+        return r
+
+    return alt()
+
+
+def nullable(r):
+    k = r[0]
+    if k == "eps" or k == "star":
+        return True
+    if k in ("empty", "chr", "any"):
+        return False
+    if k == "cat":
+        return nullable(r[1]) and nullable(r[2])
+    return nullable(r[1]) or nullable(r[2])             # alt
+
+
+def deriv(r, a):
+    k = r[0]
+    if k in ("empty", "eps"):
+        return ("empty",)
+    if k == "chr":
+        return ("eps",) if r[1] == a else ("empty",)
+    if k == "any":
+        return ("eps",)
+    if k == "alt":
+        return ("alt", deriv(r[1], a), deriv(r[2], a))
+    if k == "star":
+        return ("cat", deriv(r[1], a), r)
+    first = ("cat", deriv(r[1], a), r[2])               # cat
+    return ("alt", first, deriv(r[2], a)) if nullable(r[1]) else first
+
+
+def matches(r, u):
+    for a in u:
+        r = deriv(r, a)
+    return nullable(r)
+
+
+strings = [""] + ["".join(t) for n in range(1, 7) for t in itertools.product(ALPHABET, repeat=n)]
+with open("strings.txt", "w") as f:
+    f.write("\n".join(strings) + "\n")
+
+print(f"{len(strings)} strings over {{a,b}} of length 0 to 6")
+print("pattern          in L(r)  grep -E -x  same | lines grep -E selects  same as L(.*(r).*)")
+for pattern in ["a*b", "(a|b)*abb", "(ab)+|b?", "a.a", "((a|b)(a|b))*", "a*(ba*)*", "bab"]:
+    r = parse(pattern)
+    mine = {u for u in strings if matches(r, u)}
+    out = subprocess.run(["grep", "-E", "-x", pattern, "strings.txt"], capture_output=True, text=True).stdout
+    theirs = set(out.split("\n")[:-1])
+    search = parse(".*(" + pattern + ").*")
+    mine_search = {u for u in strings if matches(search, u)}
+    out = subprocess.run(["grep", "-E", pattern, "strings.txt"], capture_output=True, text=True).stdout
+    theirs_search = set(out.split("\n")[:-1])
+    print(f"{pattern:16s} {len(mine):7d} {len(theirs):11d}  {'yes' if mine == theirs else 'NO':&gt;4s} | "
+          f"{len(theirs_search):21d}  {'yes' if mine_search == theirs_search else 'NO'}")
+</code></pre>
+<pre><code class="output">127 strings over {a,b} of length 0 to 6
+pattern          in L(r)  grep -E -x  same | lines grep -E selects  same as L(.*(r).*)
+a*b                    6           6   yes |                   120  yes
+(a|b)*abb             15          15   yes |                    48  yes
+(ab)+|b?               5           5   yes |                   127  yes
+a.a                    2           2   yes |                    65  yes
+((a|b)(a|b))*         85          85   yes |                   127  yes
+a*(ba*)*             127         127   yes |                   127  yes
+bab                    1           1   yes |                    43  yes</code></pre>
+<p>The derivative matcher and <code>grep</code> select the same strings in all seven rows, both for whole-line matching and for the search identity. The counts can be checked by hand: <code>a*b</code> accepts \(a^kb\) for \(k=0,\dots,5\), six strings; <code>(a|b)*abb</code> accepts the strings that end in <code>abb</code>, \(1+2+4+8=15\) of lengths 3 to 6; <code>((a|b)(a|b))*</code> accepts the strings of even length, \(1+4+16+64=85\); and <code>a.a</code> accepts <code>aaa</code> and <code>aba</code>.</p>
+
+<h3>Cost: automata against backtracking</h3>
+<p>The derivative matcher of the listing is a teaching device and not how <code>grep</code> works. Cox (2007) describes two families of implementations. One simulates a nondeterministic finite automaton built from the expression, the construction that Thompson published in 1968, or builds a deterministic one; Cox lists GNU <code>grep</code> and GNU <code>awk</code> among the implementations that build deterministic automata. The simulation takes time \(O(|r|n)\) for an expression of length \(|r|\) and a text of length \(n\). The other family tries the alternatives one after another and backtracks on failure; Perl and the languages that copied it do this, and Cox's example is the expression \(a?^{n}a^{n}\) (\(n\) optional <code>a</code> followed by \(n\) required ones) against the string \(a^{n}\), on which backtracking takes time exponential in \(n\), while the automaton takes microseconds. The listing repeats the experiment with the backtracking matcher of Python's <code>re</code> module and with <code>grep -E</code>. It times one call of each per \(n\), checks that both report a match, and uses only the return codes for the check. The times printed under it are one sample run on this machine.</p>
+<pre><code class="language-python" data-file="blowup.py" data-run="python3 blowup.py" data-check="returncode">"""Time a backtracking matcher (Python re) and grep -E on the pattern a?^n a^n against a^n."""
+import re
+import subprocess
+import time
+
+print(" n   python re (s)   grep -E process (s)   both match")
+for n in (16, 20, 22, 24, 26):
+    pattern = "a?" * n + "a" * n
+    text = "a" * n
+    t0 = time.perf_counter()
+    py = re.fullmatch(pattern, text) is not None
+    t_py = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    gr = subprocess.run(["grep", "-E", "-x", pattern], input=text + "\n", capture_output=True, text=True).returncode == 0
+    t_gr = time.perf_counter() - t0
+    print(f"{n:2d} {t_py:14.4f} {t_gr:21.4f}   {py and gr}")
+</code></pre>
+<pre><code class="output"> n   python re (s)   grep -E process (s)   both match
+16         0.0017                0.0018   True
+20         0.0288                0.0019   True
+22         0.1205                0.0020   True
+24         0.5043                0.0015   True
+26         2.2845                0.0024   True</code></pre>
+<p>In this sample the Python time grows by a factor of 4.2 to 4.5 for each increase of \(n\) by 2 (0.0288 s, 0.1205 s, 0.5043 s and 2.2845 s at \(n=20,22,24,26\)); in two other runs the factors were 3.9 to 4.3. A time proportional to \(2^{n}\) gives a factor of 4 per step of 2, so the growth is exponential with a base close to 2. The <code>grep</code> process time stays between 1.5 and 2.4 ms in this sample, which is mostly the cost of starting the program. At \(n=26\) the Python time was 2.3 s in this sample and 1.9 s and 1.8 s in the two other runs, which is at least 950 to 1300 times the matching time of <code>grep</code>, because the <code>grep</code> figure is mostly process start-up, for an input of 26 characters; the Python time roughly doubles for every increase of \(n\) by 1. Cox reports the same shape for Perl and states that Thompson's algorithm handles a 100-character input in under 200 microseconds. The lesson for a log parser is limited: a pattern without back-references is safe from this blow-up in <code>grep -E</code>, and the same pattern handed to a backtracking library may not be.</p>
+
+<h3>Where the notation leaves the regular languages</h3>
+<p>A back-reference such as <code>\1</code> matches the text that an earlier group matched. GNU <code>grep</code> accepts it in both syntaxes (GNU grep manual, §3.5), and POSIX specifies it for BRE; the ERE grammar of POSIX has no back-reference. The pattern <code>^(.+)\1$</code> selects the strings of the form \(ww\), the squares. The set of squares is not a regular language, so no expression built from \(\varnothing,\varepsilon,a,rs,r+s,r^{*}\) describes it, and a matcher for back-references cannot be a finite automaton. Cox states that, with back-references, the best known implementations need exponential search in the worst case. The shell script of the next section shows the pattern at work. The other places where GNU <code>grep</code> departs from the model are these. In BRE the characters <code>?</code>, <code>+</code>, <code>{</code>, <code>|</code>, <code>(</code> and <code>)</code> lose their special meaning (GNU grep manual, §3.6). POSIX BRE has the groups <code>\(</code> and <code>\)</code> and the intervals <code>\{</code> and <code>\}</code>; the forms <code>\+</code>, <code>\?</code> and <code>\|</code> are GNU extensions, and POSIX.1-2017 §9.3 defines none of the three. A bracket range such as <code>[a-z]</code> is defined by the collation order of the locale; POSIX specifies it only for the POSIX locale (Base Definitions §9.3.5). The machine used here offers only the locales C, C.utf8 and POSIX, so the chapter does not test other collation orders. A script that parses a log should set <code>LC_ALL=C</code> so that the character classes and the sort order do not depend on the user's locale.</p>
+
+<h2 id="awk">awk: records, fields and pattern&ndash;action pairs <a class="timestamp" href="https://www.youtube.com/watch?v=S4XYOjSoAQE&amp;t=1531s">W1L5 25:31</a></h2>
+<p>The lecture describes <code>awk</code> as a tool for pattern scanning and text extraction and demonstrates four uses on a file of three lines, each with a name, an age and a letter (<code>John 25 M</code>, <code>Alice 30 F</code>, <code>Bob 28 M</code>): printing columns 1 and 3, printing the first column of the rows whose third column is <code>M</code>, printing the name and twice the age, and printing the lines that match <code>/John/</code> or <code>/M/</code>. The lecture does not state the execution model that makes the four programs instances of one rule.</p>
+<p>An <code>awk</code> program is a list of <em>pattern&ndash;action pairs</em>, written <code>pattern { action }</code> (GNU awk manual, chapter 1, "Getting Started with awk"). The program reads its input as a sequence of <em>records</em>, by default the lines. For each record it splits the text into <em>fields</em>, sets the variable <code>$0</code> to the whole record, <code>$1</code>, <code>$2</code>, … to the fields, <code>NF</code> to their number and <code>NR</code> to the record number, and then runs the action of every pair whose pattern is true for the record. An omitted pattern is true for every record, and an omitted action prints <code>$0</code>. The patterns <code>BEGIN</code> and <code>END</code> run once, before the first record and after the last (GNU awk manual, §7.1.4). Variables that were never assigned have the value zero and the empty string at once. Arithmetic follows the floating-point semantics of the ISO C standard, so <code>awk</code> computes in <code>double</code> (POSIX.1-2017, <code>awk</code>, Expressions). By default a run of blanks separates fields, and leading and trailing blanks are ignored; the default value of <code>FS</code> is a single space, which is a special case, and any other single character, such as a comma, separates every pair of occurrences, so two commas in a row delimit an empty field (GNU awk manual, §4.5.1).</p>
+<p>The script below reproduces the four lecture programs and checks the points above. It recreates the lecture's small files in a fresh directory; its other commands belong to the sections that follow and are printed in one output. The three-line file and its commands are the lecture's; the file with a woman named Mary, the field-splitting checks and the comparison of numeric strings are added. Everything in the script is deterministic, so the check is exact.</p>
+<pre><code class="language-bash" data-file="lecture_files.sh" data-run="bash lecture_files.sh">cd "$(mktemp -d /tmp/hpsc-demo.XXXXXX)"
+
+printf 'John 25 M\nAlice 30 F\nBob 28 M\n' &gt; file.txt
+echo "== awk '{print \$1, \$3}'";         awk '{print $1, $3}' file.txt
+echo "== awk '\$3 == \"M\" {print \$1}'"; awk '$3 == "M" {print $1}' file.txt
+echo "== awk '{print \$1, \$2 * 2}'";     awk '{print $1, $2 * 2}' file.txt
+echo "== awk '/M/ {print \$0}'";          awk '/M/ {print $0}' file.txt
+
+printf 'John 25 M\nMary 30 F\nBob 28 M\n' &gt; file_mary.txt
+echo "== the same /M/ program on a file that has a woman named Mary"
+awk '/M/ {print $0}' file_mary.txt
+echo "== the anchored test on the same file"
+awk '$3 == "M" {print $0}' file_mary.txt
+
+echo "== field splitting: runs of blanks separate fields, one comma separates two"
+printf 'a   b\n' | awk '{print NF}'
+printf 'a   b\n' | awk -F' ' '{print NF}'
+printf 'a,,b\n' | awk -F, '{print NF}'
+
+printf 'Mango is Yello\nApple is red\nGreen Vegetables\n' &gt; file2
+echo "== sort file2";     sort file2
+echo "== sort -r file2";  sort -r file2
+
+printf 'Mango is Yello\nApple is red\nMango is Yello\nGreen Vegetables\n' &gt; file2
+echo "== sort file2 | uniq"; sort file2 | uniq
+echo "== wc file2";   wc file2
+echo "== wc -l, -w, -c"; wc -l file2; wc -w file2; wc -c file2
+
+printf 'Mango is Yello\nApple is red\nOrange is Orange\nGreen Vegetables\nPitter is student\n' &gt; file4
+echo "== head -2 file4 and tail -2 file4"; head -n 2 file4; tail -n 2 file4
+
+printf 'Hello Ved !\nHow are you ?\nVed is good student.\nHe is talented !\n' &gt; file3
+echo "== grep, grep -n"; grep "Ved" file3; grep -n "Ved" file3
+mkdir Test; echo "Ved is child of Mr. Shyam" &gt; Test/Child.txt
+echo "== grep -r"; grep -r "Ved" * | sort
+
+echo "== diff, paste, tr"
+printf 'one\ntwo\nthree\n' &gt; f1; printf 'one\n2\nthree\n' &gt; f2
+diff f1 f2
+paste f1 f2 | tr '\t' ' '
+echo "Hello" | tr 'a-z' 'A-Z'
+
+echo "== a field that looks like a number compares as a number, a string compares as text"
+echo "10 9" | awk '{print ($1 &lt; $2), ($1 "" &lt; $2 "")}'
+</code></pre>
+<pre><code class="output">== awk '{print $1, $3}'
+John M
+Alice F
+Bob M
+== awk '$3 == "M" {print $1}'
+John
+Bob
+== awk '{print $1, $2 * 2}'
+John 50
+Alice 60
+Bob 56
+== awk '/M/ {print $0}'
+John 25 M
+Bob 28 M
+== the same /M/ program on a file that has a woman named Mary
+John 25 M
+Mary 30 F
+Bob 28 M
+== the anchored test on the same file
+John 25 M
+Bob 28 M
+== field splitting: runs of blanks separate fields, one comma separates two
+2
+2
+3
+== sort file2
+Apple is red
+Green Vegetables
+Mango is Yello
+== sort -r file2
+Mango is Yello
+Green Vegetables
+Apple is red
+== sort file2 | uniq
+Apple is red
+Green Vegetables
+Mango is Yello
+== wc file2
+ 4 11 60 file2
+== wc -l, -w, -c
+4 file2
+11 file2
+60 file2
+== head -2 file4 and tail -2 file4
+Mango is Yello
+Apple is red
+Green Vegetables
+Pitter is student
+== grep, grep -n
+Hello Ved !
+Ved is good student.
+1:Hello Ved !
+3:Ved is good student.
+== grep -r
+Test/Child.txt:Ved is child of Mr. Shyam
+file3:Hello Ved !
+file3:Ved is good student.
+== diff, paste, tr
+2c2
+&lt; two
+---
+&gt; 2
+one one
+two 2
+three three
+HELLO
+== a field that looks like a number compares as a number, a string compares as text
+0 1</code></pre>
+<p>The first four blocks of the output are the lecture's four programs: the columns <code>John M</code>, <code>Alice F</code>, <code>Bob M</code>; the names <code>John</code> and <code>Bob</code>; the doubled ages 50, 60 and 56; and the two lines that contain <code>M</code>. The next two blocks show a difference that the lecture does not draw. The pattern <code>/M/</code> is a regular expression and selects any line that contains an <code>M</code> anywhere, so <code>Mary 30 F</code> is selected although the third field is <code>F</code>. The pattern <code>$3 == "M"</code> compares one field and selects the right lines. The lecture's output is correct for its file, and the first program is wrong for any file that has an <code>M</code> elsewhere in a line. The field-splitting block shows that three blanks between <code>a</code> and <code>b</code> give two fields, with and without the explicit <code>-F' '</code>, and that <code>a,,b</code> split at commas gives three. The last block shows the rule for comparison. A field that looks like a number is compared as a number: <code>10 &lt; 9</code> is false. The same two fields, joined to the empty string so that they become text, are compared as text: <code>"10" &lt; "9"</code> is true, because the character <code>1</code> precedes <code>9</code>.</p>
+<p>One pass of <code>awk</code> over a log keeps a constant amount of state for a sum, a maximum or a ratio, which is why it suits the running case. Two programs in the following sections are examples. The first extracts the first and last residual and their count from the solver's log. The second computes the contraction factor of the iteration from the last two progress lines and compares it with the theoretical value.</p>
+
+<h2 id="pipeline">Sorting, counting and the pipeline <a class="timestamp" href="https://www.youtube.com/watch?v=S4XYOjSoAQE&amp;t=1829s">W1L5 30:29</a></h2>
+<h3>sort and uniq</h3>
+<p>The lecture shows <code>sort file2</code> arranging the lines <code>Mango is Yello</code>, <code>Apple is red</code>, <code>Green Vegetables</code> alphabetically, mentions numerical sorting, and shows <code>-r</code> for the reverse order. <code>sort</code> compares whole lines, or keys within them, by the collation order of the locale, and in the C locale by byte value (GNU coreutils manual, <code>sort</code>). Two options order numbers. <code>-n</code> reads an initial numeric string: optional blanks, an optional minus sign, digits with an optional decimal point (POSIX.1-2017, <code>sort</code>); GNU <code>sort</code> states that exponential notation is not recognized. <code>-g</code> converts a prefix to a floating-point number and does recognize exponents. A residual log is the case in which the two differ, since every residual has an exponent. The lecture's <code>uniq</code> slide says "filters out duplicate lines from sorted input". <code>uniq</code> discards all but the first of <em>adjacent</em> repeated lines; the input need not be sorted, but non-adjacent repeats stay, and <code>sort -u</code> is the one-command alternative (GNU coreutils manual, <code>uniq</code>). The lecture's example sorts the file with <code>Mango is Yello</code> twice and passes the result through <code>uniq</code>, and the output has the line once.</p>
+<h3>The pipe as defined, and as it runs</h3>
+<p>The lecture draws the pipe as "command 1, output, input, command 2" and says that the pipe passes the output of one command as input to another. POSIX states the definition used in the model section: for each command but the last, the shell connects the standard output of the command to the standard input of the next "as if by creating a pipe", and the exit status of the pipeline is the exit status of its last command (POSIX.1-2017, Shell Command Language §2.9.2). POSIX.1-2024 adds the <code>pipefail</code> option to §2.9.2: with the option enabled, the status is zero if all commands returned 0, and otherwise the status of the rightmost command that returned a non-zero status. POSIX also states that the shell waits for the last command and "may also wait for all commands". The composition of the model section therefore describes data and not time. In Linux the commands run at the same time, and a pipe is a buffer of limited capacity: a writer blocks when it is full, a reader blocks when it is empty, and a write to a pipe that no process reads from raises SIGPIPE (pipe(7)). Since Linux 2.6.11 the capacity is 16 pages of memory unless it is changed, which is 65,536 bytes with the 4096-byte pages of this machine (pipe(7); pages are defined in the memory section). Standard error is not part of the pipe unless redirected with <code>2&gt;&amp;1</code>.</p>
+<p>The shell script below checks these statements and the sorting rules. Section 1 pipes the first \(10^{8}\) integers from <code>seq</code> into <code>head -n 3</code>: if the pipeline ran stage after stage, it would first produce 100 million lines; it finishes at once because <code>head</code> exits after three lines and <code>seq</code> is killed by SIGPIPE when it writes again. The statuses are 141 for <code>seq</code> (\(128+13\)) and 0 for <code>head</code>, and the status of the whole pipeline is the status of the last command unless <code>pipefail</code> is set (<code>set -o pipefail</code> is in Bash and, since POSIX.1-2024, in §2.9.2 of the standard; <code>PIPESTATUS</code> is a Bash array and not part of POSIX). Section 2 shows that a pipe carries only standard output. Sections 3 and 4 test <code>uniq</code> and the two numeric sorts on four residuals. Section 5 shows the three exit statuses of <code>grep</code>: 0 when a line is selected, 1 when none is, 2 on an error (GNU grep manual, §2.3). Sections 6 and 7 test the leftmost-longest rule and the BRE and ERE differences. Section 8 tests the lecture's <code>grep -r "pattern" *</code>. Section 9 shows the back-reference of the previous section, and section 10 prints the capacity of a pipe. The check is exact.</p>
+<pre><code class="language-bash" data-file="pipes.sh" data-run="bash pipes.sh">cd "$(mktemp -d /tmp/hpsc-demo.XXXXXX)"
+
+echo "== 1. the stages of a pipeline run at the same time"
+seq 1 100000000 | head -n 3
+echo "statuses of seq and head: ${PIPESTATUS[@]}"
+seq 1 100000000 | head -n 3 &gt; /dev/null
+echo "pipeline status without pipefail: $?"
+set -o pipefail
+seq 1 100000000 | head -n 3 &gt; /dev/null
+echo "pipeline status with pipefail:    $?"
+set +o pipefail
+
+echo "== 2. a pipe carries standard output only"
+noisy() { echo "to stdout"; echo "to stderr" &gt;&amp;2; }
+{ noisy | wc -l; } 2&gt;&amp;1
+{ noisy 2&gt;&amp;1 | wc -l; } 2&gt;&amp;1
+
+echo "== 3. uniq removes adjacent duplicates only"
+printf 'mango\napple\nmango\ngreen\n' &gt; fruit.txt
+echo "-- uniq fruit.txt";            uniq fruit.txt
+echo "-- sort fruit.txt | uniq";     sort fruit.txt | uniq
+echo "-- sort -u fruit.txt";         sort -u fruit.txt
+echo "-- sort fruit.txt | uniq -c";  sort fruit.txt | uniq -c
+
+echo "== 4. numeric order of residuals"
+printf '9.5e-05\n1.2e-03\n4.0e-05\n1.3e-06\n' &gt; res.txt
+echo "-- sort -n (reads the mantissa only)"; sort -n res.txt
+echo "-- sort -g (reads the exponent)";      sort -g res.txt
+
+echo "== 5. exit status of grep: 0 match, 1 no match, 2 error"
+printf 'iter 50 residual 3.9e-03\n' &gt; one.log
+grep -q iter one.log;  echo "pattern present: $?"
+grep -q ERROR one.log; echo "pattern absent:  $?"
+grep -q iter missing.log 2&gt; /dev/null; echo "file missing:    $?"
+
+echo "== 6. leftmost-longest in grep, leftmost-first in Python"
+echo abcd | grep -oE 'ab|abcd'
+python3 -c "import re; print(re.search('ab|abcd', 'abcd').group())"
+
+echo "== 7. BRE and ERE"
+echo aab | grep -o 'a+b';   echo "BRE a+b exit status: $?"
+echo aab | grep -oE 'a+b'
+echo aab | grep -o 'a\+b'
+
+echo "== 8. a glob skips dot files, the directory name does not"
+mkdir -p tree/sub; echo needle &gt; tree/shown.txt; echo needle &gt; tree/.hidden.txt; echo needle &gt; tree/sub/deep.txt
+cd tree
+echo "-- grep -r needle *";  grep -r needle * | sort
+echo "-- grep -r needle .";  grep -r needle . | sort
+cd ..
+
+echo "== 9. a back-reference recognizes squares ww, which no regular expression can"
+printf 'abab\nabba\naa\nabc\nabcabc\n' | grep -E '^(.+)\1$'
+
+echo "== 10. capacity of a pipe in bytes"
+python3 -c "import os, fcntl; r, w = os.pipe(); print(fcntl.fcntl(w, 1032))"
+</code></pre>
+<pre><code class="output">== 1. the stages of a pipeline run at the same time
+1
+2
+3
+statuses of seq and head: 141 0
+pipeline status without pipefail: 0
+pipeline status with pipefail:    141
+== 2. a pipe carries standard output only
+to stderr
+1
+2
+== 3. uniq removes adjacent duplicates only
+-- uniq fruit.txt
+mango
+apple
+mango
+green
+-- sort fruit.txt | uniq
+apple
+green
+mango
+-- sort -u fruit.txt
+apple
+green
+mango
+-- sort fruit.txt | uniq -c
+      1 apple
+      1 green
+      2 mango
+== 4. numeric order of residuals
+-- sort -n (reads the mantissa only)
+1.2e-03
+1.3e-06
+4.0e-05
+9.5e-05
+-- sort -g (reads the exponent)
+1.3e-06
+4.0e-05
+9.5e-05
+1.2e-03
+== 5. exit status of grep: 0 match, 1 no match, 2 error
+pattern present: 0
+pattern absent:  1
+file missing:    2
+== 6. leftmost-longest in grep, leftmost-first in Python
+abcd
+ab
+== 7. BRE and ERE
+BRE a+b exit status: 1
+aab
+aab
+== 8. a glob skips dot files, the directory name does not
+-- grep -r needle *
+shown.txt:needle
+sub/deep.txt:needle
+-- grep -r needle .
+./.hidden.txt:needle
+./shown.txt:needle
+./sub/deep.txt:needle
+== 9. a back-reference recognizes squares ww, which no regular expression can
+abab
+aa
+abcabc
+== 10. capacity of a pipe in bytes
+65536</code></pre>
+<p>Each section confirms a statement and exposes a trap. In section 1 the three numbers appear immediately, and the statuses are <code>141 0</code>; without <code>pipefail</code> the pipeline reports 0 and with it reports 141, so a script that enables <code>pipefail</code> and ends a pipeline with <code>head</code> will see failure statuses on success. In section 2 the first command prints <code>to stderr</code> on the terminal and counts one line; with <code>2&gt;&amp;1</code> inside the pipe the count is two. Section 3 shows <code>uniq</code> alone leaving <code>mango</code> twice, because the two lines are not adjacent; <code>sort | uniq</code> and <code>sort -u</code> print it once, and <code>sort | uniq -c</code> prints the count 2 beside it. Section 4 shows that <code>sort -n</code> orders <code>9.5e-05</code>, <code>1.2e-03</code>, <code>4.0e-05</code> and <code>1.3e-06</code> by their mantissas, placing the value \(1.2\times10^{-3}\) first although it is the largest, while <code>sort -g</code> returns them in numerical order. The consequence is concrete: for a residual log, the command that finds the smallest residual is <code>sort -g | head -n 1</code>, and <code>sort -n</code> gives a wrong answer without any error message. Section 5 returns the three statuses. In section 6, <code>grep -o</code> with the alternation <code>ab|abcd</code> prints <code>abcd</code>, the longest match at the leftmost position, and the matcher of Python's <code>re</code> module returns <code>ab</code>, the first alternative that succeeds. In section 7, the pattern <code>a+b</code> in BRE selects nothing, because <code>+</code> is an ordinary character there, and the exit status is 1; in ERE it matches <code>aab</code>, and <code>a\+b</code> matches it in BRE as the GNU extension. Section 8 shows what the lecture's command <code>grep -r "Ved" *</code> misses: the shell expands <code>*</code> to the names that do not begin with a dot, so a file named <code>.hidden.txt</code> is skipped, while <code>grep -r needle .</code> reads it. Without a file operand, <code>grep -r</code> searches the working directory (GNU grep manual, §2.1.6), so <code>grep -r needle</code> has the same effect as the form with <code>.</code>. Section 9 selects <code>abab</code>, <code>aa</code> and <code>abcabc</code>, the squares among the five input lines. Section 10 prints 65536.</p>
+<h3>Counting and selecting, on the running case</h3>
+<p>The lecture's last commands are <code>wc</code>, which prints the number of lines, words and bytes (<code>4 11 61</code> for its file, and <code>-l</code>, <code>-w</code> and <code>-c</code> print one number each); <code>head -2</code> and <code>tail -2</code>, which print the first and last two lines; and the names <code>diff</code> (compare line by line), <code>paste</code> (merge lines), <code>tr</code> (translate or delete characters) and <code>sed</code> (stream editor). The script <code>lecture_files.sh</code> of the <code>awk</code> section ran all of them on the lecture's files, in the second half of its output. The lecture's file for <code>wc</code> has the lines <code>Mango is Yello</code>, <code>Apple is red</code>, <code>Mango is Yello</code> and <code>Green Vegetables</code>. Typed exactly as shown, the file has 4 lines, 11 words and 60 bytes: \(14+12+14+16\) characters and 4 newlines. The slide's value 61 is one more. An invisible trailing blank or a different character in one word would explain it; the slide does not show which, and the discrepancy is recorded and not resolved. The lines, words and bytes agree.</p>
+<p>The running case needs the commands in combination. The script below embeds the log of the first listing, so that it runs without the solver, and answers five questions with pipelines: how many progress lines there are, what the header and the final line say, which iteration and residual each progress line holds, which residuals are the smallest and the largest, and how the contraction factor over an interval of 50 sweeps is distributed. <code>sed -n 's/…/…/p'</code> prints only the lines on which the substitution happened; its pattern is a BRE with two groups, <code>\(…\)</code>, which the replacement refers to as <code>\1</code> and <code>\2</code>. The script is deterministic and the check is exact.</p>
+<pre><code class="language-bash" data-file="logsummary.sh" data-run="bash logsummary.sh">cd "$(mktemp -d /tmp/hpsc-demo.XXXXXX)"
+
+# The log of listing 1 (N = 16), written here so that the script runs without the solver.
+cat &gt; solver.log &lt;&lt;'END'
+# jacobi N=16 tol=1.0e-06 max_iter=20000
+iter    50 residual 3.960505e-03
+iter   100 residual 1.296030e-03
+iter   150 residual 5.303838e-04
+iter   200 residual 2.235469e-04
+iter   250 residual 9.458274e-05
+iter   300 residual 4.006077e-05
+iter   350 residual 1.697280e-05
+iter   400 residual 7.191545e-06
+iter   450 residual 3.047196e-06
+iter   500 residual 1.291163e-06
+# converged iter=515 residual=9.979422e-07
+END
+
+echo "== lines by kind"
+grep -c '^iter' solver.log
+grep '^#' solver.log
+
+echo "== iteration and residual of every progress line, with sed"
+sed -n 's/^iter *\([0-9]*\) residual \(.*\)$/\1 \2/p' solver.log | head -n 3
+
+echo "== the residual column, smallest and largest by value"
+grep '^iter' solver.log | awk '{print $4}' | sort -g | sed -n '1p;$p'
+
+echo "== summary in one pass of awk"
+awk '/^iter/ { n++; if (n == 1) first = $4; last = $4 }
+     END { printf "%d progress lines, first residual %s, last residual %s\n", n, first, last }' solver.log
+
+echo "== contraction factor over each interval of 50 iterations, rounded to two places"
+grep '^iter' solver.log | awk 'NR &gt; 1 { printf "%.2f\n", $4 / prev } { prev = $4 }' | sort | uniq -c
+
+echo "== the last three progress lines"
+grep '^iter' solver.log | tail -n 3
+</code></pre>
+<pre><code class="output">== lines by kind
+10
+# jacobi N=16 tol=1.0e-06 max_iter=20000
+# converged iter=515 residual=9.979422e-07
+== iteration and residual of every progress line, with sed
+50 3.960505e-03
+100 1.296030e-03
+150 5.303838e-04
+== the residual column, smallest and largest by value
+1.291163e-06
+3.960505e-03
+== summary in one pass of awk
+10 progress lines, first residual 3.960505e-03, last residual 1.291163e-06
+== contraction factor over each interval of 50 iterations, rounded to two places
+      1 0.33
+      1 0.41
+      7 0.42
+== the last three progress lines
+iter   400 residual 7.191545e-06
+iter   450 residual 3.047196e-06
+iter   500 residual 1.291163e-06</code></pre>
+<p>The log has 10 progress lines and the two comment lines that begin with <code>#</code>. The <code>sed</code> command turns <code>iter    50 residual 3.960505e-03</code> into <code>50 3.960505e-03</code>. The smallest residual is \(1.291163\times10^{-6}\), at the last progress line, and the largest is \(3.960505\times10^{-3}\), at the first. The ratios in the next block are all below 1, so the residual falls monotonically in this log. The one-pass <code>awk</code> summary reports the same two values and the count. The last two blocks lead to the next section. The ratio of consecutive progress residuals, rounded to two places, is 0.33 once, 0.41 once and 0.42 seven times, so it settles at about 0.42 per 50 sweeps. That is a per-sweep factor of \(0.42^{1/50}=0.9828\), a number that the next section derives from the grid.</p>
+
+<h2 id="rate">From the residual history to the convergence rate</h2>
+<p>The question a person asks of a residual history is when the run will end. This section answers it for the running case in three steps: a closed form for the rate at which the iteration converges, an estimator of that rate from the log, and a test of both against the logs of \(N=8,16,32\) and later of larger runs. The section is an original construction; the only external input is the value of the rate, which Demmel's 1996 Berkeley lecture notes state and which is derived here.</p>
+<h3>The eigenmodes of the iteration</h3>
+<p>Let \(u^{k}\) be the interior values after \(k\) sweeps and \(u^{*}\) the fixed point of the iteration, that is, the discrete solution of the Laplace problem with the stated boundary values. A sweep is \(u^{k+1}_{ij}=\tfrac14\bigl(u^{k}_{i-1,j}+u^{k}_{i+1,j}+u^{k}_{i,j-1}+u^{k}_{i,j+1}\bigr)\) for \(i,j=1,\dots,N\). Boundary values enter as constants and are the same for \(u^{k}\) and \(u^{*}\), so the <em>error</em> \(e^{k}=u^{k}-u^{*}\) obeys the same averaging with zero boundary values: \(e^{k+1}=Be^{k}\), where \(B\) is the linear map that averages the four neighbours and treats the boundary as zero. Let \(\theta=\pi/(N+1)\). For integers \(s,t\in\{1,\dots,N\}\) define \(v^{(s,t)}_{ij}=\sin(s\,i\theta)\sin(t\,j\theta)\). The trigonometric identity \(\sin(s(i-1)\theta)+\sin(s(i+1)\theta)=2\cos(s\theta)\sin(s\,i\theta)\) holds for every \(i\), and at \(i=0\) and \(i=N+1\) the sine is zero, which is the zero boundary condition. Applying the averaging to \(v^{(s,t)}\) therefore gives</p>
+\[
+Bv^{(s,t)}=\mu_{st}\,v^{(s,t)},\qquad \mu_{st}=\tfrac12\bigl(\cos s\theta+\cos t\theta\bigr).
+\tag{4.3}
+\]
+<p>The \(N^{2}\) vectors \(v^{(s,t)}\) are products of the one-dimensional sine vectors, which are a basis of \(\mathbb R^{N}\), so they are a basis of the space of interior grids. Expand the initial error \(e^{0}=-u^{*}\) as \(e^{0}=\sum c_{st}v^{(s,t)}\). Then \(e^{k}=\sum c_{st}\mu_{st}^{k}v^{(s,t)}\). Every \(\mu_{st}\) lies strictly between \(-1\) and 1, and the one of largest magnitude is attained at \(s=t=1\) and, with the opposite sign, at \(s=t=N\):</p>
+\[
+\rho=\max_{s,t}|\mu_{st}|=\cos\frac{\pi}{N+1}.
+\tag{4.4}
+\]
+<p>This is the value stated by Demmel (CS267 lecture notes of 1996, on the discrete Poisson equation: \(\rho_{\mathrm{Jacobi}}(n)=\cos(\pi/(n+1))\)), for the error in the root-sum-of-squares norm. For large \(N\), \(\rho\approx1-\pi^{2}/(2(N+1)^{2})\), so the factor tends to 1 as the grid is refined, and the number of sweeps for a fixed reduction grows in proportion to \(N^{2}\).</p>
+<p>The solver logs the change per sweep, which it calls the residual. The change in one sweep is \(d^{k}=u^{k+1}-u^{k}=e^{k+1}-e^{k}=\sum c_{st}(\mu_{st}-1)\mu_{st}^{k}v^{(s,t)}\), and the residual logged after \(k+1\) sweeps is \(r_{k+1}=\max_{ij}|d^{k}_{ij}|\). The change per sweep is a scaled residual of the linear system. Write the discrete problem as \(\mathsf Au=b\), with 4 on the diagonal of \(\mathsf A\), \(-1\) for each interior neighbour, and the boundary values in \(b\). Then \(B=I-\tfrac14\mathsf A\), one sweep is \(u^{k+1}=u^{k}+\tfrac14(b-\mathsf Au^{k})\), and \(d^{k}=\tfrac14(b-\mathsf Au^{k})\). The logged \(r_{k+1}\) is one quarter of \(\lVert b-\mathsf Au^{k}\rVert_\infty\), so the name is exact up to the factor 4, and a log of the system residual has the same factor \(\rho\). Each mode keeps its eigenvalue, so the modes with \(|\mu|\) smaller than \(\rho\) die out faster than the leading one. The expansion therefore predicts</p>
+\[
+r_{k}\approx A\rho^{k}\quad\text{for large }k,\qquad A=\frac{|c_{11}|\,(1-\rho)\,\max_{ij}|v^{(1,1)}_{ij}|}{\rho}\propto(1-\rho),
+\tag{4.5}
+\]
+<p>where the factor \(1/\rho\) comes from the index shift \(r_k=\max|d^{k-1}|\). The mode \(s=t=N\) has the eigenvalue \(-\rho\), the same decay factor in magnitude with alternating sign; its coefficient vanishes for even \(N\), as the check below shows. Equation (4.5) states an asymptote and a proportionality. It does not say after how many sweeps the asymptote is reached.</p>
+<h3>Estimating the factor and the end of the run from the log</h3>
+<p>For two logged points \((k_1,r_1)\) and \((k_2,r_2)\) with \(k_2\gt k_1\), define the <em>observed factor per sweep</em> \(\hat\rho=(r_2/r_1)^{1/(k_2-k_1)}\). This is the geometric mean of the ratios of consecutive sweeps, and equation (4.5) predicts \(\hat\rho\to\rho\) when both points lie in the asymptotic range. With the exact \(\rho\) known, the sweep at which the run ends follows from solving \(r_{k}=\mathrm{tol}\) with \(r_1\) as the base point:</p>
+\[
+k_{\mathrm{end}}\approx k_1+\frac{\ln(\mathrm{tol}/r_1)}{\ln\rho},
+\qquad
+\ln\rho=\ln\cos\frac{\pi}{N+1}.
+\tag{4.6}
+\]
+<p>Two estimates of \(\hat\rho\) are of interest: \(\hat\rho_{\mathrm{window}}\), computed from the first and last progress line, and \(\hat\rho_{\mathrm{last}}\), computed from the last two. The first uses points that include the transient, and the second uses points in the asymptotic range. The script below embeds three real logs, written by the solver of the first listing for \(N=8\) (a progress line every 25 sweeps), \(N=16\) (every 50) and \(N=32\) (every 100), and computes for each log both estimates, \(\rho\) from (4.4), the relative error of \(\hat\rho_{\mathrm{last}}\), the sweep at which the run converged and the sweep predicted by (4.6) from the last and from the first progress line, with \(\rho\) in (4.6); Exercise 6 uses the estimate \(\hat\rho_{\mathrm{last}}\) instead. The check is exact.</p>
+<pre><code class="language-bash" data-file="rate_check.sh" data-run="bash rate_check.sh">cd "$(mktemp -d /tmp/hpsc-demo.XXXXXX)"
+
+# Logs written by jacobi_log (listing above) for N = 8, 16 and 32.
+cat &gt; log8.txt &lt;&lt;'END'
+# jacobi N=8 tol=1.0e-06 max_iter=20000
+iter    25 residual 5.541889e-03
+iter    50 residual 1.108191e-03
+iter    75 residual 2.328766e-04
+iter   100 residual 4.915472e-05
+iter   125 residual 1.037992e-05
+iter   150 residual 2.191985e-06
+# converged iter=163 residual=9.764570e-07
+END
+cat &gt; log16.txt &lt;&lt;'END'
+# jacobi N=16 tol=1.0e-06 max_iter=20000
+iter    50 residual 3.960505e-03
+iter   100 residual 1.296030e-03
+iter   150 residual 5.303838e-04
+iter   200 residual 2.235469e-04
+iter   250 residual 9.458274e-05
+iter   300 residual 4.006077e-05
+iter   350 residual 1.697280e-05
+iter   400 residual 7.191545e-06
+iter   450 residual 3.047196e-06
+iter   500 residual 1.291163e-06
+# converged iter=515 residual=9.979422e-07
+END
+cat &gt; log32.txt &lt;&lt;'END'
+# jacobi N=32 tol=1.0e-06 max_iter=20000
+iter   100 residual 2.324855e-03
+iter   200 residual 9.689871e-04
+iter   300 residual 5.182180e-04
+iter   400 residual 3.082425e-04
+iter   500 residual 1.916505e-04
+iter   600 residual 1.209935e-04
+iter   700 residual 7.673716e-05
+iter   800 residual 4.870428e-05
+iter   900 residual 3.092399e-05
+iter  1000 residual 1.963854e-05
+iter  1100 residual 1.247287e-05
+iter  1200 residual 7.922195e-06
+iter  1300 residual 5.031943e-06
+iter  1400 residual 3.196182e-06
+iter  1500 residual 2.030159e-06
+iter  1600 residual 1.289526e-06
+# converged iter=1657 residual=9.955969e-07
+END
+
+awk '
+function report(   rho, rwin, rlast, kpred, kfirst) {
+    if (!n) return
+    rho = cos(atan2(0, -1) / (N + 1))
+    rwin = (r1 / r0) ^ (1 / (k1 - k0))
+    rlast = (r1 / rp) ^ (1 / (k1 - kp))
+    kpred = k1 + log(tol / r1) / log(rho)
+    kfirst = k0 + log(tol / r0) / log(rho)
+    printf "%3d %6d %14.6f %13.6f %10.6f %14.5f%% %9d %9.1f %10.1f\n", N, n, rwin, rlast, rho, 100 * (rlast - rho) / rho, kconv, kpred, kfirst
+}
+FNR == 1 { report(); n = 0 }
+/^# jacobi/ { split($3, a, "="); N = a[2]; split($4, b, "="); tol = b[2] }
+/^iter/ { if (!n++) { k0 = $2; r0 = $4 } kp = k1; rp = r1; k1 = $2; r1 = $4 }
+/^# converged/ { split($3, a, "="); kconv = a[2] }
+END { report() }
+' log8.txt log16.txt log32.txt | { printf "%3s %6s %14s %13s %10s %15s %9s %9s %10s\n" N points rho_hat_window rho_hat_last rho rel_error_last converged from_last from_first; cat; }
+</code></pre>
+<pre><code class="output">  N points rho_hat_window  rho_hat_last        rho  rel_error_last converged from_last from_first
+  8      6       0.939242      0.939692   0.939693       -0.00002%       163     162.6      163.6
+ 16     10       0.982317      0.982973   0.982973       -0.00000%       515     514.9      532.4
+ 32     16       0.995014      0.995472   0.995472       -0.00000%      1657    1656.0     1808.0</code></pre>
+<p>The factor \(\hat\rho_{\mathrm{last}}\) equals \(\rho\) to the six printed digits for \(N=16\) and \(N=32\), and agrees to \(2\times10^{-7}\) in relative terms for \(N=8\) (0.939692 against 0.939693). The estimate \(\hat\rho_{\mathrm{window}}\) is lower than \(\rho\) by 0.05 % to 0.07 %, because the early points contain modes that decay faster than the leading one. A small error in \(\hat\rho\) is a larger error in the quantity that matters, the distance of the factor from 1. For \(N=16\), \(1-\hat\rho_{\mathrm{window}}=0.017683\) and \(1-\rho=0.017027\), so the window estimate overstates the rate of convergence by 3.9 %. The prediction (4.6) from the last progress line is 162.6, 514.9 and 1656.0 sweeps against the observed 163, 515 and 1657: it is within one sweep in all three runs. The last progress line lies 13, 15 and 57 sweeps before the end in the three runs, so that prediction extrapolates a short distance. With the exact \(\rho\), (4.6) predicts well only from a base point in the asymptotic range. From the first progress line, in the last column, it overestimates the end by 0.4 %, 3.4 % and 9.1 % for \(N=8,16,32\), whose first lines lie at 15 %, 10 % and 6 % of the run, and by 8.5 % for \(N=64\), with the first line at 9.5 % of the run (Exercise 6). A factor estimated from early lines errs in the other direction: the faster modes make it too small, and the predicted end comes too early (the \(N=1000\) run below).</p>
+<p>The prediction (4.5) can also be tested on the values themselves and not only on their ratios. The program below solves the discrete Laplace problem for \(N=16\) exactly with a linear solve, expands \(e^{0}=-u^{*}\) in the modes of (4.3) by the orthogonality of the one-dimensional sine vectors, evaluates the modal formula for \(d^{k-1}\) at \(k=50,150,250,350,450\) (the logged iterations), and prints the maximum absolute entry beside the logged residual. The check is exact.</p>
+<pre><code class="language-python" data-file="modal_check.py" data-run="python3 modal_check.py">"""Predict the residual log of the Jacobi run (N = 16) from the eigenmodes of the iteration."""
+import numpy as np
+
+N = 16
+theta = np.pi / (N + 1)
+i = np.arange(1, N + 1)
+S = np.sin(np.outer(i, np.arange(1, N + 1)) * theta)      # S[i-1, p-1] = sin(p i theta)
+mu = 0.5 * (np.cos(np.arange(1, N + 1) * theta)[:, None] + np.cos(np.arange(1, N + 1) * theta)[None, :])
+
+# Exact solution u* of the discrete Laplace problem: u = 1 on the top edge (row 0), 0 on the other edges.
+A = np.zeros((N * N, N * N)); b = np.zeros(N * N)
+for r in range(N):
+    for c in range(N):
+        k = r * N + c
+        A[k, k] = 4.0
+        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            rr, cc = r + dr, c + dc
+            if 0 &lt;= rr &lt; N and 0 &lt;= cc &lt; N:
+                A[k, rr * N + cc] = -1.0
+            elif rr &lt; 0:
+                b[k] += 1.0                                 # the neighbour is on the top edge
+ustar = np.linalg.solve(A, b).reshape(N, N)
+
+# Initial error e0 = u0 - u* = -u*; coefficients in the sine basis (S is orthogonal up to a factor).
+c = (2.0 / (N + 1)) ** 2 * S.T @ (-ustar) @ S
+print(f"rho = cos(pi/{N + 1}) = {np.cos(theta):.6f}; largest |mu| = {np.abs(mu).max():.6f}")
+print("coefficient of the mode s = t = N below 1e-12 in magnitude:", "yes" if abs(c[-1, -1]) &lt; 1e-12 else "no")
+print("iteration   residual in the log   residual from the modes   ratio")
+log = {50: 3.960505e-03, 150: 5.303838e-04, 250: 9.458274e-05, 350: 1.697280e-05, 450: 3.047196e-06}
+for k, logged in log.items():
+    # residual after k sweeps is max |u^k - u^(k-1)| = max |e^k - e^(k-1)|
+    coef = c * mu ** (k - 1) * (mu - 1.0)
+    d = S @ coef @ S.T
+    print(f"{k:9d} {logged:21.6e} {np.abs(d).max():25.6e} {np.abs(d).max() / logged:8.5f}")
+
+# The residual bounds the change per sweep, not the error: at the sweep where the run stops,
+# the error is about r / (1 - rho) for the leading mode.
+k, logged = 515, 9.979422e-07
+err = np.abs(S @ (c * mu ** k) @ S.T).max()
+print(f"at the stop (sweep {k}): residual {logged:.3e}, error from the modes {err:.3e}, "
+      f"residual/(1-rho) {logged / (1 - np.cos(theta)):.3e}")
+</code></pre>
+<pre><code class="output">rho = cos(pi/17) = 0.982973; largest |mu| = 0.982973
+coefficient of the mode s = t = N below 1e-12 in magnitude: yes
+iteration   residual in the log   residual from the modes   ratio
+       50          3.960505e-03              3.960505e-03  1.00000
+      150          5.303838e-04              5.303838e-04  1.00000
+      250          9.458274e-05              9.458274e-05  1.00000
+      350          1.697280e-05              1.697280e-05  1.00000
+      450          3.047196e-06              3.047196e-06  1.00000
+at the stop (sweep 515): residual 9.979e-07, error from the modes 5.761e-05, residual/(1-rho) 5.861e-05</code></pre>
+<p>The two columns agree in every printed digit at all five logged iterations, and the ratio is 1.00000 in every row. In exact arithmetic the agreement is an identity, so the check tests the C solver, the modal program and the rounding, not a modelling assumption. The single-mode line \(A\rho^{k}\) of (4.5), with \(A\) fixed at the last logged point, does not agree: at \(k=50\) it gives \(2.93\times10^{-3}\), which is 26 % below the logged \(3.96\times10^{-3}\). The full expansion fits because it contains every mode. The program also tests a symmetry stated above: for \(N=16\) the coefficient of the mode \(s=t=N\) is below \(10^{-12}\) in magnitude (it is of the order of \(10^{-18}\) in a separate run, for \(N=16\) and \(N=32\)). The reason is that \(u^{*}\) is symmetric about the vertical midline of the grid and the mode with \(t=N\) even is antisymmetric about it. For odd \(N\) the argument does not apply and the chapter does not test it.</p>
+<p>The end of the run follows from the amplitude of (4.5). Solving \(A\rho^{k}=\mathrm{tol}\) gives</p>
+\[
+k_{\mathrm{end}}\approx\frac{\ln(A/\mathrm{tol})}{-\ln\rho},\qquad A\approx a\,(1-\rho),\quad a=\frac{4}{\pi^{2}}.
+\tag{4.7}
+\]
+<p>The amplitude \(A\), computed from the last logged point as \(r\rho^{-k}\), is 0.0247, 0.00692, 0.00184 and 0.000473 for \(N=8,16,32,64\). The quotient \(A/(1-\rho)\) is 0.410, 0.406, 0.406 and 0.405, constant within 1.1 %, as the proportionality \(A\propto1-\rho\) of (4.5) predicts. The limit has a closed form. As \(N\) grows, \(|c_{11}|\) tends to the coefficient of \(\sin\pi x\sin\pi y\) in the continuous solution, with \(x=ih\) the distance from the top edge and \(y=jh\), \(h=1/(N+1)\): the edge value 1 has the sine coefficient \(4/\pi\), and the profile \(\sinh(\pi(1-x))/\sinh\pi\) projects onto \(\sin\pi x\) with coefficient \(1/\pi\), so \(|c_{11}|\to4/\pi^{2}=0.40528\), and \(\max|v^{(1,1)}|/\rho\to1\). The exact discrete values of \(|c_{11}|\) are 0.39708, 0.40298, 0.40467 and 0.40513 for \(N=8,16,32,64\). Since \(1-\rho\) falls by a factor of 3.5 to 3.9 at each doubling of \(N\), so does \(A\), and \(\ln(A/\mathrm{tol})\) falls from 10.1 to 8.8, 7.5 and 6.2. This explains the observed iteration counts 163, 515, 1657 and 5272: they grow by factors of 3.16, 3.22 and 3.18 at each doubling, and not by the factors 3.6, 3.8 and 3.9 that \((N+1)^{2}\) alone would give, because the shrinking amplitude removes part of the work. Equation (4.7) with \(a=4/\pi^{2}\) therefore predicts the end of a run from \(N\) alone, before the run, without a fitted constant. The program below tests that prediction. It runs the same iteration with NumPy (the arithmetic of one sweep is the same as in the C solver, and the sweep counts for \(N=8,16,32,64\) equal those of the C logs) and compares the observed stopping sweep with (4.7) for \(N=8,16,32,64\) and \(N=100\). It also prints \(\mathrm{tol}/(1-\rho)\), the estimate of the error at the stop that (4.8) below justifies. The check is exact.</p>
+<pre><code class="language-python" data-file="end_prediction.py" data-run="python3 end_prediction.py">"""Predict the sweep at which the Jacobi run stops from N alone, and compare with the run.
+
+The prediction is k_end = ln(a (1 - rho) / tol) / (-ln rho) with rho = cos(pi/(N+1)) and a = 4/pi^2 = 0.40528,
+the limit of the quotient A/(1 - rho). The runs use NumPy; the arithmetic of one
+sweep is the same as in the C solver, so the sweep counts are the same.
+"""
+import math
+
+import numpy as np
+
+TOL, A_OVER = 1.0e-6, 4.0 / math.pi ** 2
+
+
+def sweeps(N):
+    u = np.zeros((N + 2, N + 2)); u[0, :] = 1.0
+    unew = u.copy()
+    k, r = 0, 1.0
+    while r &gt;= TOL:
+        unew[1:-1, 1:-1] = 0.25 * (u[:-2, 1:-1] + u[2:, 1:-1] + u[1:-1, :-2] + u[1:-1, 2:])
+        r = np.abs(unew[1:-1, 1:-1] - u[1:-1, 1:-1]).max()
+        u, unew = unew, u
+        k += 1
+    return k
+
+
+print("   N  observed  predicted  difference  tol/(1-rho), estimated error at the stop")
+for N in (8, 16, 32, 64, 100):
+    rho = math.cos(math.pi / (N + 1))
+    pred = math.log(A_OVER * (1 - rho) / TOL) / -math.log(rho)
+    k = sweeps(N)
+    print(f"{N:4d} {k:9d} {pred:10.1f} {100 * (pred - k) / k:10.2f} %  {TOL / (1 - rho):12.2e}")
+</code></pre>
+<pre><code class="output">   N  observed  predicted  difference  tol/(1-rho), estimated error at the stop
+   8       163      162.4      -0.34 %      1.66e-05
+  16       515      514.7      -0.06 %      5.87e-05
+  32      1657     1655.9      -0.07 %      2.21e-04
+  64      5272     5271.6      -0.01 %      8.56e-04
+ 100     10910    10909.4      -0.01 %      2.07e-03</code></pre>
+<p>The prediction is within 0.34 % of the observed stopping sweep for \(N=8\), within 0.07 % for \(N=16\) and 32, and within 0.01 % for \(N=64\) and for \(N=100\): 10,909.4 predicted against 10,910 observed. Three runs of the C solver outside the code lab, with the iteration limit raised, extend the test to larger grids. They stopped at sweep 31,946 for \(N=200\), 106,269 for \(N=500\) and 191,001 for \(N=1000\), and (4.7) gives 31,944.4, 105,563.4 and 140,335.8, which is 0.005 %, 0.66 % and 26.5 % below. The prediction degrades as the ratio \(A/\mathrm{tol}=a(1-\rho)/\mathrm{tol}\) falls: that ratio is 49.5, 8.0 and 2.0 for the three grids. When it is near 1, the leading mode alone crosses the tolerance after only \(\ln(A/\mathrm{tol})/(1-\rho)\) sweeps, a time at which the faster modes have not yet died out; (4.7) assumes that they have.</p>
+<h3>The N = 1000 run</h3>
+<p>The run for \(N=1000\) tests the modal description at a size where the transient dominates. It took 634 s, 3.3 ms per sweep, and wrote 19 progress lines. Its residuals fall as \(1/k\) at first (\(2.42\times10^{-5}\), \(1.21\times10^{-5}\) and \(8.06\times10^{-6}\) at sweeps 10,000, 20,000 and 30,000) and only later approach a geometric decay, so a person who read the factor \(\hat\rho\) from the first lines would predict a much shorter run. The program below copies eight of the logged residuals, computes the exact discrete solution \(u^{*}\) from its sine series in \(j\) and its hyperbolic profile in \(i\), expands \(e^{0}=-u^{*}\) in the modes, and evaluates the residual after each logged sweep from the expansion. It also evaluates the error at the stopping sweep and the residual that the leading mode alone would give there. The program holds \(10^{6}\) modes; its matrix products take about 15 s on this machine, and the check is exact.</p>
+<pre><code class="language-python" data-file="modal_big.py" data-run="python3 modal_big.py">"""Predict the residual log of the N = 1000 Jacobi run from the eigenmodes, and the error at its stop.
+
+The logged residuals are copied from one run of the C solver (jacobi_log.c with the iteration limit
+raised to 2,000,000 and a progress line every 10,000 sweeps), which took 10.6 minutes.
+"""
+import numpy as np
+
+N = 1000
+LOG = {10000: 2.419687e-05, 20000: 1.209857e-05, 30000: 8.064885e-06, 50000: 4.824432e-06,
+       100000: 2.297740e-06, 150000: 1.394993e-06, 190000: 1.007588e-06, 191001: 9.999952e-07}
+theta = np.pi / (N + 1)
+n = np.arange(1, N + 1)
+S = np.sin(np.outer(n, n) * theta)                       # S[i-1, p-1] = sin(p i theta)
+cosq = np.cos(n * theta)
+
+# Exact discrete solution u*: sine series in j, hyperbolic profile in i (the top edge is i = 0).
+g = (2.0 / (N + 1)) * S.sum(axis=0)                      # sine coefficients of the constant 1
+tau = np.arccosh(2.0 - cosq)                             # cosh(tau) = 2 - cos(q theta)
+i = n[:, None]
+profile = np.exp(-i * tau) * (1 - np.exp(-2 * (N + 1 - i) * tau)) / (1 - np.exp(-2 * (N + 1) * tau))
+ustar = (profile * g) @ S.T                              # ustar[i-1, j-1]
+
+c = (2.0 / (N + 1)) ** 2 * S.T @ (-ustar) @ S            # coefficients of e0 = -u*
+mu = 0.5 * (cosq[:, None] + cosq[None, :])
+print(f"N = {N}: rho = {np.cos(theta):.9f}, 1 - rho = {1 - np.cos(theta):.3e}")
+print("sweep      residual in the log   residual from the modes   ratio")
+for k, logged in LOG.items():
+    d = S @ (c * (mu - 1.0) * mu ** (k - 1)) @ S.T       # change of sweep k
+    r = np.abs(d).max()
+    print(f"{k:6d} {logged:22.6e} {r:25.6e} {r / logged:8.4f}")
+k = 191001
+err = np.abs(S @ (c * mu ** k) @ S.T).max()
+print(f"error at sweep {k}: {err:.3f}   residual/(1-rho): {LOG[k] / (1 - np.cos(theta)):.3f}")
+lead = np.abs(np.outer(S[:, 0], S[:, 0]) * c[0, 0] * (mu[0, 0] - 1.0) * mu[0, 0] ** (k - 1)).max()
+print(f"residual at sweep {k} from the leading mode alone: {lead:.3e}; from all modes: {LOG[k]:.3e}")
+</code></pre>
+<pre><code class="output">N = 1000: rho = 0.999995075, 1 - rho = 4.925e-06
+sweep      residual in the log   residual from the modes   ratio
+ 10000           2.419687e-05              2.419687e-05   1.0000
+ 20000           1.209857e-05              1.209857e-05   1.0000
+ 30000           8.064885e-06              8.064885e-06   1.0000
+ 50000           4.824432e-06              4.824432e-06   1.0000
+100000           2.297740e-06              2.297740e-06   1.0000
+150000           1.394993e-06              1.394993e-06   1.0000
+190000           1.007588e-06              1.007588e-06   1.0000
+191001           9.999952e-07              9.999952e-07   1.0000
+error at sweep 191001: 0.167   residual/(1-rho): 0.203
+residual at sweep 191001 from the leading mode alone: 7.792e-07; from all modes: 1.000e-06</code></pre>
+<p>The modal residual equals the logged residual to the seven printed digits at all eight sweeps, from 10,000 to 191,001; the expansion was fitted to nothing in the log, and the log came from a different program. The error of the iterate at the stopping sweep is 0.167, so the run that the rule \(r\lt10^{-6}\) declared converged has a maximum error of 17 % of the boundary value 1. The estimate \(r/(1-\rho)\), derived as (4.8) in the next subsection, gives 0.203, 22 % above the exact value; at \(N=16\) it was 1.7 % above. The estimate is larger here because the faster modes still carry part of the residual: the leading mode alone gives \(7.79\times10^{-7}\) at the stopping sweep, and the other modes supply the remaining 22 % of the logged \(1.00\times10^{-6}\). That is the reason why (4.7) is 26.5 % low for \(N=1000\).</p>
+<h3>What the residual does not bound</h3>
+<p>The last column of the output of <code>end_prediction.py</code> states a consequence that the log hides. The stopping rule bounds the change per sweep, \(r_k\lt\mathrm{tol}\), and not the error \(\lVert u^{k}-u^{*}\rVert_{\infty}\). For the leading mode the change and the error are linked by the factor \(\mu-1\) of the expansion of \(d^{k}\): \(d^{k}=(\mu_{11}-1)e^{k}\), so</p>
+\[
+\lVert e^{k}\rVert_{\infty}\approx\frac{r_{k+1}}{1-\rho}.
+\tag{4.8}
+\]
+<p>Equation (4.8) is an estimate, not a bound. Two exact statements hold. Since \(e^{k}=-(I-B)^{-1}d^{k}\) and the eigenvalues of the symmetric map \(B\) lie in \([-\rho,\rho]\), the root-sum-of-squares norm satisfies \(\lVert e^{k}\rVert_{2}\le\lVert d^{k}\rVert_{2}/(1-\rho)\), with equality for the leading mode. In the max-norm the guaranteed constant is the largest row sum of \((I-B)^{-1}\), which is 23.15, 84.43, 320.18 and 1244.31 for \(N=8,16,32,64\), that is 1.40 to 1.45 times \(1/(1-\rho)\) (a computation made outside the code lab). A stopping rule that must guarantee \(\lVert e\rVert_\infty\lt\delta\) therefore needs \(\mathrm{tol}\approx\delta(1-\rho)/1.45\).</p>
+<p>The factor \(1/(1-\rho)\approx2(N+1)^{2}/\pi^{2}\) grows with the square of \(N\). At the stopping sweep of the \(N=16\) run, the modal computation of the last line of <code>modal_check.py</code> gives an error of \(5.761\times10^{-5}\) against \(r/(1-\rho)=5.861\times10^{-5}\) from (4.8), which differ by 1.7 %. The error at the stop is therefore 58 times the tolerance for \(N=16\), and the last column of the output of <code>end_prediction.py</code> gives \(\mathrm{tol}/(1-\rho)=1.66\times10^{-5}\), \(5.87\times10^{-5}\), \(2.21\times10^{-4}\), \(8.56\times10^{-4}\) and \(2.07\times10^{-3}\) for \(N=8\) to 100. At \(N=1000\) the factor is \(2\times10^{5}\), and the run of the previous subsection stopped with an error of 0.167. To bring the error below \(\delta\), the tolerance on the change must be about \(\delta(1-\rho)\), and (4.7) then gives \(k_{\mathrm{end}}\approx\ln(a/\delta)/(-\ln\rho)\): for \(N=1000\) and \(\delta=10^{-6}\), \(\ln(4.053\times10^{5})/(4.925\times10^{-6})=2.62\times10^{6}\) sweeps, which is 2.4 hours at the 3.3 ms per sweep of the run above, against 191,001 sweeps for the rule \(r\lt10^{-6}\). The guaranteed max-norm constant of 1.45 changes that count by \(\ln1.45/(4.925\times10^{-6})=7.5\times10^{4}\) sweeps, about 3 %. The ratio \(A/\mathrm{tol}\) is \(a/\delta=4.05\times10^{5}\) in this case, so (4.7) is in its range of validity there. The error discussed here is the iteration error with respect to the discrete solution \(u^{*}\), not the discretization error of \(u^{*}\) as an approximation of the continuous solution. The relation (4.8) holds in the asymptotic range, where one mode dominates; it was tested at \(N=16\) (1.7 % above the exact error) and at \(N=1000\) (22 % above), and the second test is outside the asymptotic range.</p>
+<p>The boundary of the result is the problem. The closed form (4.4) holds for the Jacobi iteration on a square grid with equal spacing in both directions and constant Dirichlet values on each edge. Gauss&ndash;Seidel has the factor \(\rho^{2}\) (Demmel), and conjugate gradients do not converge at a constant factor. The estimator \(\hat\rho\) assumes a log in which the residual is the same measure at every line. A log that mixes measures, for instance the change per sweep on some lines and \(\lVert b-\mathsf Au^{k}\rVert_\infty\), four times larger for Jacobi, on others, gives wrong ratios across the switch. The cost of the run follows from (4.4): the number of sweeps grows with \(N^{2}\), and the work per sweep also grows with \(N^{2}\), so the total work grows with \(N^{4}\), a fact that returns in chapter 9.</p>
+<figure>
+<svg viewBox="0 0 720 290" role="img" aria-labelledby="fig-resid-title fig-resid-desc" font-family="system-ui, sans-serif" font-size="12" fill="currentColor">
+<title id="fig-resid-title">Logged residuals of the N = 16 Jacobi run against the sweep number</title>
+<desc id="fig-resid-desc">A semilogarithmic plot. Ten circles show the residual every 50 sweeps from 3.96e-3 at sweep 50 to 1.29e-6 at sweep 500. A straight line, the asymptote A times rho to the k, passes below the first circles and through the last. A dashed horizontal line marks the tolerance 1e-6, reached at sweep 515.</desc>
+<rect x="70" y="20" width="620" height="210" fill="none" stroke="currentColor" stroke-width="1"/>
+<line x1="70" y1="20.0" x2="690" y2="20.0" stroke="currentColor" stroke-opacity="0.2"/>
+<text x="62" y="24.0" text-anchor="end">10<tspan dy="-5" font-size="9">-2</tspan></text>
+<line x1="70" y1="70.0" x2="690" y2="70.0" stroke="currentColor" stroke-opacity="0.2"/>
+<text x="62" y="74.0" text-anchor="end">10<tspan dy="-5" font-size="9">-3</tspan></text>
+<line x1="70" y1="120.0" x2="690" y2="120.0" stroke="currentColor" stroke-opacity="0.2"/>
+<text x="62" y="124.0" text-anchor="end">10<tspan dy="-5" font-size="9">-4</tspan></text>
+<line x1="70" y1="170.0" x2="690" y2="170.0" stroke="currentColor" stroke-opacity="0.2"/>
+<text x="62" y="174.0" text-anchor="end">10<tspan dy="-5" font-size="9">-5</tspan></text>
+<line x1="70" y1="220.0" x2="690" y2="220.0" stroke="currentColor" stroke-opacity="0.2"/>
+<text x="62" y="224.0" text-anchor="end">10<tspan dy="-5" font-size="9">-6</tspan></text>
+<line x1="70.0" y1="230" x2="70.0" y2="235" stroke="currentColor"/>
+<text x="70.0" y="249" text-anchor="middle">0</text>
+<line x1="184.8" y1="230" x2="184.8" y2="235" stroke="currentColor"/>
+<text x="184.8" y="249" text-anchor="middle">100</text>
+<line x1="299.6" y1="230" x2="299.6" y2="235" stroke="currentColor"/>
+<text x="299.6" y="249" text-anchor="middle">200</text>
+<line x1="414.4" y1="230" x2="414.4" y2="235" stroke="currentColor"/>
+<text x="414.4" y="249" text-anchor="middle">300</text>
+<line x1="529.3" y1="230" x2="529.3" y2="235" stroke="currentColor"/>
+<text x="529.3" y="249" text-anchor="middle">400</text>
+<line x1="644.1" y1="230" x2="644.1" y2="235" stroke="currentColor"/>
+<text x="644.1" y="249" text-anchor="middle">500</text>
+<text x="380.0" y="270" text-anchor="middle">sweep k</text>
+<text x="14" y="125.0" text-anchor="middle" transform="rotate(-90 14 125.0)">residual r</text>
+<line x1="70" y1="220.0" x2="690" y2="220.0" stroke="currentColor" stroke-dasharray="6 4"/>
+<text x="686" y="214.0" text-anchor="end">tolerance 10<tspan dy="-5" font-size="9">-6</tspan></text>
+<line x1="661.3" y1="20" x2="661.3" y2="230" stroke="currentColor" stroke-opacity="0.5" stroke-dasharray="2 3"/>
+<text x="657.3" y="34" text-anchor="end">converged at k = 515</text>
+<line x1="70.0" y1="28.0" x2="690.0" y2="229.4" stroke="currentColor" stroke-width="1.6"/>
+<text x="138.9" y="86.4">line A&#961;<tspan dy="-5" font-size="9">k</tspan></text>
+<circle cx="127.4" cy="40.1" r="4" fill="currentColor"/>
+<circle cx="184.8" cy="64.4" r="4" fill="currentColor"/>
+<circle cx="242.2" cy="83.8" r="4" fill="currentColor"/>
+<circle cx="299.6" cy="102.5" r="4" fill="currentColor"/>
+<circle cx="357.0" cy="121.2" r="4" fill="currentColor"/>
+<circle cx="414.4" cy="139.9" r="4" fill="currentColor"/>
+<circle cx="471.9" cy="158.5" r="4" fill="currentColor"/>
+<circle cx="529.3" cy="177.2" r="4" fill="currentColor"/>
+<circle cx="586.7" cy="195.8" r="4" fill="currentColor"/>
+<circle cx="644.1" cy="214.5" r="4" fill="currentColor"/>
+</svg>
+<figcaption>Figure 4.2. The ten logged residuals of the \(N=16\) run (circles) on a logarithmic axis, and the line \(r_k=A\rho^{k}\) with \(\rho=\cos(\pi/17)\) and \(A=0.00692\) fixed by the last logged point. The first points lie above the line, because the faster modes have not yet died out; the last points lie on it. The dashed line is the tolerance \(10^{-6}\), crossed at sweep 515.</figcaption>
+</figure>
+
+<h2 id="memory">Memory: virtual and resident size, and what free reports <a class="timestamp" href="https://www.youtube.com/watch?v=TNlzx44rR88&amp;t=6s">W1L6 0:06</a></h2>
+<p>The lecture lists the concepts of Linux memory management on a slide: physical memory, the actual hardware memory; virtual memory, "an abstraction that allows processes to use more memory than the physically available RAM"; swap space, disk space reserved for pages when physical memory runs out, slower than RAM; and paging, the division of memory into fixed-size chunks called pages. It then names five commands: <code>free</code> (RAM and swap usage), <code>vmstat</code> (virtual memory statistics), <code>df</code> (disk space usage), <code>swapon</code> (show, enable or disable swap space) and <code>meminfo</code> (detailed memory information). The lecture shows no output of these commands. This section supplies the definitions that the output needs, and tests them on the running case.</p>
+<h3>Virtual size and resident size</h3>
+<p>A process addresses <em>virtual</em> memory: a set of mappings from ranges of virtual addresses to storage. The kernel divides memory into pages, 4096 bytes on this machine (the machine listing prints it). A page that is present in RAM is <em>resident</em>. The kernel reports two sizes per process in <code>/proc/PID/status</code>: <code>VmSize</code>, the size of the virtual address space, and <code>VmRSS</code>, the resident set size, which is the sum of the lines <code>RssAnon</code>, <code>RssFile</code> and <code>RssShmem</code>. The manual marks the values as inaccurate, because of a kernel-internal scalability optimization, and names <code>/proc/PID/smaps</code> and <code>/proc/PID/smaps_rollup</code> as the slower, accurate sources (proc_pid_status(5), proc_pid_statm(5)). The two sizes differ because the kernel allocates RAM for an anonymous mapping, the kind that <code>malloc</code> uses for a large request, only when a page is first written, which is called demand paging. A program can therefore hold a large virtual size and a small resident size. The slide's statement that virtual memory lets a process use more memory than the physical RAM follows from this: a process may map more than it ever touches, and the kernel may move rarely used pages to swap. Virtual memory also gives each process a private address space, which the slide does not mention.</p>
+<p>The prediction for the running case is simple. The solver holds two grids of \((N+2)^{2}\) doubles, which is \(16(N+2)^{2}\) bytes. For \(N=16\) that is 5184 bytes, the number on the diagnostic line of the solver. For \(N=1000\) it is 16,064,064 bytes (15.3 MiB), and for \(N=4000\) it is 256,256,064 bytes (244.4 MiB). The program below allocates the two grids of \(N=4000\) with <code>malloc</code> and reads <code>VmSize</code> and <code>VmRSS</code> before the allocation, after it, and after it has written every element once. The stores go through a pointer to <code>volatile double</code>, because otherwise the compiler removes the allocation and the stores, and the program measures nothing. The output is deterministic at the resolution that the program prints, and the check is exact. The program checks, in its last line, that the growth of <code>VmRSS</code> is within 1 MiB of the prediction.</p>
+<pre><code class="language-c" data-file="memory_model.c" data-build="gcc -O2 memory_model.c -o memory_model -lm" data-run="./memory_model">#include &lt;math.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+/* Read one "Name: value kB" line of /proc/self/status; return the value in kB. */
+static long status_kb(const char *name)
+{
+    char line[256];
+    long value = -1;
+    FILE *f = fopen("/proc/self/status", "r");
+    if (!f) return -1;
+    size_t len = strlen(name);
+    while (fgets(line, sizeof line, f))
+        if (strncmp(line, name, len) == 0 &amp;&amp; line[len] == ':') value = atol(line + len + 1);
+    fclose(f);
+    return value;
+}
+
+int main(void)
+{
+    const int N = 4000;
+    size_t cells = (size_t)(N + 2) * (N + 2);
+    double predicted_mib = 2.0 * cells * sizeof(double) / (1024.0 * 1024.0);
+    printf("prediction: 2 x %d x %d x 8 bytes = %.1f MiB\n", N + 2, N + 2, predicted_mib);
+
+    long size0 = status_kb("VmSize"), rss0 = status_kb("VmRSS");
+    double *u = malloc(cells * sizeof *u), *unew = malloc(cells * sizeof *unew);
+    long size1 = status_kb("VmSize"), rss1 = status_kb("VmRSS");
+    volatile double *pu = u, *pn = unew;      /* volatile: the compiler must perform every store */
+    for (size_t i = 0; i &lt; cells; i++) { pu[i] = 0.0; pn[i] = 0.0; }   /* first touch of every page */
+    long size2 = status_kb("VmSize"), rss2 = status_kb("VmRSS");
+
+    printf("after malloc:      VmSize +%4ld MiB   VmRSS +%4ld MiB\n",
+           lround((size1 - size0) / 1024.0), lround((rss1 - rss0) / 1024.0));
+    printf("after first touch: VmSize +%4ld MiB   VmRSS at %ld %% of the prediction\n",
+           lround((size2 - size0) / 1024.0), lround(100.0 * (rss2 - rss0) / 1024.0 / predicted_mib));
+    printf("growth of VmRSS within 1 MiB of the prediction: %s\n",
+           fabs((rss2 - rss0) / 1024.0 - predicted_mib) &lt; 1.0 ? "yes" : "no");
+    return 0;
+}
+</code></pre>
+<pre><code class="output">prediction: 2 x 4002 x 4002 x 8 bytes = 244.4 MiB
+after malloc:      VmSize + 244 MiB   VmRSS +   0 MiB
+after first touch: VmSize + 244 MiB   VmRSS at 100 % of the prediction
+growth of VmRSS within 1 MiB of the prediction: yes</code></pre>
+<p>The allocation raises <code>VmSize</code> by 244 MiB and leaves <code>VmRSS</code> unchanged at the printed resolution. The first write to every page raises <code>VmRSS</code> to 100 % of the prediction, rounded to whole percent (a growth between 243.2 and 245.6 MiB), and the last line of the output records that the growth is within 1 MiB of 244.4 MiB. The program prints a percentage and not whole mebibytes because the measured growth lies close to the rounding boundary 244.5 MiB, and a rounded value would change from run to run. The prediction therefore holds for an anonymous allocation of known size, and the resident size is the quantity to compare with a memory limit. Which pages are touched first also decides where a multi-socket machine places them, a point that chapters 7 and 21 take up. A person who plans a run uses \(16(N+2)^{2}\) bytes as a lower bound. For the sample value of 15,207.1 MiB of available memory on this machine (the <code>available</code> row of the next listing, from <code>/proc/meminfo</code>), the two grids fit up to \(N=31{,}567\), and the lecture's machine, with 2,500,528 KiB available on its <code>top</code> screen, fits \(N\) up to 12,648 under the same rule; exercise 2 asks for the computation. The rule counts the grids only and ignores the program, the log and the other processes.</p>
+<h3>The columns of free</h3>
+<p>The lecture's <code>free</code> shows total, used, free, shared, buffers/cache and available memory for RAM and swap. The manual of <code>free</code> defines each column through a field of <code>/proc/meminfo</code>: <code>total</code> is <code>MemTotal</code>; <code>free</code> is <code>MemFree</code>; <code>shared</code> is <code>Shmem</code>; <code>buff/cache</code> is <code>Buffers</code> plus <code>Cached</code> plus <code>SReclaimable</code>; <code>available</code> is <code>MemAvailable</code>, an estimate of how much memory is available for starting new applications without swapping; and <code>used</code> is <code>total</code> minus <code>available</code> (free(1)). <code>MemAvailable</code> exists since Linux 3.14 (proc_meminfo(5)), and the kernel documentation states that it is computed from <code>MemFree</code>, the reclaimable slab, the size of the file lists and the low watermarks, and that it counts the page cache that the system needs to function as not available. The program below recomputes the six columns from <code>/proc/meminfo</code> and compares them with the output of <code>free -k</code>. It reads the file first and calls <code>free</code> second, so the two readings differ by whatever the memory changed between them; the check is the return code, with a tolerance of 64 MiB, and the printed numbers are one sample run.</p>
+<pre><code class="language-python" data-file="meminfo_check.py" data-run="python3 meminfo_check.py" data-check="returncode">"""Recompute the columns of `free -k` from /proc/meminfo and compare them with free's output."""
+import subprocess
+
+meminfo = {}
+with open("/proc/meminfo") as f:
+    for line in f:
+        name, rest = line.split(":")
+        meminfo[name] = int(rest.split()[0])               # every value used here is in kB
+
+mine = {
+    "total": meminfo["MemTotal"],
+    "used": meminfo["MemTotal"] - meminfo["MemAvailable"],
+    "free": meminfo["MemFree"],
+    "shared": meminfo["Shmem"],
+    "buff/cache": meminfo["Buffers"] + meminfo["Cached"] + meminfo["SReclaimable"],
+    "available": meminfo["MemAvailable"],
+}
+out = subprocess.run(["free", "-k"], capture_output=True, text=True).stdout.splitlines()
+theirs = dict(zip(["total", "used", "free", "shared", "buff/cache", "available"],
+                  (int(x) for x in out[1].split()[1:7])))
+
+print(f"{'column':&lt;11}{'from /proc/meminfo':&gt;20}{'from free -k':&gt;14}{'difference':&gt;12}   (MiB)")
+worst = 0.0
+for k in mine:
+    diff = (mine[k] - theirs[k]) / 1024
+    worst = max(worst, abs(diff))
+    print(f"{k:&lt;11}{mine[k] / 1024:20.1f}{theirs[k] / 1024:14.1f}{diff:12.1f}")
+print("all columns agree within 64 MiB:", "yes" if worst &lt; 64 else "no")
+raise SystemExit(0 if worst &lt; 64 else 1)
+</code></pre>
+<pre><code class="output">column       from /proc/meminfo  from free -k  difference   (MiB)
+total                   15829.2       15829.2         0.0
+used                      622.1         622.6        -0.5
+free                    14298.1       14297.6         0.5
+shared                      3.5           3.5         0.0
+buff/cache               1142.6        1142.6         0.0
+available               15207.1       15206.6         0.5
+all columns agree within 64 MiB: yes</code></pre>
+<p>In this sample all six columns agree with <code>free</code> within 0.5 MiB: <code>total</code>, <code>shared</code> and <code>buff/cache</code> agree exactly, and <code>used</code>, <code>free</code> and <code>available</code> differ by 0.5 MiB because the memory changed between the two readings (in other runs the differences were all 0.0, or 1.0 MiB). The identities of the manual hold on this machine.</p>
+<p>The definition of <code>used</code> on the lecture's screen is not the one of the <code>free</code> installed here. The slide's <code>top</code> memory line satisfies \(\text{total}=\text{free}+\text{used}+\text{buff/cache}\) exactly, as the previous section computed, so <code>used</code> there is total minus free minus buffers and cache. It does not satisfy \(\text{used}=\text{total}-\text{available}\): the slide's available memory is 2,500,528 KiB, and \(3{,}861{,}052-2{,}500{,}528=1{,}360{,}524\), against the displayed 1,064,472. The version of the lecture's <code>top</code> is not shown, so the chapter does not say which version changed the definition. The consequence for a reader is that the number called <code>used</code> must be read with the manual of the installed version, and that <code>available</code> is the number to use when the question is whether a new process fits.</p>
+<h3>The other commands of the slide</h3>
+<p><code>vmstat</code> reports information about processes, memory, paging, block input and output, traps, disks and processor activity (vmstat(8)). <code>swapon</code> specifies the devices on which paging and swapping take place, and with <code>--show</code> it lists them (swapon(8)); the guest here has 4096 MiB of swap in <code>free</code>, shown in the machine listing. Two entries of the slide need a remark. <code>df</code> is listed with the memory commands, but, as the slide says, it reports disk space: the space used and available on file systems (GNU coreutils manual), which chapter 3 treats. <code>meminfo</code> is not a command: the machine listing shows that no such command exists, and the fields are the file <code>/proc/meminfo</code>, read with <code>cat</code> or <code>grep</code>.</p>
+
+<h2 id="network">Networking: interfaces, round-trip time and remote login <a class="timestamp" href="https://www.youtube.com/watch?v=TNlzx44rR88&amp;t=148s">W1L6 2:28</a></h2>
+<p>The lecture describes networking in Linux as the configuration, monitoring and management of network connections, protocols and services, and distinguishes two kinds of interface. The loopback interface is a virtual interface for communication within the system, with the default address 127.0.0.1. The physical interfaces are Ethernet (<code>eth0</code>, <code>eth1</code>) and Wi-Fi (<code>wlan0</code>). It then names five commands: <code>ping</code> (test connectivity to a host), <code>ip</code> (show and manipulate routing, devices and policy routing), <code>ssh</code> (secure shell for remote login and command execution), <code>wget</code> (retrieve files from the web) and <code>scp</code> (copy files securely between hosts). It shows one remote login, from a local machine to a cluster, and states that this is the usual way to reach a high-performance system.</p>
+<h3>Interfaces, and the cost of a message</h3>
+<p>A <em>host</em> in this section is a machine with a set of network interfaces, each with an IPv4 address of 32 bits written as four decimal bytes. RFC 1122 reserves the addresses whose first byte is 127 as the internal host loopback address and requires that they never appear outside the host (§3.2.1.3, p. 31). The block 127.0.0.0/8 is therefore the loopback address space, and 127.0.0.1 is the one address that the interface <code>lo</code> carries by default; the first output block of the listing below prints <code>lo UNKNOWN 127.0.0.1/8</code>, where the prefix length 8 means that the whole block is local. The WSL guest configures a second address on <code>lo</code>, which the listing does not print because it keeps only the first three fields. The current manual describes <code>ip</code> as showing and manipulating routing, network devices, interfaces and tunnels (ip(8)); the lecture's description names routing, devices and policy routing.</p>
+<p>The cost of sending a message of \(m\) bytes between two hosts is modelled in this book as \(T_{\mathrm{msg}}(m)=\alpha+\beta m\), where \(\alpha\) is the latency in seconds and \(\beta\) is the inverse bandwidth in seconds per byte. <code>ping</code> measures a round trip. It sends an ICMP echo request and waits for the echo reply; RFC 792 defines the echo message as type 8 and the reply as type 0, and requires that the data received in the echo message be returned in the reply (pp. 14&ndash;15). The default payload is 56 data bytes, which with the 8-byte ICMP header gives the 64 bytes that <code>ping</code> prints (ping(8)). If both directions cost the same, the round-trip time is \(\mathrm{RTT}(m)=2\alpha+2\beta m\). The loopback interface does not use a network card, so \(\alpha\) here is the time of the kernel's software path, and \(\beta^{-1}\) is the rate at which the kernel copies the payload. The listing measures both on this machine and then fetches a file through the interface with <code>wget</code>.</p>
+<p>The script prints the loopback interface, then sends 100 echo requests at 10 ms spacing for each of five payload sizes and keeps the minimum round-trip time, which suppresses interference from other processes at the cost of hiding variability. The least-squares line through the five minima gives an intercept and a slope. A second part starts the Python module <code>http.server</code> on a free port of the loopback address, fetches a small file with <code>wget</code>, compares it with the original by <code>cmp</code>, then fetches 200 MB of zeros and divides by the elapsed time. The script starts one server, keeps its PID in <code>$!</code> and ends it with <code>kill</code> on that PID. The printed timings are one sample run; the check is the return code.</p>
+<pre><code class="language-bash" data-file="loopback.sh" data-run="bash loopback.sh" data-check="returncode">cd "$(mktemp -d /tmp/hpsc-demo.XXXXXX)"
+
+echo "== the loopback interface"
+ip -brief address show lo | awk '{print $1, $2, $3}'
+
+echo "== ping on the loopback interface: minimum round-trip time against payload size"
+: &gt; rtt.txt
+for m in 16 16000 32000 48000 65000; do
+    ping -c 100 -i 0.01 -s $m -q 127.0.0.1 | awk -F'[/ =]+' -v m=$m '/^rtt/ {print m, $6 * 1000}' &gt;&gt; rtt.txt
+done
+awk '{printf "payload %6d B   minimum RTT %7.1f us\n", $1, $2}' rtt.txt
+awk '{n++; sx += $1; sy += $2; sxx += $1 * $1; sxy += $1 * $2}
+     END {b = (n * sxy - sx * sy) / (n * sxx - sx * sx); a = (sy - b * sx) / n
+          printf "least squares  RTT = %.1f us + %.5f us/B x payload\n", a, b
+          printf "one way: alpha = %.1f us, 1/beta = %.2f GB/s\n", a / 2, 2 / b / 1000}' rtt.txt
+
+echo "== a file served on the loopback interface and fetched with wget"
+head -c 200000000 /dev/zero &gt; big.bin
+printf 'iter 500 residual 1.291163e-06\n' &gt; small.log
+port=$(python3 -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 0)); print(s.getsockname()[1])")
+python3 -m http.server $port --bind 127.0.0.1 &gt; /dev/null 2&gt;&amp;1 &amp;
+server=$!
+until wget -q --spider http://127.0.0.1:$port/small.log 2&gt; /dev/null; do sleep 0.1; done
+wget -q -O copy.log http://127.0.0.1:$port/small.log
+cmp small.log copy.log &amp;&amp; echo "copy.log is identical to small.log"
+start=$(date +%s.%N)
+wget -q -O /dev/null http://127.0.0.1:$port/big.bin
+end=$(date +%s.%N)
+awk -v t0=$start -v t1=$end 'BEGIN {printf "200 MB over loopback in %.2f s: %.0f MB/s\n", t1 - t0, 200 / (t1 - t0)}'
+kill $server
+wait $server 2&gt; /dev/null
+exit 0
+</code></pre>
+<pre><code class="output">== the loopback interface
+lo UNKNOWN 127.0.0.1/8
+== ping on the loopback interface: minimum round-trip time against payload size
+payload     16 B   minimum RTT    26.0 us
+payload  16000 B   minimum RTT    19.0 us
+payload  32000 B   minimum RTT    35.0 us
+payload  48000 B   minimum RTT    38.0 us
+payload  65000 B   minimum RTT    35.0 us
+least squares  RTT = 23.3 us + 0.00023 us/B x payload
+one way: alpha = 11.6 us, 1/beta = 8.80 GB/s
+== a file served on the loopback interface and fetched with wget
+copy.log is identical to small.log
+200 MB over loopback in 0.10 s: 2060 MB/s</code></pre>
+<p>The interface line and the copy check do not vary. In this sample the minimum round-trip time is 26 µs for a 16-byte payload and between 19 and 38 µs for payloads of 16,000 to 65,000 bytes, and the fitted line is \(23.3\ \mu\mathrm{s}+0.00023\ \mu\mathrm{s/B}\cdot m\), so \(\alpha=11.6\ \mu\mathrm{s}\) and \(\beta^{-1}=8.8\) GB/s. In five other runs the intercept was 24.3, 24.3, 26.6, 26.6 and 27.0 µs and the slope 0.0003, 0.0005 and 0.0003 µs/B (three earlier runs, which printed four decimals) and 0.00029 and 0.00018 µs/B (two later runs, five decimals), so \(\alpha\) lies between 11.6 and 13.5 µs and \(\beta^{-1}=2/\text{slope}\) between 4.0 and 11.1 GB/s over the six runs, including the sample's 8.8 GB/s. The slope is not resolved by this method. Each minimum has a resolution of 1 µs, the five minima do not increase monotonically (in this sample the minimum at 16,000 B, 19 µs, is below the one at 16 B, 26 µs), and the slope is the difference of numbers of that resolution. The measurement determines \(\alpha\) to within about 15 % and \(\beta\) only to within a factor of 2.8. The file transfer gives a second bound: 200 MB in 0.10 s is 2.06 GB/s in this sample (2.1 to 2.3 GB/s in three other runs on an otherwise idle machine; in a run made while other processes were active it fell to 1.07 GB/s, with \(\alpha=10.1\ \mu\mathrm{s}\) and \(\beta^{-1}=4.45\) GB/s), which is a lower bound on the rate of the loopback path, because the figure includes the Python server and <code>wget</code>, and it depends on the load. With \(\alpha=12\ \mu\mathrm{s}\) and a bandwidth between 1.1 and 11.1 GB/s, the message size at which the latency equals the transfer time, \(m_{1/2}=\alpha/\beta\), lies between 13 kB and 133 kB. The numbers describe the software path inside one machine. They say nothing about a physical network, whose latency and bandwidth depend on the cable, the card and the switch, and which chapters 14 and 28 measure with MPI.</p>
+<h3>Remote login and copying</h3>
+<p>The lecture's <code>ssh</code> example logs in from a local machine to a server with the command <code>ssh user@address</code>; the server asks for a password, and after it accepts, the prompt shows that the commands now run on the server and the directory listing is that of the server. RFC 4251 describes the protocol as three components: the transport layer protocol provides server authentication, confidentiality and integrity; the user authentication protocol authenticates the client to the server; and the connection protocol multiplexes the encrypted tunnel into logical channels (§1). The <code>ssh</code> manual describes the program as one for logging into a remote machine and for executing commands on it (ssh(1)); with a command after the host name it runs that command and returns its output without an interactive login. The test machine has no SSH server, so the chapter does not demonstrate a login. The option <code>-G</code> makes <code>ssh</code> print the configuration that it would use for a connection and exit, which lets a person check the user, the host and the port that a command line selects before connecting.</p>
+<p>The lecture states that <code>scp</code> copies files securely between hosts. The manual states that <code>scp</code> uses the SFTP protocol over an <code>ssh</code> connection and the same authentication and security as a login session (scp(1)). That was not always so: the OpenSSH 9.0 release notes (April 2022) record the switch of <code>scp</code> from the legacy scp/rcp protocol to SFTP by default, and note that the legacy protocol expanded wildcards in remote file names through the remote shell, which made double quoting of shell characters necessary. The machine here has OpenSSH 9.6, so the new behaviour applies. The script below uses only commands that need no server. <code>ssh -G</code> shows the connection that a command line selects, <code>scp</code> between two local paths shows that the command line is the same as for a remote copy, and a name with a colon shows the rule by which <code>scp</code> reads the text before a colon as a host name. The output is deterministic, and the check is exact.</p>
+<pre><code class="language-bash" data-file="ssh_tools.sh" data-run="bash ssh_tools.sh">cd "$(mktemp -d /tmp/hpsc-demo.XXXXXX)"
+
+echo "== the connection ssh would make, without making it"
+ssh -G -p 2222 alice@login.example.org 2&gt; /dev/null | grep -E '^(user|hostname|port) '
+
+echo "== scp between two local paths uses the same command line as a remote copy"
+printf 'iter 500 residual 1.291163e-06\n' &gt; run.log
+scp run.log run_copy.log &amp;&amp; cmp run.log run_copy.log &amp;&amp; echo "run_copy.log is identical to run.log"
+
+echo "== a colon in the first path makes scp read a host name"
+echo data &gt; a:b.log
+scp a:b.log . &gt; /dev/null 2&gt;&amp;1; echo "scp a:b.log . exit status: $? (the host a could not be reached)"
+scp ./a:b.log c.log &amp;&amp; echo "./a:b.log is read as a local path"
+</code></pre>
+<pre><code class="output">== the connection ssh would make, without making it
+user alice
+hostname login.example.org
+port 2222
+== scp between two local paths uses the same command line as a remote copy
+run_copy.log is identical to run.log
+== a colon in the first path makes scp read a host name
+scp a:b.log . exit status: 255 (the host a could not be reached)
+./a:b.log is read as a local path</code></pre>
+<p>The command line <code>ssh -p 2222 alice@login.example.org</code> selects the user <code>alice</code>, the host <code>login.example.org</code> and port 2222, as <code>-G</code> prints. The local copy produces an identical file. A file name with a colon, <code>a:b.log</code>, is read as the file <code>b.log</code> on a host named <code>a</code>; the attempt fails with status 255 because the host cannot be reached, and the path <code>./a:b.log</code> is read as a local file. The practical rule for a log or result with a colon in its name, for example a timestamp, is to give the path a leading <code>./</code>. The chapter did not test password or key authentication, host-key checking or <code>wget</code> against a remote server; the lecture's example uses a password, and a cluster's access policy decides whether keys are required.</p>
+
+<h2 id="limits">What the chapter establishes and what it does not</h2>
+<p>The table lists the statements of the lectures that this chapter tested, with the status that the tests gave them. Where a spoken statement and a slide differ, the table says which one is tested.</p>
+<div class="table-wrap"><table>
+<caption>Table 4.1. Statements of the lectures and their status in this chapter.</caption>
+<thead><tr><th scope="col">Statement of the lecture</th><th scope="col">Status</th><th scope="col">Evidence in this chapter</th></tr></thead>
+<tbody>
+<tr><td>The lecture describes <code>sleep</code> as putting the CPU into an idle state.</td><td>Refined</td><td>The process blocks in state S and uses no processor time; the processor is idle only if nothing else is runnable (<code>jobs_demo.sh</code>, <code>states.c</code>).</td></tr>
+<tr><td>A process is put into the sleeping state because a higher-priority process arrives (spoken).</td><td>Not supported; the slide is correct</td><td>A preempted process stays in R; two busy loops on one processor are both R. Sleeping means waiting for an event (<code>states.c</code>; ps(1)).</td></tr>
+<tr><td>A zombie is a finished process whose memory has not been cleaned (spoken).</td><td>Corrected; the slide is correct</td><td>A zombie has no <code>VmRSS</code> line; the kernel keeps PID, status and resource usage in a process-table slot, which is kernel bookkeeping and no user memory (<code>states.c</code>; wait(2)).</td></tr>
+<tr><td>The lecture presents <code>ps -e</code> as listing all processes, including killed, stopped and zombie ones.</td><td>Refined</td><td>It lists every existing process, including stopped and zombie ones; a killed process that its parent has waited for no longer exists.</td></tr>
+<tr><td>The numbers of the <code>top</code> screen.</td><td>Consistent</td><td>\(1+206=207\) tasks; the processor line sums to 100.0; total \(=\) free \(+\) used \(+\) buff/cache; \(183{,}760/3{,}861{,}052=4.76\,\%\) is the printed 4.8.</td></tr>
+<tr><td><code>kill</code> sends SIGTERM by default; SIGKILL terminates by force; SIGSTOP stops and SIGCONT resumes.</td><td>Confirmed</td><td>Numbers 15, 9, 19 and 18 on x86 and ARM; SIGKILL and SIGSTOP cannot be caught (<code>states.c</code>; signal(7), kill(1)).</td></tr>
+<tr><td>In an HPC run each process, or each thread, works on one core.</td><td>Refined</td><td>The affinity mask defaults to all processors and is narrowed only by a call such as <code>sched_setaffinity</code> (<code>states.c</code>; sched_setaffinity(2)).</td></tr>
+<tr><td><code>grep -r "Ved" *</code> searches the files and directories below the current one.</td><td>Refined</td><td>The shell expands <code>*</code> without names that begin with a dot; <code>grep -r Ved .</code> reads all (<code>pipes.sh</code>, section 8).</td></tr>
+<tr><td><code>awk '/M/ {print $0}'</code> selects the males.</td><td>True for the sample file only</td><td>The pattern matches any line that contains <code>M</code>; <code>$3 == "M"</code> compares the field (<code>lecture_files.sh</code>).</td></tr>
+<tr><td><code>sort</code> sorts numerically.</td><td>Refined</td><td><code>-n</code> ignores exponents; <code>-g</code> reads them (<code>pipes.sh</code>, section 4).</td></tr>
+<tr><td><code>uniq</code> filters duplicate lines from sorted input.</td><td>Confirmed</td><td>Only adjacent duplicates are removed (<code>pipes.sh</code>, section 3).</td></tr>
+<tr><td>The pipe passes the output of one command as input to another.</td><td>Confirmed for standard output; incomplete</td><td>The stages run at the same time, the capacity is 65,536 bytes, a closed reader raises SIGPIPE, standard error is not carried (<code>pipes.sh</code>, sections 1, 2, 10).</td></tr>
+<tr><td><code>wc file2</code> prints <code>4 11 61</code>.</td><td>Lines and words confirmed; bytes unresolved</td><td>The four lines as displayed have 60 bytes; the extra byte of the slide is not visible (<code>lecture_files.sh</code>).</td></tr>
+<tr><td>The memory slide lists <code>df</code> and <code>meminfo</code> as commands.</td><td>Placement of <code>df</code> refined; <code>meminfo</code> corrected</td><td><code>df</code> reports file-system space, as the slide says; <code>meminfo</code> is the file <code>/proc/meminfo</code> (<code>machine.sh</code>).</td></tr>
+<tr><td><code>free</code> shows RAM and swap usage.</td><td>Confirmed, with a version note</td><td>Columns equal their <code>/proc/meminfo</code> definitions; the <code>used</code> of the lecture's screen is total \(-\) free \(-\) buff/cache, not total \(-\) available (<code>meminfo_check.py</code>).</td></tr>
+<tr><td>The loopback interface has the default address 127.0.0.1.</td><td>Refined</td><td>The interface carries 127.0.0.1/8, and the whole block is loopback (RFC 1122 §3.2.1.3).</td></tr>
+<tr><td><code>ssh</code> gives remote login and command execution; <code>scp</code> copies securely.</td><td>Confirmed</td><td>ssh(1), scp(1); since OpenSSH 9.0 <code>scp</code> uses SFTP by default (release notes).</td></tr>
+</tbody></table></div>
+<p>The chapter establishes the following. The formal model of streams, filters and pipelines describes which bytes flow, and the semantics of the pipe adds concurrency, a bounded buffer, exit statuses and a signal that the model omits. A regular expression defines a language, <code>grep</code> selects the lines that contain a string of that language, and a derivative matcher agrees with <code>grep -E</code> on the 127 shortest strings for seven expressions. A residual log of the Jacobi iteration has a factor per sweep that tends to \(\cos(\pi/(N+1))\), the factor from the last interval equals \(\rho\) to the six printed digits for \(N=16\) and 32 and agrees to \(2\times10^{-7}\) in relative terms for \(N=8\), and the end of the run is predicted to within one sweep from the last logged line, and from \(N\) alone to within 0.7 % for \(N\le500\) and 26.5 % low for \(N=1000\), where the stopping time precedes the end of the transient. The resident size of an anonymous allocation equals the predicted size after the first write. The columns of <code>free</code> are the stated combinations of <code>/proc/meminfo</code> fields.</p>
+<p>The chapter leaves out the following. The derivative matcher covers an ERE subset and strings of length at most 6 over two letters; it is not a proof for <code>grep</code>. Thompson's 1968 paper and Brzozowski's 1964 paper were not opened, so the history of the constructions rests on Cox (2007) and on Owens, Reppy and Turon (2009). Locales other than C were not tested, because the machine has none. The interactive commands <code>fg</code>, <code>top</code> and a remote <code>ssh</code> login were not run; their description rests on the lecture's slides and on the manuals. The timing measurements (the backtracking times, the ping minima and the file transfer rate) are single sessions on one laptop under WSL 2 with the run-to-run spread stated beside each; the ping slope in particular is not resolved. The closed form for the convergence factor is specific to Jacobi on a square grid with Dirichlet edges. The memory model covers one anonymous allocation and does not cover shared pages, file-backed pages, memory limits set by a container or a scheduler, or non-uniform memory. Each listing whose check is exact was run twice in the code lab and printed the same output both times; that is evidence of determinism and not of correctness beyond the stated checks.</p>
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> Let \(k_{10}\) be the number of sweeps in which the residual of the Jacobi iteration falls by a factor of 10 in the asymptotic range. Express \(k_{10}\) through (4.4), show that \(k_{10}\approx2(N+1)^{2}\ln10/\pi^{2}\) with a relative error of about \(\theta^{2}/6\) where \(\theta=\pi/(N+1)\), and evaluate both forms for \(N=16\) and \(N=1000\). Compare the exact value for \(N=16\) with the number of sweeps per decade that the log of the first listing shows between sweep 100 and sweep 400.</p>
+<details><summary>Solution</summary>
+<p>In the asymptotic range \(r_{k+k_{10}}=\rho^{k_{10}}r_k\), so \(\rho^{k_{10}}=1/10\) and \(k_{10}=\ln10/(-\ln\rho)\) with \(\rho=\cos\theta\). The series \(-\ln\cos\theta=\theta^{2}/2+\theta^{4}/12+\cdots\) gives \(-\ln\rho=(\theta^{2}/2)(1+\theta^{2}/6+\cdots)\), so \(k_{10}=(2\ln10/\theta^{2})(1-\theta^{2}/6+\cdots)\), and the leading term \(2(N+1)^{2}\ln10/\pi^{2}\) overestimates by the relative amount \(\theta^{2}/6\). For \(N=16\), \(\theta=0.18480\), \(\theta^{2}/6=0.0057\); the exact value is \(134.08\) sweeps and the approximation is \(134.85\), 0.57 % higher. For \(N=1000\), \(\theta^{2}/6=1.6\times10^{-6}\), the exact value is \(467{,}534.2\) sweeps and the approximation is \(467{,}535.0\). The log of the first listing has \(r_{100}=1.296030\times10^{-3}\) and \(r_{400}=7.191545\times10^{-6}\), a ratio of 180.2 over 300 sweeps, which is \(300/\log_{10}180.2=133.0\) sweeps per decade, 0.8 % below the exact 134.08 because the window starts in the transient, as the window estimate of the section on convergence did.</p>
+</details>
+<p><strong>Exercise 2 (compute).</strong> A machine reports <code>MemTotal</code> 16,209,100 kB, <code>MemFree</code> 15,273,520 kB, <code>MemAvailable</code> 15,599,304 kB, <code>Buffers</code> 58,052 kB, <code>Cached</code> 442,656 kB, <code>SReclaimable</code> 29,796 kB and <code>Shmem</code> 3,540 kB. (a) Compute the <code>used</code>, <code>free</code>, <code>buff/cache</code> and <code>available</code> columns of <code>free -m</code> as the current manual defines them. (b) Does the pair of grids of the running case fit for \(N=20000\)? (c) What is the largest \(N\) whose two grids fit in the 2,500,528 KiB that the lecture's <code>top</code> screen reports as available?</p>
+<details><summary>Solution</summary>
+<p>(a) Dividing by 1024 gives mebibytes. <code>used</code> \(=16{,}209{,}100-15{,}599{,}304=609{,}796\) kB \(=595.5\) MiB. <code>free</code> \(=15{,}273{,}520\) kB \(=14{,}915.5\) MiB. <code>buff/cache</code> \(=58{,}052+442{,}656+29{,}796=530{,}504\) kB \(=518.1\) MiB. <code>available</code> \(=15{,}599{,}304\) kB \(=15{,}233.7\) MiB. (These are the readings of the machine of this chapter at one instant.) (b) Two grids need \(16\times20002^{2}=6{,}401{,}280{,}064\) bytes \(=5.96\) GiB, and 15,233.7 MiB is 14.88 GiB, so the grids fit with a factor of 2.5 to spare; a fifth grid of 2.98 GiB, or a program that holds more than 8.9 GiB elsewhere, would change the answer. (c) The available memory is \(2{,}500{,}528\times1024=2{,}560{,}540{,}672\) bytes. Dividing by 16 gives \(160{,}033{,}792\), whose square root is \(12{,}650.4\), so \((N+2)\le12{,}650\) and \(N\le12{,}648\). The grids of \(N=20000\) do not fit there, since 5.96 GiB exceeds the 2.38 GiB available.</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> A script finds the smallest residual of a log with <code>grep '^iter' solver.log | awk '{print $4}' | sort -n | head -n 1</code> and counts the distinct residual values with <code>uniq | wc -l</code>. Give a three-line input on which the first command returns the largest residual and a three-line input on which the second reports 3 for a file with two distinct lines.</p>
+<details><summary>Solution</summary>
+<p>For the first command take the residual column <code>1.2e-03</code>, <code>9.5e-05</code>, <code>4.0e-05</code>. <code>sort -n</code> reads only the leading numeric strings 1.2, 9.5 and 4.0, because it does not recognize the exponent (GNU coreutils manual), orders them as 1.2, 4.0, 9.5, and <code>head -n 1</code> returns <code>1.2e-03</code>, the largest value. The listing of the pipeline section shows the same effect for four values. The command that gives the right answer is <code>sort -g | head -n 1</code>, which returns <code>4.0e-05</code>. For the second command take the lines <code>1e-3</code>, <code>5e-4</code>, <code>1e-3</code>. <code>uniq</code> removes only adjacent repeats, the two equal lines are not adjacent, and <code>uniq | wc -l</code> prints 3 for two distinct lines. The right commands are <code>sort -u | wc -l</code> or <code>sort | uniq | wc -l</code>, which print 2.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> A script contains <code>grep '^iter' missing.log | tail -n 1 | awk '{print $4}'</code> followed by <code>if [ $? -eq 0 ]; then echo "last residual read"; fi</code>. The file <code>missing.log</code> does not exist. State what the script prints, name the false assumption and give two repairs. Then say what a script sees if it sets <code>set -o pipefail</code> and ends a pipeline that reads a large input with <code>head</code>.</p>
+<details><summary>Solution</summary>
+<p>The script prints <code>last residual read</code>. The <code>grep</code> fails with status 2 and a message on standard error (the file does not exist), <code>tail</code> and <code>awk</code> succeed on empty input, and the status of the pipeline is the status of the last command, 0 (POSIX.1-2017, Shell Command Language §2.9.2). The false assumption is that the status of a pipeline reports the failure of any stage. In Bash, <code>echo "${PIPESTATUS[@]}"</code> directly after the pipeline prints <code>2 0 0</code> for this case. The first repair is <code>set -o pipefail</code>, under which the status is the status of the rightmost failing command, here 2. The second repair is to test the input first, with <code>[ -r missing.log ]</code> or with the status of <code>grep</code> in a separate command. With <code>pipefail</code> a pipeline that ends in <code>head</code> and reads more than <code>head</code> consumes (the first section of <code>pipes.sh</code>) reports 141, the status of a <code>seq</code> killed by SIGPIPE, although every line that <code>head</code> printed was correct. A script that enables <code>pipefail</code> must therefore either avoid <code>head</code> at the end of a long pipeline or accept 141 as success for that stage.</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> A run with \(N=1000\) that must bring the error below \(10^{-6}\) needs about 2.6 million sweeps, which is 2.4 hours at the 3.3 ms per sweep measured in this chapter. The only machine available is a shared login node. Choose among starting the solver with a plain <code>&amp;</code>, starting it with <code>nohup</code>, starting it in a terminal multiplexer, and submitting it to the batch scheduler. Give the quantitative facts of this chapter that bear on the choice, and say what to log and at what interval.</p>
+<details><summary>Solution</summary>
+<p>A plain <code>&amp;</code> is the worst choice: when the terminal closes, SIGHUP terminates the job, and <code>wait</code> would report status 129 (<code>jobs_demo.sh</code>). <code>nohup</code> survives the hangup and writes to <code>nohup.out</code> if the output is not redirected, so, after changing <code>max_iter</code> to at least 2,700,000 and <code>tol</code> to \(4.9\times10^{-12}\) in the source (neither is a command-line argument), the command should be <code>nohup ./jacobi_log 1000 1000 &gt; run.log 2&gt; run.err &amp;</code> with the PID kept from <code>$!</code> for later <code>ps</code> and <code>kill</code> commands. A terminal multiplexer keeps the session alive in the same way and adds the ability to reattach; the chapter did not test one. The batch scheduler is the correct choice on a shared node: the run holds one processor for hours, and the lecture's own motivation for <code>top</code> is the load that a process puts on a shared system; chapter 30 treats the scheduler. The memory is not a constraint, since two grids need 15.3 MiB. The stopping rule needs a change: the solver of the first listing stops at \(r\lt10^{-6}\), which for \(N=1000\) ends the run after 191,001 sweeps with an error of 0.167; for an error below \(10^{-6}\) the tolerance must be about \(10^{-6}(1-\rho)=4.9\times10^{-12}\) by (4.8) (\(3.4\times10^{-12}\) for a guaranteed max-norm bound, which needs the factor 1.45). The log size follows from the interval: with a line every 1000 sweeps the log has about 2600 lines; with a line every 50 sweeps it has 52,000 lines of about 35 bytes, about 1.8 MB. A line every 1000 sweeps is enough to estimate the factor from the last two lines with (4.4) and to predict the end with (4.6), provided that the run is past the transient. The transient does not shorten for a large grid: the ratio of the second eigenvalue \(\mu_{21}\) to \(\rho\) is about \(1-3\theta^{2}/4\), so the transient lasts a number of sweeps that grows as \(N^{2}\), like the run itself. A residual line with the iteration number, written with <code>fflush</code> or to a file, lets <code>tail -n 2</code> and one <code>awk</code> program report the state of the run at any time.</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement).</strong> Write an <code>awk</code> program that reads a log of the format of the first listing and prints \(\hat\rho_{\mathrm{last}}\), \(\rho\), the end predicted by (4.6) from the last progress line, the end predicted from the first progress line, and the sweep at which the run converged. Run the solver with <code>./jacobi_log 64 500</code> and apply the program. State how far each prediction is from the observed end.</p>
+<details><summary>Solution</summary>
+<p>The program reads \(N\) and the tolerance from the header, keeps the first and the last two progress lines, and reads the final sweep from the last line of the log:</p>
+<pre><code class="language-bash">awk '/^# jacobi/ { split($3, a, "="); N = a[2]; split($4, b, "="); tol = b[2] }
+     /^iter/ { if (!n++) { k0 = $2; r0 = $4 } kp = k1; rp = r1; k1 = $2; r1 = $4 }
+     /^# converged/ { split($3, a, "="); kc = a[2] }
+     END { rho = cos(atan2(0, -1) / (N + 1)); rhat = (r1 / rp) ^ (1 / (k1 - kp))
+           printf "rho_hat_last=%.6f rho=%.6f predicted=%.1f from_first=%.1f converged=%d\n", rhat, rho,
+                  k1 + log(tol / r1) / log(rhat), k0 + log(tol / r0) / log(rho), kc }' solver.log</code></pre>
+<p>The solver with \(N=64\) and a line every 500 sweeps writes ten progress lines and converges at sweep 5272 with residual \(9.997952\times10^{-7}\). The program prints <code>rho_hat_last=0.998832 rho=0.998832 predicted=5271.8 from_first=5719.4 converged=5272</code>. The factor from the last two lines equals \(\rho\) to the six printed digits. The prediction from the last progress line (sweep 5000, \(r=1.373855\times10^{-6}\)), using \(\hat\rho_{\mathrm{last}}\) in place of \(\rho\) in (4.6), is 5271.8, 0.2 sweeps below the observed end. The prediction from the first line (sweep 500, \(r=4.452550\times10^{-4}\)), using \(\rho\), is 5719.4, which is 447 sweeps or 8.5 % above the observed end: the early residual lies above the asymptote \(A\rho^{k}\), and extrapolating from it with the asymptotic factor overestimates the remaining work. The overestimate is 3.4 % for \(N=16\) (first line at sweep 50) and 9.1 % for \(N=32\) (first line at sweep 100), so it does not fall as the grid is refined (3.4 %, 9.1 % and 8.5 % for \(N=16,32,64\)); it depends on how early in the run the first line lies. The numbers of this solution come from running the solver and the program on this machine in a separate session; the code lab does not run exercise solutions.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li>Recordings: <a href="https://www.youtube.com/watch?v=S4XYOjSoAQE">W1L5, Mastering Linux Text Processing and File Management</a> (slides: process attributes, background and foreground, states, <code>ps</code>, <code>top</code>, <code>kill</code>, multitasking, <code>grep</code>, <code>awk</code>, <code>sort</code>, <code>uniq</code>, pipe, <code>wc</code>, <code>head</code>, <code>tail</code>, <code>diff</code>, <code>paste</code>, <code>tr</code>); <a href="https://www.youtube.com/watch?v=TNlzx44rR88">W1L6, Linux Memory and Networking Commands</a> (slides: memory concepts, <code>free</code>, <code>vmstat</code>, <code>df</code>, <code>swapon</code>, <code>meminfo</code>, loopback and physical interfaces, <code>ping</code>, <code>ip</code>, <code>ssh</code>, <code>wget</code>, <code>scp</code>), NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay, 2025.</li>
+<li>The Open Group, <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap09.html">POSIX.1-2017 Base Definitions, §9 Regular Expressions</a>. §9.1: the leftmost-longest matching rule; §9.3.5: range expressions are specified only in the POSIX locale; §9.3 and §9.4: BRE and ERE, back-references in BRE; §9.5.3: ERE grammar. <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap03.html">Base Definitions §3.206</a>: definition of a line.</li>
+<li>The Open Group, <a href="https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html">POSIX.1-2017 Shell Command Language, §2.8.2, §2.9.2 and §2.9.3</a> (and <a href="https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html">POSIX.1-2024 §2.9.2</a>, which adds the <code>pipefail</code> option and its exit-status rule): §2.8.2, the exit status of a command that a signal terminated is greater than 128; §2.9.2 and §2.9.3, the pipe "as if by creating a pipe", the exit status of the last command, the shell may also wait for all commands; asynchronous lists, standard input from <code>/dev/null</code> when job control is disabled, <code>$!</code>.</li>
+<li>The Open Group, POSIX.1-2017 utilities <a href="https://pubs.opengroup.org/onlinepubs/9699919799/utilities/awk.html"><code>awk</code></a> (arithmetic follows ISO C floating point; comparison of numeric strings), <a href="https://pubs.opengroup.org/onlinepubs/9699919799/utilities/sort.html"><code>sort</code></a> (<code>-n</code>: initial numeric string), <a href="https://pubs.opengroup.org/onlinepubs/9699919799/utilities/uniq.html"><code>uniq</code></a> and <a href="https://pubs.opengroup.org/onlinepubs/9699919799/utilities/grep.html"><code>grep</code></a>.</li>
+<li>Free Software Foundation, <a href="https://www.gnu.org/software/grep/manual/grep.html">GNU grep manual</a>: §2.1.6 (<code>-r</code> and the working directory), §2.3 (exit status 0, 1, 2), §3.5 (back-references), §3.6 (BRE against ERE). <a href="https://www.gnu.org/software/gawk/manual/gawk.html">GNU awk manual</a>: chapter 1 (pattern&ndash;action rules), §4.5.1 (default field splitting), §7.1.4 (<code>BEGIN</code> and <code>END</code>). GNU coreutils manual: <a href="https://www.gnu.org/software/coreutils/manual/html_node/sort-invocation.html"><code>sort</code></a> (<code>-n</code> does not recognize exponents; <code>-g</code> converts a prefix to floating point), <a href="https://www.gnu.org/software/coreutils/manual/html_node/uniq-invocation.html"><code>uniq</code></a> (only adjacent repeats; <code>sort -u</code>), <a href="https://www.gnu.org/software/coreutils/manual/html_node/nohup-invocation.html"><code>nohup</code></a> (hangup ignored; <code>nohup.out</code>), <a href="https://www.gnu.org/software/coreutils/manual/html_node/df-invocation.html"><code>df</code></a> (file-system space).</li>
+<li>S. Owens, J. Reppy and A. Turon, <a href="https://www.ccs.neu.edu/home/turon/re-deriv.pdf">"Regular-expression derivatives re-examined"</a>, Journal of Functional Programming 19(2) (2009) 173&ndash;190 (bibliographic data checked in Crossref). Definitions 2.1 and 2.2 (syntax and language), §3.1 (the derivative rules, due to Brzozowski), §3.2 (matching by derivatives). Used for (4.1) and (4.2). The original, J. A. Brzozowski, "Derivatives of regular expressions", Journal of the ACM 11(4) (1964) 481&ndash;494, was not opened; its bibliographic data were checked in Crossref.</li>
+<li>R. Cox, <a href="https://swtch.com/~rsc/regexp/regexp1.html">"Regular Expression Matching Can Be Simple And Fast"</a> (January 2007): backtracking against automata on \(a?^{n}a^{n}\); the Thompson NFA simulation runs in \(O(|r|\,n)\); GNU grep and GNU awk build DFAs; back-references are not regular and need exponential search in the worst case; Thompson's 1968 paper (CACM 11(6) 419&ndash;422) is described there. The paper itself could not be opened (the publisher's page returned a bot-check page); the volume, issue and pages were checked in Crossref.</li>
+<li>M. Kerrisk et al., Linux man-pages: <a href="https://man7.org/linux/man-pages/man1/ps.1.html">ps(1)</a> (default selection; <code>-e</code>, <code>-f</code>; process state codes D, I, R, S, T, t, W, X, Z), <a href="https://man7.org/linux/man-pages/man1/top.1.html">top(1)</a> (<code>%CPU</code>, <code>%MEM</code>), <a href="https://man7.org/linux/man-pages/man1/kill.1.html">kill(1)</a> (default SIGTERM), <a href="https://man7.org/linux/man-pages/man7/signal.7.html">signal(7)</a> (SIGKILL and SIGSTOP cannot be caught; signal numbers by architecture; SIGTTIN, SIGPIPE, SIGHUP), <a href="https://man7.org/linux/man-pages/man2/wait.2.html">wait(2)</a> (zombies, NOTES), <a href="https://man7.org/linux/man-pages/man7/pipe.7.html">pipe(7)</a> (SIGPIPE; capacity 65,536 bytes), <a href="https://man7.org/linux/man-pages/man2/sched_setaffinity.2.html">sched_setaffinity(2)</a>, <a href="https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html">proc_pid_stat(5)</a> (state field), <a href="https://man7.org/linux/man-pages/man5/proc_pid_status.5.html">proc_pid_status(5)</a> (<code>VmSize</code>, <code>VmRSS</code>; inaccurate values), <a href="https://man7.org/linux/man-pages/man5/proc_pid_statm.5.html">proc_pid_statm(5)</a> (<code>smaps</code> and <code>smaps_rollup</code> for accurate values), <a href="https://man7.org/linux/man-pages/man2/clone.2.html">clone(2)</a> (<code>CLONE_THREAD</code>), <a href="https://man7.org/linux/man-pages/man5/proc_meminfo.5.html">proc_meminfo(5)</a> (<code>MemAvailable</code>), <a href="https://man7.org/linux/man-pages/man1/free.1.html">free(1)</a> (the columns and their <code>/proc/meminfo</code> fields), <a href="https://man7.org/linux/man-pages/man8/vmstat.8.html">vmstat(8)</a>, <a href="https://man7.org/linux/man-pages/man8/swapon.8.html">swapon(8)</a>, <a href="https://man7.org/linux/man-pages/man8/ip.8.html">ip(8)</a>, <a href="https://man7.org/linux/man-pages/man8/ping.8.html">ping(8)</a> (default payload 56 bytes, 64 ICMP bytes), <a href="https://man7.org/linux/man-pages/man1/ssh.1.html">ssh(1)</a> (<code>-G</code>), <a href="https://man7.org/linux/man-pages/man1/scp.1.html">scp(1)</a> (SFTP over ssh).</li>
+<li>The Linux kernel documentation, <a href="https://docs.kernel.org/filesystems/proc.html">The <code>/proc</code> filesystem</a>: <code>MemAvailable</code> is an estimate of the memory available for starting new applications without swapping, computed from <code>MemFree</code>, <code>SReclaimable</code>, the file LRU lists and the low watermarks.</li>
+<li>R. Braden (ed.), <a href="https://www.rfc-editor.org/rfc/rfc1122.txt">RFC 1122, Requirements for Internet Hosts &ndash; Communication Layers</a> (1989), §3.2.1.3: addresses {127, any} are the internal host loopback address and must not appear outside a host. J. Postel, <a href="https://www.rfc-editor.org/rfc/rfc792.txt">RFC 792, Internet Control Message Protocol</a> (1981), p. 14: echo is type 8, echo reply type 0, and the data received in the echo message must be returned in the reply. T. Ylonen and C. Lonvick, <a href="https://www.rfc-editor.org/rfc/rfc4251.txt">RFC 4251, The Secure Shell (SSH) Protocol Architecture</a> (2006), §1: transport layer, user authentication and connection protocols.</li>
+<li>The Open Group, <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap11.html">POSIX.1-2017 Base Definitions §11.1.10 (Modem Disconnect)</a>: SIGHUP is sent to the controlling process of the terminal. Free Software Foundation, <a href="https://www.gnu.org/software/bash/manual/bash.html">GNU Bash manual</a>, "Signals" (an interactive shell resends SIGHUP to all jobs, running or stopped) and "Exit Status" (a command killed by a fatal signal with number N has the status 128+N).</li>
+<li>OpenSSH, <a href="https://www.openssh.com/txt/release-9.0">release notes of version 9.0</a>: <code>scp</code> switches from the legacy scp/rcp protocol to the SFTP protocol by default; the legacy protocol expanded remote wildcards through the remote shell.</li>
+<li>J. Demmel, <a href="https://people.eecs.berkeley.edu/~demmel/cs267/lecture24/lecture24.html">CS267 notes for lectures 15 and 16 (5 and 7 March 1996), Solving the Discrete Poisson Equation using Jacobi, SOR, Conjugate Gradients, and the FFT</a>, Jacobi's method: the iteration, the error reduction factor \(\rho_{\mathrm{Jacobi}}(n)=\cos(\pi/(n+1))\), its approximation \(1-\tfrac12(\pi/(n+1))^{2}\), and \(\rho_{\mathrm{Gauss\text{-}Seidel}}=\rho_{\mathrm{Jacobi}}^{2}\).</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-03-linux-file-system-permissions-ownership.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-05-shell-scripting-processes-and-control-flow.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>
