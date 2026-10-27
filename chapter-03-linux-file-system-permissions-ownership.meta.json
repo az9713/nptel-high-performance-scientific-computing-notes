@@ -1,0 +1,446 @@
+{
+  "chapter": 3,
+  "title": "The Linux file system: names, inodes, permission bits and ownership",
+  "status": "revised after review round 2",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "t8tAOMqb3qc",
+      "label": "W1L3",
+      "playlist_index": 5,
+      "duration_seconds": 1942
+    },
+    {
+      "video_id": "bc4gkkRVn4Q",
+      "label": "W1L4",
+      "playlist_index": 6,
+      "duration_seconds": 2823
+    }
+  ],
+  "frames_viewed": {
+    "t8tAOMqb3qc": [
+      "f0001",
+      "f0003",
+      "f0005",
+      "f0007",
+      "f0009",
+      "f0011",
+      "f0013",
+      "f0015",
+      "f0017",
+      "f0019",
+      "f0021",
+      "f0023",
+      "f0025",
+      "f0027",
+      "f0029",
+      "f0031",
+      "f0033",
+      "f0035",
+      "f0037",
+      "f0039",
+      "f0041",
+      "f0043",
+      "f0045",
+      "f0047",
+      "f0049",
+      "f0051",
+      "f0053",
+      "f0055",
+      "f0057",
+      "f0059",
+      "f0061",
+      "f0063"
+    ],
+    "bc4gkkRVn4Q": [
+      "f0002",
+      "f0004",
+      "f0006",
+      "f0008",
+      "f0010",
+      "f0012",
+      "f0014",
+      "f0016",
+      "f0018",
+      "f0020",
+      "f0022",
+      "f0024",
+      "f0026",
+      "f0028",
+      "f0030",
+      "f0032",
+      "f0034",
+      "f0036",
+      "f0038",
+      "f0040",
+      "f0042",
+      "f0044",
+      "f0046",
+      "f0048",
+      "f0050",
+      "f0052",
+      "f0054",
+      "f0056",
+      "f0058",
+      "f0060",
+      "f0062",
+      "f0064",
+      "f0066",
+      "f0068",
+      "f0070",
+      "f0072",
+      "f0074",
+      "f0076",
+      "f0078",
+      "f0080",
+      "f0082",
+      "f0084",
+      "f0086",
+      "f0088",
+      "f0090",
+      "f0092",
+      "f0094"
+    ]
+  },
+  "lecture_corrections": [
+    {
+      "where": "W1L3 free -h screen",
+      "slide": "frame f0019 shows 888M; frame f0017 shows the KiB table",
+      "chapter": "the used column of the slide follows total - free - buff/cache, not the current procps definition total - available (free_used.py); no speech-based claim is made"
+    },
+    {
+      "where": "W1L3 lscpu screen",
+      "slide": "frame f0015 shows 11th Gen Intel Core i5-1135G7, CPU(s) 1, hypervisor VMware",
+      "chapter": "generation is 11th Gen, i5 is the product tier; the machine is a one-processor virtual machine"
+    },
+    {
+      "where": "W1L3 ls -l date column",
+      "slide": "-",
+      "chapter": "stated as a fact (modification time, Coreutils 10.1.2; birth time separate); not attributed to the lecture because only the machine transcript supports what was said"
+    },
+    {
+      "where": "W1L4 rm -r slide",
+      "slide": "frame f0026 callout: rm deletes data permanently",
+      "chapter": "rm removes a name; content survives other links and open descriptors and is usually recoverable (Coreutils 11.5)"
+    },
+    {
+      "where": "W1L4 cat redirection",
+      "slide": "frame f0036 marks > as Redirect",
+      "chapter": "the shell performs the redirection and truncates the target before cat starts (redirect_session.sh); cat file2 file3 > file2 loses data"
+    },
+    {
+      "where": "W1L4 chmod +x file2",
+      "slide": "frames f0080-f0082 show 664 to 775",
+      "chapter": "a clause without who is a minus the bits of the umask: all under 002, owner and group under 027 (chmod_session.sh, chmod_model.py)"
+    },
+    {
+      "where": "W1L4 chown",
+      "slide": "frame f0090 prompt is root (#)",
+      "chapter": "only a privileged process may change the owner (chown(2)); an owner may change the group to a group of the owner (root_b transcript)"
+    },
+    {
+      "where": "W1L4 default modes",
+      "slide": "frames f0010, f0014, f0080 show rw-rw-r-- and rwxrwxr-x",
+      "chapter": "follows from creation mask 002, the unique solution among 512 masks (umask_check.py); the slides give no cause"
+    }
+  ],
+  "source_uncertainties": [
+    "Frames were viewed as 2x3 contact sheets scaled to 800x450 per frame, so small terminal text was read at reduced size; every number used in the chapter (link counts 22, 4 and 28; the free table; the modes) was legible in that view. Odd frames f0001-f0063 of W1L3 and even frames f0002-f0094 of W1L4 were viewed.",
+    "The lecture's machine is not available. Its creation mask 002, the SELinux context behind the dot after the mode strings, the Red Hat-family inference from the group wheel, and the older procps definition of used in free are inferences from the slides, not statements of the lecture. The inference of the mask 002 holds under three stated conditions (requests 0666 and 0777 by the tools, no default ACL, one mask for the files and TestDir2); the requests of the lecture's tools were not observed. The screens do not show which mechanism set the mask on the lecture's machine.",
+    "login.defs: the rule that a default umask of 022 becomes 002 for private user groups is stated in pam_umask(8), option usergroups (man7.org, fetched 2026-10-26), and in the comment in /etc/login.defs of the verification machine (Ubuntu 24.04, shadow 4.13); the man7.org login.defs(5) page documents UMASK as the initial mask used by pam_umask and USERGROUPS_ENAB only for useradd/userdel. On the verification machine the shell prints umask 0022 although USERGROUPS_ENAB is yes and uid equals gid; the cause was not investigated.",
+    "GNU Coreutils manual: the web edition at gnu.org returned 403 (anti-bot page) to the fetching client. The chapter cites the Coreutils 9.4 manual as installed with the verification system (info coreutils, read as text); the section numbers 10.1.2, 11.4, 11.5, 27.1, 27.2.6, 27.5 are those of that copy. The web edition may number or word sections differently.",
+    "Filesystem Hierarchy Standard 3.0: the HTML edition returned an anti-bot page. The chapter reads the PDF fhs-3.0.pdf (publication date 19 March 2015, 50 PDF pages) and cites sections (Chapter 2, 3.8, 3.18, 5.15), not page numbers.",
+    "POSIX pages are the Issue 8 / POSIX.1-2024 edition (pubs.opengroup.org/onlinepubs/9799919799). POSIX.1-2017 wording was not compared; sections 4.5 Directory Protection and 4.7 File Access Permissions are numbered as in the 2024 edition.",
+    "Linux man-pages were fetched from man7.org on 2026-10-26 (page versions as served then). The kernel of the verification machine is 6.6.87.2-microsoft-standard-WSL2; other kernels and file systems were not tested.",
+    "Ritchie and Thompson (1974) was read in Eric Brewer's electronic recreation. Journal page numbers 366-369 are derived from the page headers of that file (PDF page 1 = journal page 365).",
+    "The transcripts with numeric identities 2001, 2002 and 2003 (root_a.sh, root_b.sh; root_a.sh and root_a.out were restored at 21:07 to the content of the original run, and an extra run of a 0604 case is not used; root_b was not edited after its run) were produced by the root account of the WSL guest (wsl -u root) with setpriv, in a scratch directory that was deleted afterwards; no account or group was created. python code_lab.py cannot reproduce them because it runs as the unprivileged user. Standard input was not a terminal in both runs (the chapter says so). Their kernel results equal the model's table (shared_dir_model.py) on all 18 yes/no answers.",
+    "access_predicate.py compares the predicate with the kernel on files of the machine that runs it (up to 3000 entries under each of /etc, /var/log, /usr/bin and /home; the walk stops when the budget is used). Under /etc, /var/log and /usr/bin the walk ended before the budget (1516, 206 and 1093 entries examined); only under /home did it stop at 3000. In the run that produced the sample, 2997 entries were in the owner class (all under /home, the test user's own files), 42 in the group class (all under /var/log) and 1946 in the other class; the listing prints only whether each class had at least 20. The counts depend on the machine and change as logs rotate. The owner-class test is exhaustive (512 modes); the order of the group class and the other class was not tested against the kernel (a group member refused under mode 0604 although the other digit grants read is the untested example). The ACL attribute (system.posix_acl_access) was detected through listxattr but its entries were not decoded: getfacl and setfacl are not installed, so the chapter does not say which ACL entry grants the access on the journal files, and the ACL-based repair named in exercise 5 was not tested.",
+    "GNU chmod prints 'new permissions are r--r--rw-, not r--r--r--' and exits with status 1 for chmod -w on mode 646 under umask 002. The resulting mode (446) equals the model's result; the reason for the warning was inferred, not read in the source code.",
+    "The effect of a set-user-ID program (effective user = file owner) rests on Ritchie and Thompson (1974) and inode(7); no set-user-ID program was run. The mode of /usr/bin/passwd is a fact of the verification machine.",
+    "The claim that the 9p-mounted Windows drive does not store Linux modes rests on one test on this machine: chmod 000 on a new file under /mnt/c gave mode 555 in stat. The mount options were not varied.",
+    "The directory sizes 4096 and 35 bytes are read from the lecture's slide. The link-count rule (3.1) is verified on this machine's ext4 and assumed for the lecture's file system; link-count conventions of other file systems were not tested.",
+    "The chapter does not cover the other parts of the W1L3 outline that the lecture announces (process management, text processing, memory and network commands); they belong to Chapters 2 and 4."
+  ],
+  "sections": [
+    {
+      "section": "The objects of the chapter and the running case",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Multi-user system, owner/group/others (W1L4 25:50).",
+      "research_extension": "Ritchie and Thompson 1974; POSIX 4.7, 4.8; inode(7); credentials(7)",
+      "teaching_construction": "Formal model of inodes, credentials and modes; the shared-directory case with requirements R1-R3",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "Who runs the commands and on what",
+      "video_id": "t8tAOMqb3qc",
+      "start": 184.0,
+      "end": 586.0,
+      "lecture_material": "whoami, uname, lscpu, free -h",
+      "research_extension": "free(1) definition of used; credentials(7)",
+      "teaching_construction": "free_used.py; session on the verification machine",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "The directory tree, paths and the working directory",
+      "video_id": "t8tAOMqb3qc",
+      "start": 653.0,
+      "end": 1431.0,
+      "lecture_material": "file and directory definitions, pwd, ls, ls -la, hidden files, cd variants",
+      "research_extension": "FHS 3.0; path_resolution(7); Coreutils 10.1.2",
+      "teaching_construction": "nav_session.sh; decoding of the lecture's ls -la line",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "A directory is a table of names",
+      "video_id": "t8tAOMqb3qc",
+      "start": 953.0,
+      "end": 1055.0,
+      "lecture_material": "link count column of ls -l",
+      "research_extension": "Ritchie and Thompson 1974; link(2), unlink(2), rename(2), symlink(7)",
+      "teaching_construction": "Link count of a directory (3.1); names_inodes.py",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Creating, renaming, moving, copying and deleting",
+      "video_id": "t8tAOMqb3qc",
+      "start": 1431.0,
+      "end": 1898.0,
+      "lecture_material": "W1L3 23:51-31:38: mkdir, rmdir, mv; W1L4 0:37-25:14 (video bc4gkkRVn4Q, t=37-1514): touch, vim, gedit, rm, rm -r, cp, cp -r",
+      "research_extension": "mkdir(2), rmdir(2), open(2), unlink(2), rename(2); Coreutils 11.4, 11.5",
+      "teaching_construction": "Table 3.1; files_session.sh",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Concatenation and redirection",
+      "video_id": "bc4gkkRVn4Q",
+      "start": 794.0,
+      "end": 1312.0,
+      "lecture_material": "cat, >, >>",
+      "research_extension": "open(2) O_TRUNC, O_APPEND",
+      "teaching_construction": "redirect_session.sh",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Owner, group and other: the access rule and the ten characters",
+      "video_id": "bc4gkkRVn4Q",
+      "start": 1550.0,
+      "end": 1987.0,
+      "lecture_material": "three categories, r/w/x, ten-character string",
+      "research_extension": "POSIX 4.7; path_resolution(7); Coreutils 10.1.2, 27.1",
+      "teaching_construction": "Access rule (3.2)-(3.3); owner_class.sh; mode_decode.py; access_predicate.py",
+      "evidence_class": "theorem"
+    },
+    {
+      "section": "Changing the mode: symbolic and octal notation",
+      "video_id": "bc4gkkRVn4Q",
+      "start": 1987.0,
+      "end": 2559.0,
+      "lecture_material": "chmod symbolic and octal",
+      "research_extension": "POSIX chmod; Coreutils 27.2.6",
+      "teaching_construction": "(3.4), (3.5); chmod_session.sh; chmod_model.py (24,576 cases)",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Ownership: chown, chgrp and the group of a new file",
+      "video_id": "bc4gkkRVn4Q",
+      "start": 2559.0,
+      "end": 2789.0,
+      "lecture_material": "chown owner:group, groups",
+      "research_extension": "chown(2); open(2)",
+      "teaching_construction": "root_b.sh transcript",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Defaults and special bits: the creation mask, set-group-ID, sticky and set-user-ID",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "none (default modes are shown, not explained)",
+      "research_extension": "open(2), mkdir(2), POSIX umask, Ritchie and Thompson 1974, Coreutils 27.5, inode(7), POSIX 4.5",
+      "teaching_construction": "(3.6); umask_check.py; group_session.sh",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "The shared project directory",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "none",
+      "research_extension": "-",
+      "teaching_construction": "shared_dir_model.py; root_a.sh transcript",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "The UNIX Time-Sharing System (Ritchie and Thompson, CACM 17(7), 1974)",
+      "url": "https://www.cs.berkeley.edu/~brewer/cs262/unix.pdf",
+      "supports": "A file does not exist within a directory; each directory has at least two entries; no links to directories and none between file system hierarchies; seven protection bits and set-user-ID; i-node fields; link creation and removal by changing the link count",
+      "page_checked": "pp. 366-369 (full text read in the recreated electronic version)"
+    },
+    {
+      "title": "POSIX.1-2024 Base Definitions, chapter 4 General Concepts",
+      "url": "https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/V1_chap04.html",
+      "supports": "4.5 sticky-bit deletion conditions; 4.7 class-based access rule, privileged processes, additional and alternate mechanisms; 4.8 directed graph",
+      "page_checked": "sections 4.5, 4.7, 4.8 read"
+    },
+    {
+      "title": "POSIX.1-2024 chmod",
+      "url": "https://pubs.opengroup.org/onlinepubs/9799919799/utilities/chmod.html",
+      "supports": "owner or privileged may change the mode; symbolic-mode semantics; bits of the creation mask are excluded when who is omitted",
+      "page_checked": "DESCRIPTION and EXTENDED DESCRIPTION read"
+    },
+    {
+      "title": "POSIX.1-2024 umask",
+      "url": "https://pubs.opengroup.org/onlinepubs/9799919799/utilities/umask.html",
+      "supports": "the file mode creation mask utility",
+      "page_checked": "DESCRIPTION read"
+    },
+    {
+      "title": "POSIX.1-2024 sys/stat.h",
+      "url": "https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/sys_stat.h.html",
+      "supports": "names of the mode bits",
+      "page_checked": "read"
+    },
+    {
+      "title": "inode(7)",
+      "url": "https://man7.org/linux/man-pages/man7/inode.7.html",
+      "supports": "inode fields; mode bit values; the owner of a new file is the effective user ID; meaning of the sticky bit on a directory",
+      "page_checked": "whole page"
+    },
+    {
+      "title": "path_resolution(7)",
+      "url": "https://man7.org/linux/man-pages/man7/path_resolution.7.html",
+      "supports": "resolution steps and errors; the three-class permission rule (owner, then group or supplementary group, then other)",
+      "page_checked": "whole page"
+    },
+    {
+      "title": "credentials(7)",
+      "url": "https://man7.org/linux/man-pages/man7/credentials.7.html",
+      "supports": "effective and supplementary IDs are used for file permission checks",
+      "page_checked": "whole page"
+    },
+    {
+      "title": "open(2)",
+      "url": "https://man7.org/linux/man-pages/man2/open.2.html",
+      "supports": "O_TRUNC, O_APPEND; mode and ~umask; the group of a new file depends on set-group-ID of the parent directory; EACCES for creation",
+      "page_checked": "O_CREAT, O_TRUNC, O_APPEND, ERRORS"
+    },
+    {
+      "title": "mkdir(2)",
+      "url": "https://man7.org/linux/man-pages/man2/mkdir.2.html",
+      "supports": "mode & ~umask & 0777; owner and group of a new directory; set-group-ID inheritance; EEXIST, EACCES",
+      "page_checked": "whole page"
+    },
+    {
+      "title": "rmdir(2), link(2), unlink(2), rename(2)",
+      "url": "https://man7.org/linux/man-pages/man2/unlink.2.html",
+      "supports": "ENOTEMPTY; EPERM for directories; EXDEV across file systems; unlink deletes a name, and the file when the last link and last descriptor are gone; sticky-bit conditions; EACCES without write permission on the containing directory",
+      "page_checked": "DESCRIPTION and ERRORS of each page"
+    },
+    {
+      "title": "symlink(7)",
+      "url": "https://man7.org/linux/man-pages/man7/symlink.7.html",
+      "supports": "permissions of a symbolic link are not used and are always 0777 on Linux",
+      "page_checked": "section on ownership, permissions and timestamps"
+    },
+    {
+      "title": "chmod(2) and chown(2)",
+      "url": "https://man7.org/linux/man-pages/man2/chown.2.html",
+      "supports": "only a privileged process may change the owner; the owner may change the group to one of the owner's groups; set-user-ID and set-group-ID cleared on a change by an unprivileged user; chmod needs the owner or a privileged process",
+      "page_checked": "DESCRIPTION and ERRORS"
+    },
+    {
+      "title": "free(1) (procps-ng)",
+      "url": "https://man7.org/linux/man-pages/man1/free.1.html",
+      "supports": "used is calculated as total - available",
+      "page_checked": "column descriptions"
+    },
+    {
+      "title": "login.defs(5) and /etc/login.defs of the verification machine",
+      "url": "https://man7.org/linux/man-pages/man5/login.defs.5.html",
+      "supports": "UMASK is the initial file mode creation mask used by pam_umask (default 022); the comment in /etc/login.defs states that USERGROUPS_ENAB yes turns 022 into 002 for private user groups",
+      "page_checked": "UMASK and USERGROUPS_ENAB entries of the man page; comment lines 134-146 of /etc/login.defs"
+    },
+    {
+      "title": "pam_umask(8)",
+      "url": "https://man7.org/linux/man-pages/man8/pam_umask.8.html",
+      "supports": "option usergroups: if the user is not root and the username equals the primary group name, the umask group bits are set equal to the owner bits (022 becomes 002, 077 becomes 007)",
+      "page_checked": "option list (usergroups, nousergroups, umask)"
+    },
+    {
+      "title": "Filesystem Hierarchy Standard 3.0",
+      "url": "https://refspecs.linuxfoundation.org/FHS_3.0/fhs-3.0.pdf",
+      "supports": "shareable/static distinction; /home is site-specific; /tmp is not preserved; /var/tmp is preserved",
+      "page_checked": "Chapter 2, 3.8, 3.18, 5.15 (PDF text)"
+    },
+    {
+      "title": "GNU Coreutils 9.4 manual (installed copy, info coreutils)",
+      "url": "https://www.gnu.org/software/coreutils/manual/coreutils.html",
+      "supports": "ls -l modification time, file types, s S t T, the '.' security-context and '+' ACL markers; mv copy-and-remove across file systems; rm prompting and recovery warning; the umask exception of chmod; setgid directories and the digit rule of chmod",
+      "page_checked": "sections 10.1.2, 11.4, 11.5, 27.1, 27.2.6, 27.5 (read in the installed info file; gnu.org refused the fetch)"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "m, m_c",
+      "first_section": "model",
+      "definition": "12-bit mode; octal digit of class c"
+    },
+    {
+      "symbol": "q, u_q, g_q, Sigma_q, G_q",
+      "first_section": "model",
+      "definition": "a process; its effective user, effective group, set of supplementary groups, and the union of the effective and supplementary groups (renamed from p, S_p, G_p after review round 1 to avoid the book-wide p and S_p)"
+    },
+    {
+      "symbol": "u_f, g_f",
+      "first_section": "model",
+      "definition": "owner and group of file f"
+    },
+    {
+      "symbol": "n, s(delta), delta",
+      "first_section": "inodes",
+      "definition": "link count; number of subdirectories of the directory delta (renamed from D)"
+    },
+    {
+      "symbol": "mu",
+      "first_section": "model",
+      "definition": "creation mask (umask), 9 bits"
+    },
+    {
+      "symbol": "e_c",
+      "first_section": "model",
+      "definition": "octal position of class c: u=2, g=1, o=0"
+    },
+    {
+      "symbol": "a",
+      "first_section": "permissions",
+      "definition": "requested access: 4 read, 2 write, 1 execute or search"
+    },
+    {
+      "symbol": "K, b, sigma_K(b), A",
+      "first_section": "chmod",
+      "definition": "set of classes named by the who of a symbolic clause (renamed from W), the 3-bit permission value (renamed from P), its placement in those classes, and the mask of bits the clause may change"
+    }
+  ],
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT WITH FIXES (5 blocking, 7 major, 12 minor)",
+      "changes": "B1: directory-size paragraph rewritten from the W1L3 screen (sizes 4096, 6 to 141, 35) and /tmp. B2: mv failure text follows Coreutils 11.4 (partial copy removed; already-copied directories stay). B3: free -h text now reports what the slide shows; no speech-based correction. B4: chmod +x text and table row rewritten (all classes in the demonstration; the lecture states the who-less clause acts on all classes; not general). B5: symbols renamed (p to q, S_p to Sigma_q, W to K, D to delta, P to b) in text, equations, exercises and ledger. M1: lecturer narration removed; 'The lecture does not discuss it'; 'It follows that'. M2: date column stated as a fact, no attribution. M3: three conditions and the non-fitting directories (Desktop 755, home 700, simpleproject) stated; source-note says inference under stated conditions. M4: login.defs(5) opened; the 022 to 002 sentence is sourced to the machine's /etc/login.defs comment; unsupported background claim removed. M5: budget bug fixed (walk stops); thresholds replace bare booleans; sample counts given; owner-class exhaustiveness stated; the order of the group class and the other class is stated as not tested on the kernel (no new root run, as instructed by the lead). M6: exercise 5 lemma replaced and PI-in-lab condition added. M7: stdin-not-a-terminal stated at both transcripts. m1: whoami spelling remark deleted. m2: free_used.py comment agrees (8:15). m3: free -h wording. m4: frame IDs replaced by recording label and time in the public text (kept in the sidecar). m5: chown(2) quote completed. m6: fsuid clause added. m7: redirection wording. m8: chown wording and the wheel/shadow remark. m9: sentence on section order added. m10: conversion sentence of the free digression removed; no further cuts. m11: execute exception added to the privileged-process definition. m12: 'before the operation'. m13: the chmod sentence now speaks of the lecture's result, not a statement."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT WITH FIXES (1 blocking, 0 major, 7 minor)",
+      "changes": "N1: the access_predicate walk is described as measured (1516, 206, 1093 and 3000 entries; 2997 owner-class entries are the test user's own files under /home, 42 group-class under /var/log, 1946 other-class); the lead says 'files in all three classes'; sidecar matches. n2: the limits summary qualifies the 002 inference. n3: the two remaining statements about the lecture's words are replaced by what the demonstration shows and by the failing assumption. n4: pam_umask(8) option usergroups cited and quoted, 'Ubuntu's shadow-utils' replaced by 'shadow and PAM configuration of Ubuntu 24.04', pam_umask(8) added to sources and references. n5: d in the rmdir row is code, not the digit symbol. n6: not changed (lead: length needs no change). n7: sidecar records that the group-before-other order was not tested and that root_a.sh/out were restored at 21:07 to the original content."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python code_lab.py --chapter 03",
+    "listings": 14,
+    "all_passed": true
+  }
+}

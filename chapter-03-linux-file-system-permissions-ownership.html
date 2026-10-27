@@ -1,0 +1,1032 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="a721dd81ca2762b0358c04cdbc3ba3dc66a58d7b62531af9ecbd764c1d4fe498"><title>The Linux file system: names, inodes, permission bits and ownership · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>The Linux file system: names, inodes, permission bits and ownership</h1>
+<p class="lead">Three people share one results directory. Alice owns it and runs the jobs. Bob is in her group and must read and write her files, and she must read and write his. Carol is on the same cluster, outside the group, and must read nothing. A file has nine permission bits, so there are \(2^{9}=512\) possible modes. Exactly 4 of them give the owner and the group read and write access and give everyone else no access: 660, 670, 760 and 770. The default configuration of the lecture's machine produces mode 664 for a new file and puts the file in the creator's personal group, so a file that Bob creates is read-only for Alice. One more bit, set once on the directory, makes Alice and Bob read and write every new file and keeps Carol out: mode 2770 for the directory with a creation mask of 002 in every member's shell. This chapter defines the file-system objects that these numbers describe, derives the rule that decides each access, and checks the rule against the kernel of the verification machine for 1536 requests on files it owns, for files in all three classes, and for three numeric identities in a scratch directory.</p>
+<p class="source-note">Grounded in two recordings of the NPTEL course <em>High Performance Scientific Computing</em> (Prof. Shivasubramanian Gopalakrishnan, IIT Bombay): <a href="https://www.youtube.com/watch?v=t8tAOMqb3qc">W1L3, Mastering Linux Directory and File Management</a>, and <a href="https://www.youtube.com/watch?v=bc4gkkRVn4Q">W1L4, Understanding File Permissions and Ownership in Linux</a>. <strong>Lecture material:</strong> the commands <code>whoami</code>, <code>uname</code>, <code>lscpu</code>, <code>free</code>; files and directories, <code>pwd</code>, <code>ls -la</code> and its columns, hidden files, <code>cd</code> with no argument, with <code>-</code> and with <code>..</code>; <code>mkdir</code>, <code>rmdir</code>, <code>mv</code>, <code>touch</code>, text editors, <code>rm</code> and <code>rm -r</code>, <code>cat</code> with <code>&gt;</code> and <code>&gt;&gt;</code>, <code>cp</code> and <code>cp -r</code>; owner, group and others; read, write and execute; the ten-character mode string; <code>chmod</code> in symbolic and octal notation; <code>chown</code> and <code>groups</code>. <strong>Research extensions:</strong> Ritchie and Thompson (1974, the i-node, links and the protection bits of the first UNIX file system); POSIX.1-2024 (file access permissions, directory protection, the <code>chmod</code> grammar, the <code>umask</code> utility); the Filesystem Hierarchy Standard 3.0; the Linux man-pages for <code>inode</code>, <code>path_resolution</code>, <code>credentials</code>, <code>open</code>, <code>mkdir</code>, <code>link</code>, <code>unlink</code>, <code>rename</code>, <code>rmdir</code>, <code>symlink</code>, <code>chmod</code>, <code>chown</code>, <code>free</code>, <code>login.defs</code> and <code>pam_umask</code>; the GNU Coreutils 9.4 manual. <strong>Original teaching constructions:</strong> the formal model of inodes, credentials and modes; the access predicate and its check against the kernel; the creation law and the inference, under stated conditions, that the lecture's shell used a creation mask of 002; the model of symbolic <code>chmod</code> and its check against GNU <code>chmod</code> on 24,576 cases; the decoder of mode strings; the shared-directory case with three numeric identities; all programs; the six exercises.</p>
+
+<h2 id="model">The objects of the chapter and the running case</h2>
+<p>The chapter describes the part of a Linux system that stores named data and decides who may use it. The description has three parts: the objects that are stored, the processes that act on them, and the operations that connect the two.</p>
+<p><strong>Stored objects.</strong> An <em>inode</em> is a record that describes one file. It holds a <em>type</em> (regular file, directory, symbolic link, device, FIFO, socket), a <em>mode</em> \(m\), an owner user ID \(u_f\), a group ID \(g_f\), a <em>link count</em> \(n\), a size, timestamps, and a reference to the content (<code>inode(7)</code>). The mode is a number from 0 to 4095, so it has 12 bits. The low 9 bits are the <em>permission bits</em>. The 3 high bits are the <em>special bits</em>: set-user-ID (octal 4000), set-group-ID (2000) and sticky (1000). A regular file has as content a sequence of bytes. A <em>directory</em> has as content a table that maps names to inodes; each pair of a name and an inode is a <em>directory entry</em>. A <em>symbolic link</em> has as content a path. A <em>name is not an attribute of an inode</em>: the same inode can have several names, in the same directory or in different ones. Ritchie and Thompson (1974, p. 366) state it as a design rule, "a file does not exist within a particular directory; the directory entry for a file consists merely of its name and a pointer to the information actually describing the file", and POSIX.1-2024 (XBD 4.8) calls the whole structure a directed graph because several entries may refer to one file. A <em>path</em> is a string of names separated by <code>/</code>; <em>resolving</em> a path is following the entries from a starting directory to an inode.</p>
+<p><strong>Processes.</strong> A process \(q\) carries <em>credentials</em>: an effective user ID \(u_q\), an effective group ID \(g_q\), and a set \(\Sigma_q\) of supplementary group IDs. Write \(G_q=\{g_q\}\cup \Sigma_q\). The kernel compares these numbers, not names, with the numbers in the inode (<code>credentials(7)</code>, <code>path_resolution(7)</code>). A process also has a <em>working directory</em> and a <em>creation mask</em> \(\mu\) (the <em>umask</em>), a 9-bit number defined in the section on defaults. A <em>privileged</em> process is one that the system exempts from the permission bits (except that execution needs at least one execute bit; see the section on permissions); on Linux this is a process with the appropriate capability, normally one that runs as user 0 (<code>root</code>). All other processes are <em>unprivileged</em>, and this chapter's rules describe them.</p>
+<p><strong>Operations.</strong> The operations are the system calls behind the commands of the lectures: <code>mkdir</code>, <code>rmdir</code>, <code>open</code> with creation, <code>link</code>, <code>symlink</code>, <code>unlink</code>, <code>rename</code>, <code>chmod</code>, <code>chown</code>, and path resolution. Each is a function of the inode table, the credentials of the caller and the arguments. The chapter derives, for the operations that the lectures show, the permission that each needs and the change that each makes to the table.</p>
+<p><strong>Notation.</strong> The three <em>classes</em> of the lecture are the owner (u), the group (g) and the other class (o; the lecture's "others"). The octal digit of class \(c\) in a mode is \(m_c=\lfloor m/8^{e_c}\rfloor \bmod 8\) with \(e_{\mathrm u}=2\), \(e_{\mathrm g}=1\), \(e_{\mathrm o}=0\); the three digits are the three groups of three permission bits. The weights of the access rights are read \(=4\), write \(=2\), execute \(=1\). The symbols \(\wedge\), \(\vee\) and \(\lnot\) denote bitwise AND, OR and complement on 9-bit numbers, so \(\lnot\mu=511-\mu\). Octal numbers in the text have a leading zero when they are modes (0644) and none when they are digits.</p>
+<p>The running case is the shared directory of the opening. A group named <code>hpsc</code> has the numeric ID 2100. Alice (user 2001, primary group 2001) and Bob (user 2002, primary group 2002) are members of <code>hpsc</code>. Carol (user 2003, primary group 2003) is not. The directory <code>proj</code> belongs to Alice and to the group <code>hpsc</code>. The requirement has three parts. R1: Alice and Bob create files in <code>proj</code> and read and write each other's files. R2: Carol can list nothing, read nothing and traverse nothing in <code>proj</code>. R3: R1 and R2 hold for files created later, without anyone running <code>chmod</code> or <code>chgrp</code> on them. The IDs are numbers chosen for this chapter; no account with these names exists on the verification machine, and the kernel experiments use the numbers directly.</p>
+<p>All commands run in a WSL 2 Ubuntu 24.04 guest on an Intel Core i5-12450H laptop under Windows 11, as the account <code>az9713</code> (user 1000), with GNU coreutils 9.4 and Python 3.12. Every runnable listing creates its own directory under <code>/tmp</code>, which is an ext4 file system. None works under <code>/mnt/c</code>. On the Windows drive, which the guest mounts through the 9p protocol, a test on this machine created a file, ran <code>chmod 000</code> on it, and <code>stat</code> then reported mode 555: that file system does not store Linux mode bits, so the chapter's results do not apply there.</p>
+
+<h2 id="identity">Who runs the commands and on what: <code>whoami</code>, <code>uname</code>, <code>lscpu</code>, <code>free</code> <a class="timestamp" href="https://www.youtube.com/watch?v=t8tAOMqb3qc&amp;t=184s">W1L3 3:04</a></h2>
+<p>The lecture opens with four commands that identify the user and the machine. <code>whoami</code> prints the name of the user of the session. <code>uname -a</code> prints the kernel name, release and machine architecture. <code>lscpu</code> prints the processor model, the number of processors, and the cache and thread layout. <code>free</code> prints memory in kibibytes, and <code>free -h</code> scales each number to a unit (Ki, Mi, Gi) based on powers of 1024 and prints the unit letter. The first command matters for this chapter, because every permission decision starts from the identity that it reports. The other three describe the machine and belong to later chapters: <code>free</code> to Chapter 4 (memory and networking commands) and <code>lscpu</code> to Chapter 6 (node architecture).</p>
+<p>A user has a name and a number. The name is for people. The kernel compares the number (<code>credentials(7)</code>), so the command <code>id</code>, which prints the number, the primary group and the supplementary groups, is the one that predicts access. A session on the verification machine shows both:</p>
+<pre><code class="language-bash">$ whoami
+az9713
+$ id
+uid=1000(az9713) gid=1000(az9713) groups=1000(az9713),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),100(users),1001(docker)
+$ uname -sr
+Linux 6.6.87.2-microsoft-standard-WSL2
+$ lscpu | grep -E 'Model name|^CPU\(s\)|Thread|Hypervisor'
+CPU(s):                               12
+Model name:                           12th Gen Intel(R) Core(TM) i5-12450H
+Thread(s) per core:                   2
+Hypervisor vendor:                    Microsoft
+$ free -k
+               total        used        free      shared  buff/cache   available
+Mem:        16209100      605592    14853796        3536      966756    15603508
+Swap:        4194304           0     4194304
+</code></pre>
+<p>The set \(G_q\) of this process has eight members: the primary group 1000 and seven supplementary groups. The <code>lscpu</code> slide (W1L3 7:15) prints <code>Model name: 11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz</code>, <code>CPU(s): 1</code> and <code>Hypervisor vendor: VMware</code>. The generation is 11th Gen, and i5 is the product tier. The slide also shows that the lecture's machine is a virtual machine with one processor, which is why its numbers cannot be compared with the 12 logical processors above. The <code>free -h</code> slide (W1L3 9:15) shows <code>3.7G</code> total, <code>1.1G</code> used and <code>888M</code> free.</p>
+<p>The <code>free</code> slide of the lecture (W1L3 8:15) is a table in kibibytes (KiB, units of 1024 bytes), and the <code>used</code> column has had two different definitions in two versions of the program. The next listing does the arithmetic. Inputs: the six numbers of the slide. Output: both definitions applied to them, and each number converted to GiB and MiB. The check is that exactly one definition reproduces the printed <code>used</code> column.</p>
+<pre><code class="language-python" data-file="free_used.py" data-run="python3 free_used.py"># Columns of the lecture's `free` screenshot (KiB), W1L3, 8:15 into the recording.
+total, used, free, shared, cache, available = 3861044, 1170740, 910584, 63084, 1779720, 2347100
+print('older procps:  total - free - buff/cache =', total - free - cache, ' printed used =', used)
+print('procps 4:      total - available         =', total - available)
+for name, kib in (('total', total), ('used', used), ('free', free), ('available', available)):
+    print(f'{name:&lt;9}{kib / 2**20:6.3f} GiB {kib / 2**10:8.1f} MiB')
+</code></pre>
+<pre><code class="output">older procps:  total - free - buff/cache = 1170740  printed used = 1170740
+procps 4:      total - available         = 1513944
+total     3.682 GiB   3770.6 MiB
+used      1.117 GiB   1143.3 MiB
+free      0.868 GiB    889.2 MiB
+available 2.238 GiB   2292.1 MiB
+</code></pre>
+<p>The slide's <code>used</code> of 1 170 740 KiB equals total minus free minus buffers and cache, so the lecture's <code>free</code> used the older definition. The manual of the current procps-ng program (<code>free(1)</code>) defines <code>used</code> as total minus available, and on the verification machine this definition holds: \(16\,209\,100-15\,603\,508=605\,592\), the value of the session above, while total minus free minus buffers and cache is \(388\,548\). The two definitions differ by 217 044 KiB on this machine and by 343 204 KiB on the lecture's slide, so a script that reads the <code>used</code> column gets numbers that depend on the version of the program. The version of procps on the lecture's machine is not known; the statement above is inferred from the numbers.</p>
+
+<h2 id="tree">The directory tree, paths and the working directory <a class="timestamp" href="https://www.youtube.com/watch?v=t8tAOMqb3qc&amp;t=653s">W1L3 10:53</a></h2>
+<p>The lecture defines a file as a collection of data stored on a disk or in memory and a directory as a special file that contains references to other files and directories; the slide adds "It's like a folder that organizes files into a hierarchy" (W1L3 11:15). The model of this chapter makes the second definition exact: a directory is an inode whose content is a table of names. The next section develops it. This section treats the tree that the tables form and the commands that move through it: <code>pwd</code>, <code>ls</code>, <code>cd</code>.</p>
+<p><strong>Where things are.</strong> The Filesystem Hierarchy Standard (FHS 3.0, 19 March 2015) fixes the top of the tree by two distinctions. A file is <em>shareable</em> if one host can store it and others can use it, and <em>static</em> if it changes only by administrator action (FHS §2). Files that differ in either respect belong in different directories, so that they can sit on different file systems. This yields <code>/usr</code> for static shareable programs, <code>/etc</code> for static host-specific configuration, and <code>/var</code> for variable data (FHS §2 and §3). User files live under <code>/home</code>, which the standard calls "clearly a site-specific filesystem": "no program should assume any specific location for a home directory, rather it should query for it" (FHS §3.8.1). The lecture's home directory is <code>/home/master</code>. Temporary files go to <code>/tmp</code>, whose contents a program "must not assume" survive between runs (FHS §3.18.1), or to <code>/var/tmp</code>, whose contents "must not be deleted when the system is booted" (FHS §5.15.1). This chapter's listings use <code>/tmp</code> for that reason.</p>
+<p><strong>Resolution.</strong> A path that begins with <code>/</code> is <em>absolute</em> and starts at the root directory. Any other path is <em>relative</em> and starts at the working directory of the process (<code>path_resolution(7)</code>). The kernel takes the path one name at a time. For each name it needs search permission on the current directory, otherwise it fails with <code>EACCES</code> ("Permission denied"); the name must exist, otherwise <code>ENOENT</code>; and every name except the last must be a directory, otherwise <code>ENOTDIR</code>. Two names are special: <code>.</code> is the current directory and <code>..</code> its parent. At the root, <code>..</code> is the root itself; the listing below confirms it. The working directory belongs to the process and is looked up at each resolution. It follows that a separate program cannot change the working directory of the shell that started it, which is why <code>cd</code> is built into the shell.</p>
+<p>The lecture shows three uses of <code>cd</code>: with a name, with no argument (the user goes to the home directory), with <code>-</code> (to the previous directory) and with <code>..</code> (to the parent). The listing runs all of them in a scratch tree whose "home" is set by assigning the shell variable <code>HOME</code>. Inputs: none. Output: the working directory after each command, relative to the scratch root, which the program does not print. The last lines run <code>ls</code> in a directory that holds one hidden file. The check is that each result matches the lecture's description.</p>
+<pre><code class="language-bash" data-file="nav_session.sh" data-run="bash nav_session.sh">#!/bin/bash
+d=$(mktemp -d /tmp/hpsc-ch03.XXXXXX); cd "$d" || exit 1
+trap 'cd /; rm -rf "$d"' EXIT
+mkdir -p home/proj/sub; export HOME=$d/home
+where() { echo "$1 -&gt; ${PWD#$d}"; }
+
+cd ~/proj/sub;  where 'cd ~/proj/sub'
+cd ..;          where 'cd ..'
+cd - &gt; /dev/null; where 'cd -'
+cd;             where 'cd'
+cd proj/./sub/../sub; where 'cd proj/./sub/../sub'
+
+mkdir ls_demo; cd ls_demo; touch .hidden visible
+echo "ls:    $(ls | paste -sd" ")"
+echo "ls -A: $(ls -A | paste -sd" ")"
+echo "ls -a: $(ls -a | paste -sd" ")"
+cd /
+echo "at /: . and .. are the same directory: $([ . -ef .. ] &amp;&amp; echo yes || echo no)"
+</code></pre>
+<pre><code class="output">cd ~/proj/sub -&gt; /home/proj/sub
+cd .. -&gt; /home/proj
+cd - -&gt; /home/proj/sub
+cd -&gt; /home
+cd proj/./sub/../sub -&gt; /home/proj/sub
+ls:    visible
+ls -A: .hidden visible
+ls -a: . .. .hidden visible
+at /: . and .. are the same directory: yes
+</code></pre>
+<p>Each line matches the lecture. <code>cd</code> with no argument goes to <code>HOME</code>, <code>cd -</code> returns to the directory left by the previous <code>cd</code>, and <code>cd ..</code> goes up one level. The path <code>proj/./sub/../sub</code> resolves to <code>proj/sub</code>: <code>.</code> and <code>..</code> are names in each directory table, so resolution treats them like any other name. The last three lines test the lecture's rule that a name that starts with a dot makes a hidden file. The rule belongs to <code>ls</code>, not to the file system: the kernel stores <code>.hidden</code> like any name, plain <code>ls</code> skips every name that starts with a dot, <code>ls -A</code> shows all of them except <code>.</code> and <code>..</code>, and <code>ls -a</code> shows all. The last line shows that at the root, <code>.</code> and <code>..</code> are the same directory.</p>
+<p><strong>The long listing.</strong> The lecture's <code>ls -la</code> screen (W1L3 14:15 to 17:15) is the first view of the model's attributes. One line reads <code>drwxrwxr-x. 28 master master 4096 Dec 14 2023 anaconda3</code>. The ten characters <code>drwxrwxr-x</code> are the type and the mode (decoded in the section on permissions). The dot after them is not part of the mode. GNU <code>ls</code> prints it for "a file with a security context, but no other alternate access method" and prints <code>+</code> when another alternate method such as an access control list applies (Coreutils 9.4 manual, §10.1.2 "What information is listed", the description of <code>-l</code>); a security context is the label of the SELinux security module. The lecture does not discuss it. Its presence on the file lines of the lecture's screens, and the group named <code>wheel</code> in the later <code>groups</code> output, indicate a Red Hat-family system with SELinux; the verification machine prints no dot. The number 28 is the link count; the next section derives it. <code>master master</code> are the owner and the group. The number 4096 is the size, in bytes, of the directory object itself, that is, of its table of names, not of the files in it. The same screen shows that this size follows the table and not a fixed block. In the one home directory, <code>anaconda3</code>, <code>.cache</code> and <code>.config</code> report 4096 bytes, while <code>Documents</code>, <code>.dbus</code>, <code>Desktop</code>, <code>.conda</code>, <code>Anaconda</code> and <code>Downloads</code> report 6, 25, 27, 30, 47 and 141 bytes, and <code>/home</code> reports 35. On the verification machine's <code>/tmp</code> (ext4), a new empty directory reports 4096 bytes, one block. The small sizes on the lecture's screen come from a file system that stores short tables in less space than a block; the screens do not name that file system. The date is a modification time, not a creation time (the same coreutils description: "normally the modification timestamp"), and the section on commands shows the two times apart. The line above the entries, <code>total 60</code>, is the file-system space of the listed entries in 1024-byte blocks, not a count of files.</p>
+
+<h2 id="inodes">A directory is a table of names: link counts, hard links and symbolic links <a class="timestamp" href="https://www.youtube.com/watch?v=t8tAOMqb3qc&amp;t=953s">W1L3 15:53</a></h2>
+<p>The lecture reads the second column of <code>ls -l</code> as the number of links associated with the file or directory and does not develop it. The column is the link count \(n\) of the model, and it answers a question that the lecture's commands raise: what exactly does <code>rm</code> remove, and what does <code>mv</code> change? Ritchie and Thompson describe the original structure (1974, pp. 366 to 369). A directory entry holds a name and an <em>i-number</em>, an index into a table of i-nodes. The i-node holds the owner, the protection bits, the addresses of the contents, the size, the time of last modification, the number of links ("the number of times it appears in a directory") and the type. Making a link "involves creating a directory entry with the new name, copying the i-number from the original file entry, and incrementing the link-count field of the i-node". Deleting a file "is done by decrementing the link-count of the i-node specified by its directory entry and erasing the directory entry. If the link-count drops to 0, any disk blocks in the file are freed and the i-node is deallocated". The Linux system calls keep this design: <code>link(2)</code> creates a new name for an existing file, and the two names have "the same permissions and ownership" and are indistinguishable ("it is impossible to tell which name was the original"); <code>unlink(2)</code> deletes one name, and the file itself is deleted only when that name was the last link and "no processes have the file open" (the file then remains until the last descriptor is closed).</p>
+<figure>
+<svg viewBox="0 0 720 250" role="img" aria-labelledby="fig-ino-title fig-ino-desc" font-family="system-ui, sans-serif" font-size="13" fill="currentColor">
+<title id="fig-ino-title">Directory tables and inodes</title>
+<desc id="fig-ino-desc">A directory table with three names. Two names, a.txt and b.txt, point to inode 57 with link count 2. The name s.txt points to inode 91, a symbolic link whose content is the text b.txt.</desc>
+<defs><marker id="ino-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+<rect x="20" y="20" width="230" height="140" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="30" y="42" font-weight="600">directory proj (inode 20)</text>
+<line x1="20" y1="52" x2="250" y2="52" stroke="currentColor"/>
+<text x="34" y="78">name</text><text x="150" y="78">inode</text>
+<text x="34" y="104">a.txt</text><text x="160" y="104">57</text>
+<text x="34" y="128">b.txt</text><text x="160" y="128">57</text>
+<text x="34" y="152">s.txt</text><text x="160" y="152">91</text>
+<rect x="400" y="20" width="300" height="90" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="410" y="42" font-weight="600">inode 57: regular file</text>
+<text x="410" y="64">mode, owner, group, size, times</text>
+<text x="410" y="84">link count n = 2</text>
+<text x="410" y="102">content: the bytes of the file</text>
+<rect x="400" y="140" width="300" height="90" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="410" y="162" font-weight="600">inode 91: symbolic link</text>
+<text x="410" y="184">mode 0777, link count n = 1</text>
+<text x="410" y="204">content: the text "b.txt"</text>
+<path d="M190 100 L390 62" stroke="currentColor" fill="none" marker-end="url(#ino-arrow)"/>
+<path d="M190 124 L390 70" stroke="currentColor" fill="none" marker-end="url(#ino-arrow)"/>
+<path d="M190 148 L390 180" stroke="currentColor" fill="none" marker-end="url(#ino-arrow)"/>
+<path d="M550 140 C 450 130, 250 140, 200 126" stroke="currentColor" fill="none" stroke-dasharray="5 4" marker-end="url(#ino-arrow)"/>
+<text x="420" y="132" font-size="11">resolved again by name</text>
+</svg>
+<figcaption>Figure 3.1. One directory table, two inodes. The names <code>a.txt</code> and <code>b.txt</code> are two entries for inode 57, whose link count is 2. The name <code>s.txt</code> is an entry for inode 91, a separate file whose content is a path; the dashed arrow shows that the kernel resolves that path by name each time the link is used. The figure shows structure only; the numbers 20, 57 and 91 are illustrative.</figcaption>
+</figure>
+<p><strong>The link count of a directory.</strong> Which names refer to a directory \(\delta\) that has \(s(\delta)\) subdirectories? The entry for \(\delta\) in its parent; the entry <code>.</code> inside \(\delta\); and the entry <code>..</code> inside each of the \(s(\delta)\) subdirectories. Each such name adds one to the link count, so on a file system that follows the original convention
+
+\[ n(\delta) = 2 + s(\delta). \tag{3.1} \]
+
+The 1974 paper states the first part (p. 366): "each directory always has at least two entries". The lecture's screen gives three checks. The home directory (<code>.</code> in the first line of the <code>ls -la</code> screen) has link count 22, so it has 20 subdirectories, hidden ones included; the parent <code>/home</code> has count 4, so 2 subdirectories; and <code>anaconda3</code> has count 28, so 26 subdirectories. The <code>ls -la</code> screen at W1L4 4:45 adds a fourth: the entry <code>.</code> there is <code>Desktop</code>, with link count 4 and exactly two subdirectories, <code>simpleproject</code> and <code>TestDir2</code>. The program below verifies (3.1) directly and also tests the rules of links. Inputs: none. Output: link counts, results of the calls, and the error that each forbidden call returns, by the name of its error code. The check is that each result agrees with the man pages quoted above.</p>
+<pre><code class="language-python" data-file="names_inodes.py" data-run="python3 names_inodes.py">import errno, os, shutil, tempfile
+
+def attempt(label, call, *args):
+    try:
+        call(*args)
+        print(f'{label}: ok')
+    except OSError as e:
+        print(f'{label}: {errno.errorcode[e.errno]}')
+
+root = tempfile.mkdtemp(dir='/tmp')
+os.chdir(root)
+
+# A directory is a table of names; its link count is 2 + number of subdirectories.
+os.makedirs('proj/data/raw')
+os.makedirs('proj/src')
+os.mkdir('proj/docs')
+for d in ('proj', 'proj/data', 'proj/src', 'proj/docs'):
+    subdirs = sum(os.path.isdir(os.path.join(d, n)) for n in os.listdir(d))
+    print(f'{d:&lt;10} subdirectories {subdirs}  link count {os.stat(d).st_nlink}')
+
+# A hard link is a second name for one inode.
+with open('proj/a.txt', 'w') as f:
+    f.write('residuals\n')
+os.link('proj/a.txt', 'proj/b.txt')
+a, b = os.stat('proj/a.txt'), os.stat('proj/b.txt')
+print('a and b same inode:', a.st_ino == b.st_ino, ' link count:', a.st_nlink)
+os.unlink('proj/a.txt')
+print('after unlink(a): b reads', repr(open('proj/b.txt').read()), ' link count:', os.stat('proj/b.txt').st_nlink)
+
+# A symbolic link is a file whose content is a path.
+os.symlink('b.txt', 'proj/s.txt')
+print('symlink: lstat is link:', os.path.islink('proj/s.txt'), ' mode:', oct(os.lstat('proj/s.txt').st_mode &amp; 0o777),
+      ' target text:', os.readlink('proj/s.txt'), ' reads:', repr(open('proj/s.txt').read()))
+os.unlink('proj/b.txt')
+print('after unlink(b): symlink still present:', os.path.lexists('proj/s.txt'), ' resolves:', os.path.exists('proj/s.txt'))
+attempt('open dangling symlink', open, 'proj/s.txt')
+
+# Limits of links and renames.
+attempt('hard link to a directory', os.link, 'proj/src', 'proj/src2')
+attempt('rmdir of a non-empty directory', os.rmdir, 'proj/data')
+attempt('unlink of a directory', os.unlink, 'proj/data')
+other = tempfile.mkdtemp(dir='/dev/shm')
+open('proj/c.txt', 'w').close()
+print('/tmp and /dev/shm on different file systems:', os.stat(root).st_dev != os.stat(other).st_dev)
+attempt('rename across file systems', os.rename, 'proj/c.txt', other + '/c.txt')
+attempt('hard link across file systems', os.link, 'proj/c.txt', other + '/c.txt')
+before = os.stat('proj/c.txt').st_ino
+os.rename('proj/c.txt', 'proj/docs/c.txt')
+print('rename inside one file system keeps the inode:', os.stat('proj/docs/c.txt').st_ino == before)
+
+shutil.rmtree(root)
+shutil.rmtree(other)
+</code></pre>
+<pre><code class="output">proj       subdirectories 3  link count 5
+proj/data  subdirectories 1  link count 3
+proj/src   subdirectories 0  link count 2
+proj/docs  subdirectories 0  link count 2
+a and b same inode: True  link count: 2
+after unlink(a): b reads 'residuals\n'  link count: 1
+symlink: lstat is link: True  mode: 0o777  target text: b.txt  reads: 'residuals\n'
+after unlink(b): symlink still present: True  resolves: False
+open dangling symlink: ENOENT
+hard link to a directory: EPERM
+rmdir of a non-empty directory: ENOTEMPTY
+unlink of a directory: EISDIR
+/tmp and /dev/shm on different file systems: True
+rename across file systems: EXDEV
+hard link across file systems: EXDEV
+rename inside one file system keeps the inode: True
+</code></pre>
+<p>The first four lines confirm (3.1): <code>proj</code> has three subdirectories and link count 5, <code>proj/data</code> one subdirectory and count 3, and the two empty directories count 2. The hard link <code>b.txt</code> and the original <code>a.txt</code> have the same inode, and the count is 2. After <code>unlink</code> of <code>a.txt</code> the file is still readable through <code>b.txt</code> and the count is 1: only a name was removed. The symbolic link is its own file. Its mode is 0777, which <code>symlink(7)</code> states is always so on Linux because the permissions of a symbolic link "are not used in any operations"; its content is the text <code>b.txt</code>; and when the target name is unlinked the link stays and fails to resolve, so opening it returns <code>ENOENT</code>. The next five lines show the three limits of links. A hard link to a directory fails with <code>EPERM</code> (<code>link(2)</code>); the 1974 paper gives the reason, that with arbitrary links to directories "it would be quite difficult to detect when the last connection from the root to a directory was severed". <code>rmdir</code> of a non-empty directory fails with <code>ENOTEMPTY</code> (<code>rmdir(2)</code>), and Linux reports <code>unlink</code> of a directory as <code>EISDIR</code> (<code>unlink(2)</code>, which notes that POSIX prescribes <code>EPERM</code>). The program found <code>/tmp</code> and <code>/dev/shm</code> on different file systems, and both <code>rename</code> and <code>link</code> across them fail with <code>EXDEV</code>, "not on the same mounted filesystem" (<code>rename(2)</code>, <code>link(2)</code>). Ritchie and Thompson (p. 367) give the same rule for the first UNIX file system: "no link may exist between one file system hierarchy and another". Inside one file system, <code>rename</code> keeps the inode, so the last line prints <code>True</code>.</p>
+<p>These results give the exact meaning of two commands of the lecture. <code>mv</code> inside one file system changes directory entries and no data. When the destination is on another file system, <code>rename</code> cannot work, and GNU <code>mv</code> "falls back on copying as if by <code>cp -a</code>, then (assuming the copy succeeded) it removes the original" (Coreutils manual, §11.4); the cost then grows with the size of the data. A script that moves a result file from a fast scratch file system to a home file system therefore moves bytes, and its time grows with the size of the file. If the copy fails, <code>mv</code> removes the partial copy in the destination. If several directories are moved and the copy of a later one fails, the ones already copied stay at the destination and the rest stay at the source (Coreutils manual, §11.4), so one command can leave the data split across two file systems. And <code>rm</code> does not erase a file. It removes a name, and the file disappears when the last name and the last open descriptor are gone.</p>
+
+<h2 id="commands">Creating, renaming, moving, copying and deleting <a class="timestamp" href="https://www.youtube.com/watch?v=t8tAOMqb3qc&amp;t=1431s">W1L3 23:51</a> <a class="timestamp" href="https://www.youtube.com/watch?v=bc4gkkRVn4Q&amp;t=37s">W1L4 0:37</a></h2>
+<p>The lectures present these commands that change the inode table: <code>mkdir</code> and <code>rmdir</code> for directories, <code>touch</code> and the editors <code>vim</code> and <code>gedit</code> for new files, <code>mv</code> for renaming and moving, <code>rm</code> and <code>rm -r</code> for deletion, and <code>cp</code> and <code>cp -r</code> for copies. Each command is a small program around one or two system calls, and the model of the previous section says what each call changes. Table 3.1 lists the calls and the documented conditions under which they fail.</p>
+<div class="table-wrap"><table>
+<caption>Table 3.1. Commands of the lectures, the system calls behind them, and the documented conditions that make the call fail.</caption>
+<thead><tr><th scope="col">Command</th><th scope="col">System call</th><th scope="col">Change to the model</th><th scope="col">Documented failure conditions</th></tr></thead>
+<tbody>
+<tr><td><code>mkdir d</code></td><td><code>mkdir</code></td><td>New directory inode with the entries <code>.</code> and <code>..</code>; the parent's link count rises by 1 (3.1); mode \(=\) requested mode \(\wedge\lnot\mu\wedge\) 0777</td><td><code>EEXIST</code> if the name exists, even as a dangling symbolic link; <code>EACCES</code> without write permission on the parent or search permission on a directory of the path (<code>mkdir(2)</code>)</td></tr>
+<tr><td><code>rmdir d</code></td><td><code>rmdir</code></td><td>Removes the entry of an empty directory</td><td><code>ENOTEMPTY</code> if <code>d</code> has entries other than <code>.</code> and <code>..</code>; <code>EACCES</code> without write permission on the containing directory (<code>rmdir(2)</code>)</td></tr>
+<tr><td><code>touch f</code>, a new file from an editor or from <code>&gt;</code></td><td><code>open</code> with <code>O_CREAT</code></td><td>New inode, new entry; mode \(=\) requested mode \(\wedge\lnot\mu\)</td><td><code>EACCES</code> if the file does not exist and write access to the parent directory is not allowed (<code>open(2)</code>)</td></tr>
+<tr><td><code>mv a b</code></td><td><code>rename</code></td><td>Moves or renames an entry; the inode and its other links are unchanged; an existing \(b\) is replaced atomically</td><td><code>EXDEV</code> if the two names are on different mounted file systems (<code>rename(2)</code>)</td></tr>
+<tr><td><code>rm f</code></td><td><code>unlink</code></td><td>Removes one entry; the count \(n\) falls by 1</td><td><code>EACCES</code> without write permission on the containing directory or search permission on a directory of the path (<code>unlink(2)</code>)</td></tr>
+<tr><td><code>cp a b</code></td><td><code>open</code>, <code>read</code>, <code>write</code></td><td>If \(b\) does not exist: a new inode with the creator's ownership and a new modification time</td><td>As for creation</td></tr>
+<tr><td><code>ln a b</code></td><td><code>link</code></td><td>New entry for the same inode; count \(+1\)</td><td><code>EPERM</code> for a directory; <code>EXDEV</code> across file systems (<code>link(2)</code>)</td></tr>
+<tr><td><code>chmod</code>, <code>chown</code></td><td><code>chmod</code>, <code>chown</code></td><td>Changes the mode, or the owner and group, in the inode</td><td>See the sections on <code>chmod</code> and ownership</td></tr>
+</tbody></table></div>
+<p>This section gathers the table edits of both lectures, including the <code>cp</code> demonstration of W1L4 (21:52), ahead of the section on redirection, which follows the order of W1L4. The listing reproduces the lecture's directory and file examples on <code>/tmp</code> with a creation mask of 002 (the value that a later section infers for the lecture's machine), and adds the checks that the table implies. Inputs: none. Output: one block of lines per command, each printing the fact that the command's documentation predicts. The checks are: <code>mv</code> keeps the inode; <code>rmdir</code> refuses a non-empty directory with the message of the lecture's slide (W1L4 10:45); <code>cp -r</code> run twice nests the copy; <code>cp</code> creates a new inode while <code>cp -p</code> preserves the modification time; <code>rm</code> removes a name and does not consult the mode of the file.</p>
+<pre><code class="language-bash" data-file="files_session.sh" data-run="bash files_session.sh">#!/bin/bash
+d=$(mktemp -d /tmp/hpsc-ch03.XXXXXX); cd "$d" || exit 1
+trap 'cd /; rm -rf "$d"' EXIT
+umask 002
+
+echo '$ mv inside one file system'
+mkdir TestDir; i=$(stat -c %i TestDir)
+mv TestDir TestDir2
+[ "$(stat -c %i TestDir2)" = "$i" ] &amp;&amp; echo 'same inode after mv'
+
+echo '$ rmdir, then rm -r'
+mkdir TestDir2/child; touch TestDir2/file4
+rmdir TestDir2 2&gt;&amp;1
+rm -r TestDir2 &amp;&amp; echo 'rm -r removed the tree'
+
+echo '$ cp -r, twice'
+mkdir -p simpleproject/src; touch simpleproject/README.md
+cp -r simpleproject project2
+cp -r simpleproject project2
+find project2 | sort
+
+echo '$ cp and cp -p'
+touch -d '2020-01-01 00:00:00' old
+cp old copy; cp -p old kept
+[ copy -nt old ] &amp;&amp; echo 'cp: the copy is newer than the original'
+[ kept -nt old ] || [ kept -ot old ] || echo 'cp -p: same modification time'
+[ old -ef copy ] || echo 'cp: a new inode'
+
+echo '$ rm removes a name, and consults the directory, not the file'
+echo data &gt; keep; ln keep alias; rm keep
+echo "alias still reads '$(cat alias)', link count $(stat -c %h alias)"
+touch locked; chmod 000 locked
+rm locked &amp;&amp; echo 'rm of a mode 000 file: removed'
+mkdir ro; touch ro/f; chmod 666 ro/f; chmod a-w ro
+rm ro/f 2&gt;&amp;1
+chmod u+w ro
+
+echo '$ the time in ls -l'
+birth=$(stat -c %W old); mtime=$(stat -c %Y old)
+[ "$birth" -gt "$mtime" ] &amp;&amp; echo 'birth time is later than the modification time of 2020-01-01'
+</code></pre>
+<pre><code class="output">$ mv inside one file system
+same inode after mv
+$ rmdir, then rm -r
+rmdir: failed to remove 'TestDir2': Directory not empty
+rm -r removed the tree
+$ cp -r, twice
+project2
+project2/README.md
+project2/simpleproject
+project2/simpleproject/README.md
+project2/simpleproject/src
+project2/src
+$ cp and cp -p
+cp: the copy is newer than the original
+cp -p: same modification time
+cp: a new inode
+$ rm removes a name, and consults the directory, not the file
+alias still reads 'data', link count 1
+rm of a mode 000 file: removed
+rm: cannot remove 'ro/f': Permission denied
+$ the time in ls -l
+birth time is later than the modification time of 2020-01-01
+</code></pre>
+<p>The first block shows that <code>mv TestDir TestDir2</code> keeps the inode number, so the lecture's rename moved no data. The second block reproduces the lecture's failure: <code>rmdir</code> prints <code>Directory not empty</code>, and <code>rm -r</code> removes the directory and everything under it. Because <code>rmdir</code> needs an empty directory, the recursion must remove the entries of a directory before it removes the directory. In the third block the second <code>cp -r simpleproject project2</code> found that <code>project2</code> already existed, and so it created <code>project2/simpleproject</code> inside it; the lecture's single run was the first of these. The fourth block shows the three differences between a copy and the original: the copy is a new inode, it belongs to the user who ran <code>cp</code> (the listing does not print the owner; by <code>inode(7)</code> the owner of a new file is the effective user of the creating process), and it has a new modification time unless <code>cp -p</code> asks for the old one.</p>
+<p>The fifth block corrects the lecture's description of <code>rm</code>. The lecture, and its slide (W1L4 12:45), say that <code>rm</code> deletes the data permanently and should be used with caution. The caution is justified, because <code>rm</code> calls <code>unlink</code> and keeps no copy of the name, but the statement is too strong in two ways. First, <code>rm</code> removes a name. The file survives while another name or an open descriptor exists: after <code>ln keep alias</code> and <code>rm keep</code>, the content is still readable through <code>alias</code> and the link count is 1. Second, <code>rm</code> does not overwrite the content. The Coreutils manual (§11.5) warns that "it is usually possible to recover the contents of that file" and points to <code>shred</code> for those who need more assurance. The same block shows that the file's own mode is not consulted: <code>rm</code> removed a file of mode 000, and refused to remove a file of mode 666 in a directory without write permission, with <code>Permission denied</code>. The mode that decides is the one of the containing directory, as <code>unlink(2)</code> states. When stdin is a terminal and a file is unwritable, <code>rm</code> asks for confirmation before it removes it (Coreutils §11.5); in the listing stdin is not a terminal, so no question appears. The last block separates two times. The date column of <code>ls -l</code> is the modification time, not the creation time; the birth time is stored separately, and for a file that <code>touch -d</code> gave a modification time in 2020, the birth time is later than that.</p>
+<p>The lecture creates files in three ways. <code>touch</code> makes an empty file. An editor, <code>vim</code> on the command line or <code>gedit</code> in a window, makes a file with content. The <code>ls -la</code> screen of the <code>vim</code> demonstration (W1L4 4:45) shows <code>file1</code> made by <code>touch</code> with size 0 and <code>file2</code> made by <code>vim</code> with size 33, and both with mode <code>-rw-rw-r--</code>. Both programs therefore request the same mode when they create a file, which the section on defaults explains. The lecture's remark that <code>touch</code> creates "an empty file" is correct for a name that does not exist. For a name that exists, <code>touch</code> changes timestamps and keeps the content; the listing uses <code>touch -d</code> for that purpose.</p>
+
+<h2 id="redirect">Concatenation and redirection <a class="timestamp" href="https://www.youtube.com/watch?v=bc4gkkRVn4Q&amp;t=794s">W1L4 13:14</a></h2>
+<p>The lecture introduces <code>cat</code> as the command that prints a file on the terminal, concatenates several files, and, with <code>&gt;</code> or <code>&gt;&gt;</code>, creates a file from them. The slide marks <code>&gt;</code> with the word Redirect (W1L4 17:45) and shows it inside the <code>cat</code> command line, which hides who does the work. The shell reads the characters <code>&gt; file4</code>, removes them from the command line, opens <code>file4</code> itself, and starts <code>cat</code> with its standard output attached to the open file. For <code>&gt;</code> the shell opens the file for writing with <code>O_TRUNC</code>, which truncates an existing regular file to length 0 (<code>open(2)</code>). For <code>&gt;&gt;</code> it opens with <code>O_APPEND</code>, so that "before each write" the offset moves to the end of the file. The program <code>cat</code> never sees the operator. Chapter 5 treats the shell's parsing in full; here only the order of events matters, because it decides what a command like <code>cat file2 file3 &gt; file2</code> does. The listing runs the lecture's four examples and two commands that name an input file as the output. Inputs: two small files with the lecture's content. Output: the line counts and byte counts that each command leaves, and the diagnostics. The check is that the counts match the order of events just described.</p>
+<pre><code class="language-bash" data-file="redirect_session.sh" data-run="bash redirect_session.sh">#!/bin/bash
+d=$(mktemp -d /tmp/hpsc-ch03.XXXXXX); cd "$d" || exit 1
+trap 'cd /; rm -rf "$d"' EXIT
+printf 'My name is Linux\nI am the best !\n' &gt; file2
+printf 'Hello from GNU\nI am Open Source !\n' &gt; file3
+
+echo '$ cat file2 file3'
+cat file2 file3
+echo '$ cat file2 file3 &gt; file4'
+cat file2 file3 &gt; file4
+echo "file4 has $(wc -l &lt; file4) lines"
+echo '$ cat file2 file3 &gt; file4   (second time)'
+cat file2 file3 &gt; file4
+echo "file4 has $(wc -l &lt; file4) lines"
+echo '$ cat file2 file3 &gt;&gt; file4'
+cat file2 file3 &gt;&gt; file4
+echo "file4 has $(wc -l &lt; file4) lines"
+echo '$ cat file3 &gt;&gt; file3'
+{ cat file3 &gt;&gt; file3; } 2&gt;&amp;1; echo "exit status $?, file3 has $(wc -c &lt; file3) bytes"
+echo '$ cat file2 file3 &gt; file2'
+echo "file2 has $(wc -c &lt; file2) bytes before"
+cat file2 file3 &gt; file2; echo "exit status $?"
+echo "file2 has $(wc -c &lt; file2) bytes after; file3 has $(wc -c &lt; file3)"
+cmp -s file2 file3 &amp;&amp; echo 'file2 now equals file3: the old content of file2 is gone'
+</code></pre>
+<pre><code class="output">$ cat file2 file3
+My name is Linux
+I am the best !
+Hello from GNU
+I am Open Source !
+$ cat file2 file3 &gt; file4
+file4 has 4 lines
+$ cat file2 file3 &gt; file4   (second time)
+file4 has 4 lines
+$ cat file2 file3 &gt;&gt; file4
+file4 has 8 lines
+$ cat file3 &gt;&gt; file3
+cat: file3: input file is output file
+exit status 1, file3 has 34 bytes
+$ cat file2 file3 &gt; file2
+file2 has 33 bytes before
+exit status 0
+file2 has 34 bytes after; file3 has 34
+file2 now equals file3: the old content of file2 is gone
+</code></pre>
+<p>The first <code>&gt;</code> creates <code>file4</code> with the 4 lines of the two inputs. The second <code>&gt;</code> leaves 4 lines: the old content was replaced, as the lecture says. <code>&gt;&gt;</code> appends 4 more lines and gives 8. The last example loses data. The shell truncated <code>file2</code> to 0 bytes before <code>cat</code> started, so <code>cat</code> read an empty <code>file2</code> and the 34 bytes of <code>file3</code> and wrote 34 bytes into <code>file2</code>. The command exits with status 0 and prints nothing, and the original 33 bytes of <code>file2</code> are gone; <code>cmp</code> shows that <code>file2</code> now equals <code>file3</code>. GNU <code>cat</code> refuses the append form: <code>cat file3 &gt;&gt; file3</code> prints <code>input file is output file</code>, exits with status 1 and leaves <code>file3</code> at 34 bytes. It does not refuse the truncating form, because the input is already empty when <code>cat</code> starts, so a script must not rely on the check. The lecture's demonstration used a new file as the target and did not meet the case.</p>
+
+<h2 id="permissions">Owner, group and other: the access rule and the ten characters <a class="timestamp" href="https://www.youtube.com/watch?v=bc4gkkRVn4Q&amp;t=1550s">W1L4 25:50</a></h2>
+<p>The lecture states that Linux is a multi-user system, so a file needs an owner and rules for others, and divides users into three categories: the owner (slide: "The person who owns the file"), the group ("A group of users who share access to the file") and others ("Everyone else"). It divides the access into read, write and execute, and says that for a directory, execute permission lets a user navigate or traverse it (slide: "traverse a directory"). These statements are correct. They leave one question open: when a user fits more than one category, which rights apply?</p>
+<p><strong>The access rule.</strong> The question for a process \(q\) and a file \(f\) is whether the kernel grants the access \(a\), where \(a\) is 4 for read, 2 for write or 1 for execute (search, for a directory). Linux selects one class and looks at that class only (<code>path_resolution(7)</code>, section "Permissions"): the owner class when the effective user ID of \(q\) equals the owner of \(f\); otherwise the group class when the group of \(f\) is the effective group or one of the supplementary groups of \(q\); otherwise the other class. In symbols, with \(u_q\) and \(G_q\) from the model,
+
+\[ c(q,f)=\begin{cases}\mathrm{u} &amp; u_q=u_f,\\ \mathrm{g} &amp; u_q\ne u_f \text{ and } g_f\in G_q,\\ \mathrm{o} &amp; \text{otherwise,}\end{cases}\tag{3.2} \]
+
+and an unprivileged process is granted the access \(a\) exactly when
+
+\[ m_{c(q,f)}\wedge a\neq 0 .\tag{3.3} \]
+
+Linux compares the file-system user ID, which equals the effective user ID unless a program changes it with <code>setfsuid</code> (<code>path_resolution(7)</code>). POSIX.1-2024 (XBD 4.7) states the same: access is granted "if the requested access permission bit is set for the class (file owner class, file group class, or file other class) to which the process belongs"; a privileged process is granted read, write and search always, and execute if at least one execute bit is set. The same section lets an implementation add mechanisms: an additional mechanism "shall only further restrict" access, and an alternate mechanism must be "enabled only by explicit user action, on a per-file basis". For a file reached by a path, the kernel applies (3.3) to the file and also requires search permission, (3.3) with \(a=1\), on every directory of the path before the last name.</p>
+<p>The consequence of the word "otherwise" in (3.2) is that the classes are not cumulative. A user who owns a file is judged by the owner digit alone, even if the group digit is larger. Table 3.2 gives the meaning of the three rights. In the directory column, read and execute are independent rights, and creation and removal need write and execute together.</p>
+<div class="table-wrap"><table>
+<caption>Table 3.2. The meaning of the three access rights for a regular file and for a directory.</caption>
+<thead><tr><th scope="col">Right</th><th scope="col">Regular file</th><th scope="col">Directory</th></tr></thead>
+<tbody>
+<tr><td>read (4)</td><td>Read the content</td><td>List the names in the table</td></tr>
+<tr><td>write (2)</td><td>Change the content</td><td>Create, remove and rename entries (with execute also granted; the file's own mode is not consulted)</td></tr>
+<tr><td>execute (1)</td><td>Run the file as a program</td><td>Search: use the directory in a path, that is, look up a name in it</td></tr>
+</tbody></table></div>
+<p>The listing tests (3.2) and Table 3.2 on a scratch file and a scratch directory. Inputs: none. Output: what <code>cat</code>, <code>ls</code> and <code>cd</code> do under each mode, with the diagnostics of the shell. The checks are: with mode 070 or 007 the owner is refused although the group or other digit is 7; with mode 400 the owner reads; a directory with mode 400 lists its names but allows neither <code>cat dir/f</code> nor <code>cd dir</code>; a directory with mode 100 refuses <code>ls</code> but allows <code>cat dir/f</code> and <code>cd dir</code>.</p>
+<pre><code class="language-bash" data-file="owner_class.sh" data-run="bash owner_class.sh">#!/bin/bash
+d=$(mktemp -d /tmp/hpsc-ch03.XXXXXX); cd "$d" || exit 1
+trap 'cd /; chmod -R u+rwx "$d"; rm -rf "$d"' EXIT
+umask 022
+
+echo '--- the owner class is chosen first'
+echo secret &gt; f; chmod 070 f
+echo "mode 070:"; cat f 2&gt;&amp;1
+chmod 007 f
+echo "mode 007:"; cat f 2&gt;&amp;1
+chmod 400 f
+echo "mode 400:"; cat f 2&gt;&amp;1
+
+echo '--- read and search on a directory are different rights'
+mkdir dir; echo x &gt; dir/f
+chmod 400 dir
+echo "mode 400 on dir:"; ls dir; cat dir/f 2&gt;&amp;1; cd dir 2&gt;&amp;1
+chmod 100 dir
+echo "mode 100 on dir:"; ls dir 2&gt;&amp;1; cat dir/f; cd dir &amp;&amp; echo 'cd works'
+</code></pre>
+<pre><code class="output">--- the owner class is chosen first
+mode 070:
+cat: f: Permission denied
+mode 007:
+cat: f: Permission denied
+mode 400:
+secret
+--- read and search on a directory are different rights
+mode 400 on dir:
+f
+cat: dir/f: Permission denied
+owner_class.sh: line 17: cd: dir: Permission denied
+mode 100 on dir:
+ls: cannot open directory 'dir': Permission denied
+x
+cd works
+</code></pre>
+<p>The first two blocks prove the selection of one class. The test user owns <code>f</code> and is in its group (the group of a new file is the user's primary group). Under mode 070 the group digit is 7, and the access is refused: \(c(q,f)=\mathrm{u}\), and \(m_{\mathrm u}=0\). The same happens under 007. Under 400 the access is granted. The directory blocks show that the two rights are independent. With read only, <code>ls dir</code> prints the name <code>f</code>, because listing needs only the table of names; <code>cat dir/f</code> and <code>cd dir</code> fail, because both need search permission. With search only, <code>ls dir</code> is refused, but <code>cat dir/f</code> prints the content (the user must know the name), and <code>cd dir</code> succeeds.</p>
+<p><strong>The ten characters.</strong> The mode string that <code>ls -l</code> prints is a code for the type and the 12-bit mode. The first character is the type. The lecture names two values, <code>-</code> for a regular file and <code>d</code> for a directory; the Coreutils manual (§10.1.2) lists the others: <code>l</code> symbolic link, <code>c</code> and <code>b</code> character and block devices, <code>p</code> FIFO, <code>s</code> socket. The next nine characters are three groups of three, for the owner, the group and the other class, and each position holds <code>r</code>, <code>w</code> or <code>x</code> or the character <code>-</code> for a clear bit. A special bit is shown in the position of the execute bit of its class: <code>s</code> when the set-user-ID (set-group-ID) bit and the execute bit are both set, <code>S</code> when only the special bit is set, <code>t</code> when the sticky bit and other-execute are both set, and <code>T</code> when only the sticky bit is set (Coreutils §10.1.2). Figure 3.2 shows the layout of the 12 bits.</p>
+<figure>
+<svg viewBox="0 0 720 190" role="img" aria-labelledby="fig-mode-title fig-mode-desc" font-family="system-ui, sans-serif" font-size="13" fill="currentColor">
+<title id="fig-mode-title">The 12 bits of a mode</title>
+<desc id="fig-mode-desc">Twelve boxes in four groups of three. The first group holds the special bits set-user-ID 4, set-group-ID 2 and sticky 1. The next three groups hold read 4, write 2 and execute 1 for owner, group and other. Each group is one octal digit.</desc>
+<g stroke="currentColor" fill="none" stroke-width="1.3">
+<rect x="30" y="50" width="52" height="40"/><rect x="82" y="50" width="52" height="40"/><rect x="134" y="50" width="52" height="40"/>
+<rect x="206" y="50" width="52" height="40"/><rect x="258" y="50" width="52" height="40"/><rect x="310" y="50" width="52" height="40"/>
+<rect x="382" y="50" width="52" height="40"/><rect x="434" y="50" width="52" height="40"/><rect x="486" y="50" width="52" height="40"/>
+<rect x="558" y="50" width="52" height="40"/><rect x="610" y="50" width="52" height="40"/><rect x="662" y="50" width="52" height="40"/>
+</g>
+<g text-anchor="middle">
+<text x="56" y="76">suid</text><text x="108" y="76">sgid</text><text x="160" y="76">sticky</text>
+<text x="232" y="76">r</text><text x="284" y="76">w</text><text x="336" y="76">x</text>
+<text x="408" y="76">r</text><text x="460" y="76">w</text><text x="512" y="76">x</text>
+<text x="584" y="76">r</text><text x="636" y="76">w</text><text x="688" y="76">x</text>
+<text x="56" y="108" font-size="11">4</text><text x="108" y="108" font-size="11">2</text><text x="160" y="108" font-size="11">1</text>
+<text x="232" y="108" font-size="11">4</text><text x="284" y="108" font-size="11">2</text><text x="336" y="108" font-size="11">1</text>
+<text x="408" y="108" font-size="11">4</text><text x="460" y="108" font-size="11">2</text><text x="512" y="108" font-size="11">1</text>
+<text x="584" y="108" font-size="11">4</text><text x="636" y="108" font-size="11">2</text><text x="688" y="108" font-size="11">1</text>
+<text x="108" y="34" font-weight="600">special digit</text>
+<text x="284" y="34" font-weight="600">owner digit m_u</text>
+<text x="460" y="34" font-weight="600">group digit m_g</text>
+<text x="636" y="34" font-weight="600">other digit m_o</text>
+<text x="108" y="140">ls shows s, S in</text><text x="108" y="156">the owner or group x,</text><text x="108" y="172">t, T in the other x</text>
+<text x="284" y="140">octal 0100, 0200, 0400</text>
+<text x="460" y="140">octal 010, 020, 040</text>
+<text x="636" y="140">octal 01, 02, 04</text>
+</g>
+</svg>
+<figcaption>Figure 3.2. The 12 bits of a mode, as four octal digits. The weight of each bit inside its digit is written under the box. The mode 4755 has the digits 4, 7, 5, 5: set-user-ID, then rwx, r-x and r-x. The figure shows the bit layout; it does not show which operations each bit controls.</figcaption>
+</figure>
+<p>The lecture decodes three strings on its screens (W1L4 29:45 to 32:45). <code>-rw-rw-r--</code> is a regular file: owner <code>rw-</code> (4+2), group <code>rw-</code> (4+2), other <code>r--</code> (4), so mode 664. <code>drwxrwxr-x</code> is a directory with the digits 7, 7, 5: mode 775. <code>-rwxrwxr-x</code>, the executable <code>exe.sh</code> on the same screen, is a regular file with the digits 7, 7, 5. The other class of the directory holds read and execute, as the screen at W1L4 31:45 shows.</p>
+<p>The decoder below turns a mode into its ten characters by the rules above. Inputs: the mode of 4096 files, one for each 12-bit value, created in a scratch directory and set by <code>chmod</code>; a directory, a symbolic link and a FIFO; and the file <code>/usr/bin/passwd</code>. Output: the number of files for which the function agrees with GNU <code>stat -c %A</code> and with Python's <code>stat.filemode</code>, then examples. The check is agreement on all 4096 values.</p>
+<pre><code class="language-python" data-file="mode_decode.py" data-run="python3 mode_decode.py">import os, stat, subprocess, tempfile
+
+def mode_string(mode):
+    """The ten characters of ls -l for st_mode, from the bit layout of stat(2)."""
+    kind = {0o140000: 's', 0o120000: 'l', 0o100000: '-', 0o060000: 'b',
+            0o040000: 'd', 0o020000: 'c', 0o010000: 'p'}[mode &amp; 0o170000]
+    out = [kind]
+    for shift, special, low, high in ((6, 0o4000, 's', 'S'), (3, 0o2000, 's', 'S'), (0, 0o1000, 't', 'T')):
+        bits = (mode &gt;&gt; shift) &amp; 7
+        out.append('r' if bits &amp; 4 else '-')
+        out.append('w' if bits &amp; 2 else '-')
+        if mode &amp; special:
+            out.append(low if bits &amp; 1 else high)
+        else:
+            out.append('x' if bits &amp; 1 else '-')
+    return ''.join(out)
+
+def main():
+    with tempfile.TemporaryDirectory(dir='/tmp') as d:
+        for m in range(4096):
+            path = os.path.join(d, f'{m:04o}')
+            open(path, 'w').close()
+            os.chmod(path, m)
+        names = sorted(os.listdir(d))
+        text = subprocess.run(['stat', '-c', '%n %A', *names], cwd=d, capture_output=True, text=True).stdout
+        gnu = dict(line.split() for line in text.splitlines())
+        agree_gnu = sum(mode_string(os.stat(os.path.join(d, n)).st_mode) == gnu[n] for n in names)
+        agree_py = sum(mode_string(os.stat(os.path.join(d, n)).st_mode) == stat.filemode(os.stat(os.path.join(d, n)).st_mode) for n in names)
+        print(f'{len(names)} regular files, one per 12-bit mode')
+        print(f'mode_string equals GNU stat %A for {agree_gnu}, equals stat.filemode for {agree_py}')
+        os.mkdir(os.path.join(d, 'dir'))
+        os.symlink('0644', os.path.join(d, 'link'))
+        os.mkfifo(os.path.join(d, 'fifo'))
+        for n in ('dir', 'link', 'fifo', '4755', '2770', '1777'):
+            st = os.lstat(os.path.join(d, n))
+            print(f'{n:&gt;5} {oct(st.st_mode &amp; 0o7777)[2:].zfill(4)} {mode_string(st.st_mode)}')
+    print('/usr/bin/passwd', mode_string(os.stat('/usr/bin/passwd').st_mode))
+
+main()
+</code></pre>
+<pre><code class="output">4096 regular files, one per 12-bit mode
+mode_string equals GNU stat %A for 4096, equals stat.filemode for 4096
+  dir 0755 drwxr-xr-x
+ link 0777 lrwxrwxrwx
+ fifo 0644 prw-r--r--
+ 4755 4755 -rwsr-xr-x
+ 2770 2770 -rwxrws---
+ 1777 1777 -rwxrwxrwt
+/usr/bin/passwd -rwsr-xr-x
+</code></pre>
+<p>The function agrees with both references on all 4096 values, so the four octal digits and the ten characters carry the same information (for the type character, the examples cover four of the seven types: regular file, directory, symbolic link and FIFO). The examples show the special bits: mode 4755 prints <code>s</code> in the owner execute position, 2770 prints <code>s</code> in the group position, 1777 prints <code>t</code>, and the setuid program <code>/usr/bin/passwd</code> of this machine prints <code>-rwsr-xr-x</code>.</p>
+<p>Finally, the access rule (3.2) and (3.3) is a prediction about the kernel, so the next program tests it. Inputs: 512 files that the test user owns, one for each permission mode; then up to 3000 entries under each of <code>/etc</code>, <code>/var/log</code>, <code>/usr/bin</code> and <code>/home</code>. The program computes the predicate from the inode and compares it with <code>os.access</code>, which asks the kernel with the effective user, for read, write and execute. Assumptions: the process is unprivileged; the file system is the root ext4 file system; path-prefix search permission is not modelled, which restricts the second test to entries that the directory walk reached. Output: agreement counts, and whether each class of system entries had at least 20 entries.</p>
+<pre><code class="language-python" data-file="access_predicate.py" data-run="python3 access_predicate.py">import os, tempfile
+
+BIT = {'r': 4, 'w': 2, 'x': 1}
+
+def may(mode, owner, group, user, want):
+    """Access predicate for an unprivileged process. user = (uid, set of group ids)."""
+    uid, gids = user
+    shift = 6 if uid == owner else 3 if group in gids else 0   # first matching class only
+    return bool((mode &gt;&gt; shift) &amp; BIT[want])
+
+# 1. The kernel agrees with the predicate for the owner class: 512 modes x 3 requests.
+me = (os.geteuid(), set(os.getgroups()) | {os.getegid()})
+agree = total = 0
+with tempfile.TemporaryDirectory(dir='/tmp') as d:
+    for m in range(512):
+        p = os.path.join(d, f'{m:03o}')
+        open(p, 'w').close()
+        os.chmod(p, m)
+        for want, flag in (('r', os.R_OK), ('w', os.W_OK), ('x', os.X_OK)):
+            total += 1
+            agree += may(m, os.geteuid(), os.getegid(), me, want) == os.access(p, flag, effective_ids=True)
+print(f'owner class, own files: kernel and predicate agree on {agree} of {total} requests')
+
+# 2. ... and for the group and other classes, on files this user does not own.
+seen = {'owner': 0, 'group': 0, 'other': 0}
+bad = bad_acl = 0
+dev = os.stat('/').st_dev
+for top in ('/etc', '/var/log', '/usr/bin', '/home'):
+    budget = 3000                                  # entries examined under each top directory
+    for dirpath, dirs, files in os.walk(top):
+        if budget == 0:
+            break                                  # stop the walk, not only the inner loop
+        for name in files + dirs:
+            if budget == 0:
+                break
+            budget -= 1
+            p = os.path.join(dirpath, name)
+            try:
+                st = os.lstat(p)
+            except OSError:
+                continue
+            if st.st_dev != dev or os.path.islink(p):
+                continue
+            cls = 'owner' if st.st_uid == me[0] else 'group' if st.st_gid in me[1] else 'other'
+            seen[cls] += 1
+            try:
+                has_acl = 'system.posix_acl_access' in os.listxattr(p)
+            except OSError:
+                has_acl = False
+            for want, flag in (('r', os.R_OK), ('w', os.W_OK), ('x', os.X_OK)):
+                if may(st.st_mode &amp; 0o777, st.st_uid, st.st_gid, me, want) != os.access(p, flag, effective_ids=True):
+                    bad_acl += has_acl
+                    bad += not has_acl
+print('system entries examined per class, at least 20 each:', {k: v &gt;= 20 for k, v in seen.items()})
+print('disagreements on files without an ACL:', bad)
+print('disagreements on files with an ACL (the mode bits are not the whole rule):', 'some' if bad_acl else 'none')
+</code></pre>
+<pre><code class="output">owner class, own files: kernel and predicate agree on 1536 of 1536 requests
+system entries examined per class, at least 20 each: {'owner': True, 'group': True, 'other': True}
+disagreements on files without an ACL: 0
+disagreements on files with an ACL (the mode bits are not the whole rule): some
+</code></pre>
+<p>For files owned by the test user the kernel agrees with the predicate on all 1536 requests (512 modes, three accesses). This test is exhaustive for the owner class only: for its own files the predicate always selects the owner digit, so the order of the group class and the other class is not tested by it. Under <code>/etc</code>, <code>/var/log</code> and <code>/usr/bin</code> the walk ended before the budget (1516, 206 and 1093 entries examined); only under <code>/home</code> did it stop at 3000. Of the entries that were not symbolic links and lay on the root file system, 2997 were in the owner class (all under <code>/home</code>, the test user's own files), 42 in the group class (all under <code>/var/log</code>) and 1946 in the other class, in the run that produced the sample. The printed line says that each class had at least 20 entries, and the number of disagreements on files without an access control list was 0. The counts depend on the machine and change as logs rotate. The order between the group class and the other class (for example, a group member refused under mode 0604) was not tested against the kernel. On the files that carry an ACL attribute the predicate disagrees with the kernel for some requests: examples are the systemd journal files under <code>/var/log/journal</code>, which have mode 0640, owner root and a group that the test user does not belong to, and which the test user can nevertheless read. The program does not decode the ACL, and <code>getfacl</code> is not installed, so the listing does not say which entry grants the access; it shows only that the nine mode bits are not the whole rule on a file that has the attribute. This is the extra mechanism that POSIX allows, and the boundary of the model of this chapter.</p>
+
+<h2 id="chmod">Changing the mode: symbolic and octal notation <a class="timestamp" href="https://www.youtube.com/watch?v=bc4gkkRVn4Q&amp;t=1987s">W1L4 33:07</a></h2>
+<p>Only the owner of a file, or a privileged process, may change its mode (POSIX <code>chmod</code>, DESCRIPTION; <code>chmod(2)</code>). The lecture presents the two notations of <code>chmod</code>. This section gives each a precise meaning and tests the symbolic one against the program on the machine.</p>
+<p><strong>Octal notation.</strong> The lecture assigns the weights 4, 2 and 1 to read, write and execute and adds the weights of the rights to be granted: 7 is 4+2+1, 5 is 4+1, 6 is 4+2. The assignment is a bijection between the eight subsets of \(\{r,w,x\}\) and the numbers 0 to 7:
+
+\[ d = 4\,[r] + 2\,[w] + 1\,[x] , \tag{3.4} \]
+
+where \([r]\) is 1 if read is granted and 0 otherwise, and likewise for \([w]\) and \([x]\). Equation (3.4) is a binary numeral whose leading bit is \([r]\). Every integer from 0 to 7 has exactly one such numeral, so each digit names exactly one subset. Three classes give \(8^3=512=2^9\) permission modes, and a fourth digit for the special bits gives the 4096 values of the decoder. The lecture's examples follow: 755 is owner 7 (rwx), group 5 (r-x), other 5 (r-x); 644 is rw-, r--, r--; 777 is rwx for everyone.</p>
+<p><strong>Symbolic notation.</strong> A symbolic mode is a list of clauses separated by commas. Each clause is a <em>who</em> (any of <code>u</code>, <code>g</code>, <code>o</code>, or <code>a</code> for all three, or nothing), an <em>operator</em> (<code>+</code>, <code>-</code> or <code>=</code>), and a <em>permission</em> (any of <code>r</code>, <code>w</code>, <code>x</code>, or one of <code>u</code>, <code>g</code>, <code>o</code> to copy the current rights of that class); a clause may repeat the operator and permission part (POSIX <code>chmod</code>, EXTENDED DESCRIPTION; the letters <code>X</code>, <code>s</code> and <code>t</code> are left out of this chapter's model). Let \(K\) be the set of classes of the <em>who</em>, with all three when the <em>who</em> is <code>a</code> or empty, and let \(b\) be the 3-bit value of the permission. Let \(\sigma_K(b)\) be \(b\) placed in each class of \(K\): \(\sigma_K(b)=\sum_{c\in K}b\cdot 8^{e_c}\). Let \(A\) be the mask of bits that the clause may change: \(A=\lnot\mu\) when the <em>who</em> is empty and \(A=511\) otherwise, where \(\mu\) is the creation mask of the process that runs <code>chmod</code>. Then the clause changes the current mode \(m\) as
+
+\[ m'=\begin{cases} m\vee(\sigma_K(b)\wedge A) &amp; \text{for } +,\\ m\wedge\lnot(\sigma_K(b)\wedge A) &amp; \text{for } -,\\ \bigl(m\wedge\lnot\sigma_K(7)\bigr)\vee(\sigma_K(b)\wedge A) &amp; \text{for } =. \end{cases}\tag{3.5} \]
+
+For the permission copied from a class, \(b\) is the digit of that class in \(m\) before the operation. The mask \(A\) is the point that the lecture does not make. POSIX.1-2024 states: when the <em>who</em> is not specified, the bits are set or cleared "except for those with corresponding bits in the file mode creation mask of the invoking process". The Coreutils manual (§27.2.6) gives the example that with a mask of 2 the mode <code>+w</code> gives write permission to the owner and the group "but not to other users", while <code>a+w</code> "ignores umask".</p>
+<p>The first listing repeats the lecture's <code>chmod</code> session, with the modes printed by <code>stat</code> instead of <code>ls -l</code>, and then shows what the mask changes. Inputs: new files made under the masks 002 and 027. Output: octal and symbolic mode after each command. The checks: the lecture's results (<code>chmod +x file2</code> gives <code>-rwxrwxr-x</code>, <code>chmod 777</code> gives <code>-rwxrwxrwx</code>; W1L4 39:45 to 41:45) must reproduce; and <code>+x</code> must give a different result under mask 027.</p>
+<pre><code class="language-bash" data-file="chmod_session.sh" data-run="bash chmod_session.sh">#!/bin/bash
+d=$(mktemp -d /tmp/hpsc-ch03.XXXXXX); cd "$d" || exit 1
+trap 'cd /; rm -rf "$d"' EXIT
+show() { stat -c '%a %A %n' "$@"; }
+
+echo '--- the lecture session, umask 002'
+umask 002
+touch file1 file2
+show file1 file2
+chmod +x file2; show file2
+chmod 777 file1; show file1
+chmod 755 file1; show file1
+chmod 644 file1; show file1
+chmod u+x file1; chmod g-w file1; chmod a+r file1; show file1
+
+echo '--- the same chmod +x under umask 027'
+umask 027
+touch g1 g2
+chmod +x g1; chmod a+x g2
+show g1 g2
+
+echo '--- chmod -w under umask 002 on a file that others may write'
+umask 002
+touch h; chmod 646 h
+chmod -w h 2&gt;&amp;1; echo "exit status $?"
+show h
+</code></pre>
+<pre><code class="output">--- the lecture session, umask 002
+664 -rw-rw-r-- file1
+664 -rw-rw-r-- file2
+775 -rwxrwxr-x file2
+777 -rwxrwxrwx file1
+755 -rwxr-xr-x file1
+644 -rw-r--r-- file1
+744 -rwxr--r-- file1
+--- the same chmod +x under umask 027
+750 -rwxr-x--- g1
+751 -rwxr-x--x g2
+--- chmod -w under umask 002 on a file that others may write
+chmod: h: new permissions are r--r--rw-, not r--r--r--
+exit status 1
+446 -r--r--rw- h
+</code></pre>
+<p>The first block reproduces the lecture's screens. A file created by <code>touch</code> has mode 664 (the lecture's <code>-rw-rw-r--</code>), <code>chmod +x</code> turns 664 into 775, and <code>chmod 777</code>, <code>755</code> and <code>644</code> set the modes absolutely. The last line chains three clauses: <code>u+x</code>, <code>g-w</code> and <code>a+r</code> take 644 to 744, which the lecture's three symbolic examples predict. The lecture's demonstration gives execute to all three classes (664 becomes 775, W1L4 39:45), and the demonstration suggests that a clause without a <em>who</em> acts on all classes. The second block shows that this statement is not general. Under mask 027, <code>chmod +x</code> gives 750, with execute for the owner and the group only, while <code>chmod a+x</code> gives 751. By (3.5), \(A=\lnot 027=0750\), and the others' execute bit is outside \(A\). The lecture's result, execute for all three classes, holds for the lecture's machine, whose mask is 002, and does not hold for a user whose mask is 027. The third block shows the mask on the minus operator. For mode 646 and mask 002, <code>chmod -w</code> clears write for the owner and the group and leaves it for the other class: the result is 446, the mode that (3.5) predicts. GNU <code>chmod</code> prints a warning that the new permissions differ from the plain removal of write, and exits with status 1.</p>
+<p>The second listing turns (3.5) into a program and tests it against <code>chmod</code>. Inputs: all 512 permission modes as starting modes; 16 clauses that include the lecture's examples (<code>+x</code>, <code>a+w</code>, <code>u+x</code>, <code>g-w</code>), absolute settings (<code>=rw</code>, <code>a=r</code>, <code>o=</code>), copies (<code>go=u</code>, <code>g=u,o=g</code>, <code>o+g</code>), and a list (<code>u=rwx,g=rx,o=r</code>); three masks, 002, 022 and 027. Output: five worked examples from the model, then the number of cases and the number on which the model and GNU <code>chmod</code> differ. The program runs the real <code>chmod</code> once per clause and mask on all 512 files. Assumptions: nine permission bits only; files, not directories.</p>
+<pre><code class="language-python" data-file="chmod_model.py" data-run="python3 chmod_model.py">import os, re, subprocess, tempfile
+
+R, W, X = 4, 2, 1
+SHIFT = {'u': 6, 'g': 3, 'o': 0}
+
+def apply_symbolic(mode, spec, umask):
+    """POSIX symbolic mode on the nine permission bits (no s, t, X)."""
+    for clause in spec.split(','):
+        who = re.match(r'[ugoa]*', clause).group()
+        classes = 'ugo' if who in ('', 'a') or 'a' in who else who
+        masked = who == ''
+        for op, perm in re.findall(r'([-+=])([ugo]|[rwx]*)', clause[len(who):]):
+            if perm in ('u', 'g', 'o'):
+                bits = (mode &gt;&gt; SHIFT[perm]) &amp; 7
+            else:
+                bits = sum({'r': R, 'w': W, 'x': X}[c] for c in perm)
+            field = 0
+            for c in classes:
+                field |= bits &lt;&lt; SHIFT[c]
+            allowed = 0o777 &amp; ~umask if masked else 0o777
+            span = sum(7 &lt;&lt; SHIFT[c] for c in classes)
+            if op == '+':
+                mode |= field &amp; allowed
+            elif op == '-':
+                mode &amp;= ~(field &amp; allowed)
+            else:
+                mode = (mode &amp; ~span) | (field &amp; allowed)
+    return mode
+
+CLAUSES = ['+x', '-x', '+w', '-w', 'a+w', 'a+x', 'u+x', 'g-w', 'o=', 'go=u', 'g=u,o=g',
+           'u=rwx,g=rx,o=r', '=rw', 'a=r', 'g+w,o-r', 'o+g']
+UMASKS = [0o002, 0o022, 0o027]
+
+def main():
+    cases = bad = 0
+    with tempfile.TemporaryDirectory(dir='/tmp') as d:
+        names = []
+        for m in range(512):
+            p = os.path.join(d, f'{m:03o}')
+            open(p, 'w').close()
+            os.chmod(p, m)
+            names.append(p)
+        for spec in CLAUSES:
+            for u in UMASKS:
+                for m in range(512):
+                    os.chmod(names[m], m)
+                subprocess.run(['chmod', spec, *names], stderr=subprocess.DEVNULL, preexec_fn=lambda: os.umask(u))
+                for m in range(512):
+                    got = os.stat(names[m]).st_mode &amp; 0o777
+                    cases += 1
+                    if got != apply_symbolic(m, spec, u):
+                        bad += 1
+                        if bad &lt;= 5:
+                            print(f'MISMATCH {spec} umask {u:03o} from {m:03o}: chmod {got:03o} model {apply_symbolic(m, spec, u):03o}')
+    for m, spec, u in [(0o664, '+x', 0o002), (0o664, '+x', 0o027), (0o664, 'a+x', 0o027),
+                       (0o444, '+w', 0o022), (0o444, 'a+w', 0o022)]:
+        assert spec in CLAUSES and u in UMASKS
+        print(f'{m:03o} {spec:&lt;4} umask {u:03o} -&gt; {apply_symbolic(m, spec, u):03o}')
+    print(f'{cases} cases: {len(CLAUSES)} clauses x {len(UMASKS)} umasks x 512 initial modes')
+    print(f'disagreements between the model and GNU chmod: {bad}')
+
+main()
+</code></pre>
+<pre><code class="output">664 +x   umask 002 -&gt; 775
+664 +x   umask 027 -&gt; 774
+664 a+x  umask 027 -&gt; 775
+444 +w   umask 022 -&gt; 644
+444 a+w  umask 022 -&gt; 666
+24576 cases: 16 clauses x 3 umasks x 512 initial modes
+disagreements between the model and GNU chmod: 0
+</code></pre>
+<p>The model and <code>chmod</code> agree on all \(16\times3\times512=24\,576\) cases. The model's examples give the lecture's case (664 with <code>+x</code> under 002 gives 775), the same command under 027 (774, where the others' bit is withheld and, in this example, the owner and group execute bits are granted), and <code>a+x</code> (775). They also give the case that explains a common failure: <code>chmod +w</code> on a read-only file (444) under mask 022 gives 644, with write for the owner only, while <code>a+w</code> gives 666. The agreement establishes (3.5) for permission bits, files and the 16 clauses; it does not establish the behaviour for the letters <code>X</code>, <code>s</code> and <code>t</code>, for directories, or for clauses outside the list, and the warning of GNU <code>chmod</code> in the third block of the previous listing is not part of the model.</p>
+
+<h2 id="ownership">Ownership: <code>chown</code>, <code>chgrp</code> and the group of a new file <a class="timestamp" href="https://www.youtube.com/watch?v=bc4gkkRVn4Q&amp;t=2559s">W1L4 42:39</a></h2>
+<p>The lecture states that the user of the session is by default the owner of a new file, shows <code>chown owner:group file</code> with the syntax of the slide (W1L4 43:45), lists the groups of the session with the command <code>groups</code> (output <code>master wheel shadow</code>), and gives a file to the user <code>minion1</code> and the group <code>shadow</code> (W1L4 44:45). The first statement is correct and can be made more precise. By <code>inode(7)</code>, the owner of a new file is the effective user ID of the creating process. The group is, by <code>open(2)</code>, either the effective group ID of the process (System V semantics) or the group of the parent directory (BSD semantics); "on Linux, the behavior depends on whether the set-group-ID mode bit is set on the parent directory: if that bit is set, then BSD semantics apply". The lecture's files have the group <code>master</code>, the personal group of the user <code>master</code>, so its directories did not have that bit. The section on defaults returns to this rule, because it solves the running case.</p>
+<p>The lecture presents <code>chown</code> without stating that changing the owner needs privilege, and it does. The prompt on the lecture's screen (W1L4 44:45) is <code>[root@localhost Desktop]#</code>: the command ran as root. The session user is in the groups <code>wheel</code> and <code>shadow</code> (W1L4 43:45), so the <code>:shadow</code> half of <code>chown minion1:shadow file3</code> needed no privilege; only the change of owner to <code>minion1</code> did. By <code>chown(2)</code>, "only a privileged process (Linux: one with the CAP_CHOWN capability) may change the owner of a file", and the owner of a file "may change the group of the file to any group of which that owner is a member". The same page adds that when an unprivileged user changes the owner or group of an executable file, the set-user-ID and set-group-ID bits are cleared. The next transcript runs the three cases on numeric identities. The transcript was produced by the root account of the verification guest with the program <code>setpriv</code>, which runs a command with chosen numeric user, group and supplementary group IDs; no account was created, and the scratch directory was deleted afterwards. The code lab does not run it, because it needs root. Standard input was not a terminal; with a terminal, <code>rm</code> asks before it removes a write-protected file, and the removals of write-protected files in these transcripts would wait for an answer. The script lists the identities of the running case: alice 2001 with groups 2001 and 2100, bob 2002 with groups 2002 and 2100, and carol 2003 with group 2003 only. The sticky-bit lines of the output belong to the next section.</p>
+<pre><code class="language-bash">exec 2&gt;&amp;1
+# Run as root. Identities are numeric, so no account is created.
+# alice 2001:2001, bob 2002:2002, carol 2003:2003, group hpsc 2100.
+as() { u=$1; shift; case $u in
+  alice) setpriv --reuid=2001 --regid=2001 --groups=2001,2100 -- "$@";;
+  bob)   setpriv --reuid=2002 --regid=2002 --groups=2002,2100 -- "$@";;
+  carol) setpriv --reuid=2003 --regid=2003 --groups=2003      -- "$@";;
+esac; }
+d=$(mktemp -d /tmp/hpsc-root-demo.XXXX); chmod 755 $d; cd $d
+echo "--- sticky bit"
+mkdir pub; chmod 777 pub; as alice touch pub/a.dat; as bob rm pub/a.dat; echo "bob rm in 0777 dir exit $?"
+as alice touch pub/b.dat; chmod 1777 pub; as bob rm pub/b.dat; echo "bob rm in 1777 dir exit $?"
+as alice rm pub/b.dat; echo "alice rm in 1777 dir exit $?"
+echo "--- chown and chgrp by an unprivileged owner"
+mkdir own; chown 2001:2001 own; cd own
+as alice touch mine.dat; as alice chown 2002 mine.dat; echo "alice chown to bob exit $?"
+as alice chgrp 2100 mine.dat; echo "alice chgrp to hpsc (a group of alice) exit $?"
+as alice chgrp 2003 mine.dat; echo "alice chgrp to carol's group exit $?"
+stat -c '%A %u:%g %n' mine.dat
+cd /; rm -rf $d
+</code></pre>
+<pre><code class="output">--- sticky bit
+bob rm in 0777 dir exit 0
+rm: cannot remove 'pub/b.dat': Operation not permitted
+bob rm in 1777 dir exit 1
+alice rm in 1777 dir exit 0
+--- chown and chgrp by an unprivileged owner
+chown: changing ownership of 'mine.dat': Operation not permitted
+alice chown to bob exit 1
+alice chgrp to hpsc (a group of alice) exit 0
+chgrp: changing group of 'mine.dat': Operation not permitted
+alice chgrp to carol's group exit 1
+-rw-r--r-- 2001:2100 mine.dat
+</code></pre>
+<p>Alice cannot give her file to Bob: <code>chown</code> returns <code>Operation not permitted</code> and exits with status 1. She can change its group to 2100, because she is a member of that group (exit status 0), and cannot change it to Carol's group 2003, which she is not in. The final <code>stat</code> shows the result: owner 2001, group 2100. In the lecture, <code>chown minion1:shadow file3</code> needed root for the same reason, and on a shared system a user who wants another owner must ask the administrator, while changing the group to a group of which one is a member needs no help. That second operation is what the running case uses to place a project directory in the group <code>hpsc</code>.</p>
+
+<h2 id="special">Defaults and special bits: the creation mask, set-group-ID, sticky and set-user-ID</h2>
+<p>This section covers what the lectures leave out and the running case needs. It has no recording behind it. The lecture shows that a new file has mode <code>-rw-rw-r--</code> and a new directory <code>drwxrwxr-x</code> and the slides do not say where these modes come from.</p>
+<p><strong>The creation mask.</strong> A program that creates a file passes the mode that it requests to the system call, and the kernel removes the bits that the process's creation mask \(\mu\) names. For <code>open</code> with <code>O_CREAT</code>, "in the absence of a default ACL, the mode of the created file is (mode &amp; ~umask)" (<code>open(2)</code>); for <code>mkdir</code> it is "(mode &amp; ~umask &amp; 0777)" (<code>mkdir(2)</code>). In the notation of the model,
+
+\[ m_{\text{new}} = m_{\text{req}}\wedge\lnot\mu . \tag{3.6} \]
+
+The mask belongs to the process and is set by the shell command <code>umask</code> (POSIX <code>umask</code>), so the same command can create files with different modes in two sessions. The tools of the lectures behave as if they request 0666 for a file (<code>touch</code>, the editors, redirection) and 0777 for a directory (<code>mkdir</code>): no execute bit is requested for a file, and a directory needs the execute bit to be usable. (The requests of the lecture's tools were not observed; the statement is the assumption that the next program makes.) The lecture's machine produced 664 and 775. The next program tests (3.6) for all 512 masks and then solves for the mask of the lecture. Inputs: each mask from 000 to 777, a file created with requested mode 0666 and a directory created with 0777 under it. Output: the number of masks for which the result equals (3.6), and the masks that reproduce a file mode of 664 and a directory mode of 775 together.</p>
+<pre><code class="language-python" data-file="umask_check.py" data-run="python3 umask_check.py">import os, tempfile
+
+ok_file = ok_dir = 0
+fits = []
+with tempfile.TemporaryDirectory(dir='/tmp') as d:
+    for u in range(512):
+        os.umask(u)
+        f, g = os.path.join(d, f'f{u:03o}'), os.path.join(d, f'd{u:03o}')
+        os.close(os.open(f, os.O_CREAT | os.O_WRONLY, 0o666))
+        os.mkdir(g, 0o777)
+        file_mode, dir_mode = os.stat(f).st_mode &amp; 0o777, os.stat(g).st_mode &amp; 0o777
+        ok_file += file_mode == 0o666 &amp; ~u
+        ok_dir += dir_mode == 0o777 &amp; ~u
+        if file_mode == 0o664 and dir_mode == 0o775:
+            fits.append(f'{u:03o}')
+print(f'umask values tried: 512; file mode == 0666 &amp; ~umask: {ok_file}; directory mode == 0777 &amp; ~umask: {ok_dir}')
+print('umask values that give a file mode 664 and a directory mode 775:', fits)
+</code></pre>
+<pre><code class="output">umask values tried: 512; file mode == 0666 &amp; ~umask: 512; directory mode == 0777 &amp; ~umask: 512
+umask values that give a file mode 664 and a directory mode 775: ['002']
+</code></pre>
+<p>The kernel obeys (3.6) for all 512 masks, for files and for directories. Exactly one mask produces the lecture's pair: 002. The reasoning also follows from (3.6) by hand. A file request of 0666 has no execute bits, so the file cannot reveal whether the mask has execute bits; it shows that \(\mu\wedge0666=0002\). The directory request of 0777 reveals them all: the result 775 means that the only bit removed is the 002 bit, so \(\mu=0002\). The inference rests on three conditions. The tools requested 0666 for a file and 0777 for a directory, as <code>umask_check.py</code> assumes. The directories had no default ACL, because <code>open(2)</code> applies the mask only "in the absence of a default ACL". And the files and <code>TestDir2</code> were made under the same mask. Under these conditions the lecture's screens fit the inference: the files made in the demonstrations have <code>-rw-rw-r--</code> (W1L4 4:45, 6:45 and 39:45), and <code>TestDir2</code> has <code>drwxrwxr-x</code> (W1L4 4:45). The same screen shows directories that do not fit the pair: the user's <code>Desktop</code> (the entry <code>.</code> at W1L4 4:45) has <code>drwxr-xr-x</code> and the home directory (<code>..</code>) has <code>drwx------</code>. Other programs created them, and these programs may request other modes or run under other masks, so these directories do not test the shell's mask. The root-owned <code>simpleproject</code>, <code>drwxr-xr-x</code>, was created by root, whose mask is separate. A mask of 002 for a user with a private group is one setting of the shadow and PAM configuration of Ubuntu 24.04: <code>pam_umask(8)</code>, option <code>usergroups</code>, states "If the user is not root and the username is the same as primary group name, the umask group bits are set to be the same as owner bits (examples: 022 -&gt; 002, 077 -&gt; 007)", and the comment in <code>/etc/login.defs</code> of the verification machine states that with <code>USERGROUPS_ENAB yes</code> a default <code>UMASK</code> of 022 becomes 002 for a user whose user ID equals the group ID and whose name equals the primary group name, and <code>login.defs(5)</code> documents <code>UMASK</code> as the initial value of the mask for <code>pam_umask</code>. The lecture's files have the group <code>master</code>, the user's name; the screens do not show which mechanism set the mask on the lecture's machine. The verification machine's shell prints the mask 022 although its <code>/etc/login.defs</code> has <code>USERGROUPS_ENAB yes</code> and the user ID equals the group ID, so a file made there by <code>touch</code> has mode 644. The two defaults differ in one bit, the group's write permission, and that bit decides the running case.</p>
+<p><strong>The set-user-ID bit.</strong> The first UNIX file system had seven protection bits: six gave read, write and execute permission independently to the owner and to all other users, and the seventh worked as follows; "if the seventh bit is on, the system will temporarily change the user identification of the current user to that of the creator of the file whenever the file is executed as a program" (Ritchie and Thompson 1974, p. 367). That bit is set-user-ID (octal 4000, <code>S_ISUID</code>; <code>inode(7)</code>). A process started from such a file has the file's owner as effective user, and (3.2) then judges it as that user. The decoder's example, <code>/usr/bin/passwd</code> with mode <code>-rwsr-xr-x</code> and owner root on this machine, is an instance: a user who runs it gets a process whose effective user is root, the owner of the file. The first system had no group class at all, and the nine-bit mode with a group digit of this chapter is a later extension; the 1974 paper does not describe it. This chapter does not run a set-user-ID program, so it does not test the effect, and the description above rests on the paper and on <code>inode(7)</code>.</p>
+<p><strong>The set-group-ID bit on a directory.</strong> On a regular file, set-group-ID (2000) is the group counterpart of the bit above. On a directory it has a different, documented meaning: "newly created subfiles inherit the same group as the directory, and newly created subdirectories inherit the set-group-ID bit of the parent directory" (Coreutils §27.5; <code>open(2)</code> and <code>mkdir(2)</code> say the same). Without the bit, a new file takes the creator's effective group, as the section on ownership showed. The bit solves the problem of the running case, because it makes the group of every new file the group of the project directory with no action by the creator. The listing tests it with a group that the test account belongs to and that is not its primary group. Inputs: a directory whose group is such a group. Output: the answers to four questions (is the group of a new file the directory's group, with and without the bit; is the bit inherited by a subdirectory; is the owner the creator), and the effect of three <code>chmod</code> commands on the bit. The Coreutils manual states that <code>chmod 770</code> leaves the bit of a directory unchanged and that a numeric mode of five or more digits clears it; the last block tests that statement.</p>
+<pre><code class="language-bash" data-file="group_session.sh" data-run="bash group_session.sh">#!/bin/bash
+d=$(mktemp -d /tmp/hpsc-ch03.XXXXXX); cd "$d" || exit 1
+trap 'cd /; rm -rf "$d"' EXIT
+umask 002
+g=$(id -Gn | tr ' ' '\n' | grep -vx "$(id -gn)" | head -n 1)   # a group of mine other than my primary group
+[ -n "$g" ] || { echo 'this account has no supplementary group'; exit 1; }
+mkdir proj; chgrp "$g" proj; chmod 770 proj
+same() { [ "$(stat -c %G "$1")" = "$2" ] &amp;&amp; echo yes || echo no; }
+
+echo "directory group differs from my primary group: $([ "$(stat -c %G proj)" != "$(id -gn)" ] &amp;&amp; echo yes || echo no)"
+touch proj/a
+echo "without setgid, group of a new file is the directory group: $(same proj/a "$g")"
+chmod g+s proj
+stat -c '%A %n' proj
+touch proj/b; mkdir proj/sub
+echo "with setgid, group of a new file is the directory group: $(same proj/b "$g")"
+stat -c '%A %n' proj/sub
+echo "owner of the new file is me: $([ "$(stat -c %u proj/b)" = "$(id -u)" ] &amp;&amp; echo yes || echo no)"
+echo '--- does chmod keep the setgid bit of a directory?'
+chmod 770 proj; stat -c '%a %A %n' proj
+chmod 00770 proj; stat -c '%a %A %n' proj
+chmod 2770 proj; chmod g-s proj; stat -c '%a %A %n' proj
+</code></pre>
+<pre><code class="output">directory group differs from my primary group: yes
+without setgid, group of a new file is the directory group: no
+drwxrws--- proj
+with setgid, group of a new file is the directory group: yes
+drwxrwsr-x proj/sub
+owner of the new file is me: yes
+--- does chmod keep the setgid bit of a directory?
+2770 drwxrws--- proj
+770 drwxrwx--- proj
+770 drwxrwx--- proj
+</code></pre>
+<p>Without the bit, the new file <code>proj/a</code> is not in the directory's group (<code>no</code>). After <code>chmod g+s proj</code> the directory shows <code>drwxrws---</code>, the new file <code>proj/b</code> is in the directory's group (<code>yes</code>), the new subdirectory shows <code>s</code> in its group position (<code>drwxrwsr-x</code>) so the rule propagates down the tree, and the owner of the new file is still the creator. In the last block, <code>chmod 770 proj</code> kept the bit (mode 2770 in the first line), <code>chmod 00770 proj</code> cleared it (second line), and <code>chmod g-s</code> cleared it (third line). The consequence for administrators is that the form of the <code>chmod</code> command decides whether the shared directory stays shared. A mode written with four digits or fewer does not remove the bit from a directory, and a mode written with five digits does.</p>
+<p><strong>The sticky bit.</strong> On a directory the bit 1000 restricts deletion: a file in the directory "can be renamed or deleted only by the owner of the file, by the owner of the directory, and by a privileged process" (<code>inode(7)</code>; POSIX XBD 4.5 gives the same three conditions and calls the writability of the file by the process optional and implementation-defined). It is the answer to the section on commands, where write permission on a directory allowed removal of any entry. The shared directory <code>/tmp</code> has mode <code>drwxrwxrwt</code> on this machine: every user may create entries, and only the owners may remove their own. The transcript of the section on ownership has the lines that test it. Bob removed Alice's file from a directory of mode 0777 (exit status 0), could not remove the same kind of file from a directory of mode 1777 (<code>Operation not permitted</code>, exit status 1), and Alice could remove her own file from the 1777 directory (exit status 0).</p>
+
+<h2 id="case">The shared project directory</h2>
+<p>The requirements R1 to R3 of the model section can now be met. The administrator creates the group <code>hpsc</code> and adds Alice and Bob. Alice creates <code>proj</code>, gives it to the group (<code>chgrp hpsc proj</code>, which she may do because she is a member), and sets mode 2770. Every member sets the mask 002 in the shell's start-up file. The design has three parts, and each one answers one requirement. The other digit of the directory is 0, so by (3.2) and (3.3) with \(a=1\), Carol has no search permission on <code>proj</code> and cannot reach anything inside it (R2). The set-group-ID bit gives every new file the group <code>hpsc</code> (R3, group). The mask 002 gives every new file mode 664, so the group digit is 6 and has write permission (R3, mode); and (3.2) then judges Alice and Bob by the group digit for files that the other one created.</p>
+<p>The program below applies the rules to Bob's file in three configurations: the mask 022 without the bit, the mask 002 without the bit, and the mask 002 with the bit. It evaluates the access predicate of the previous sections for read and write, for each of the three users, on the file that Bob creates, and requires search permission on <code>proj</code> as well. Inputs: the identities of the model section and the three configurations. Output: for each configuration, the mode and group of the new file and the access of the three users. The check against the kernel follows in the next transcript.</p>
+<pre><code class="language-python" data-file="shared_dir_model.py" data-run="python3 shared_dir_model.py"># The shared project directory: who can do what to a file that bob creates.
+BIT = {'r': 4, 'w': 2, 'x': 1}
+
+def may(mode, owner, group, user, want):
+    """Access predicate for an unprivileged process. user = (uid, set of group ids)."""
+    uid, gids = user
+    shift = 6 if uid == owner else 3 if group in gids else 0   # first matching class only
+    return bool((mode &gt;&gt; shift) &amp; BIT[want])
+
+# Numeric identities of the running case; group 2100 is hpsc.
+USERS = {'alice': (2001, {2001, 2100}), 'bob': (2002, {2002, 2100}), 'carol': (2003, {2003})}
+EGID = {'alice': 2001, 'bob': 2002, 'carol': 2003}
+HPSC = 2100
+
+def create(directory, who, umask):
+    """New file: owner = creator, mode = 0666 &amp; ~umask, group = directory's if setgid else creator's."""
+    dmode, dgroup = directory
+    group = dgroup if dmode &amp; 0o2000 else EGID[who]
+    return (0o666 &amp; ~umask, USERS[who][0], group)
+
+def rights(directory, fileinfo, who):
+    dmode, dgroup = directory
+    fmode, fowner, fgroup = fileinfo
+    reach = may(dmode, USERS['alice'][0], dgroup, USERS[who], 'x')       # search permission on proj
+    return ''.join(c if reach and may(fmode, fowner, fgroup, USERS[who], c) else '-' for c in 'rw')
+
+print('file created by bob in proj (alice:hpsc, others none); access of alice / bob / carol')
+for label, dmode, umask in (('mode 0770, umask 022', 0o770, 0o022),
+                            ('mode 0770, umask 002', 0o770, 0o002),
+                            ('mode 2770, umask 002', 0o2770, 0o002)):
+    directory = (dmode, HPSC)
+    f = create(directory, 'bob', umask)
+    row = '  '.join(f'{u} {rights(directory, f, u)}' for u in USERS)
+    print(f'{label}: file {f[0]:o} group {f[2]}   {row}')
+</code></pre>
+<pre><code class="output">file created by bob in proj (alice:hpsc, others none); access of alice / bob / carol
+mode 0770, umask 022: file 644 group 2002   alice r-  bob rw  carol --
+mode 0770, umask 002: file 664 group 2002   alice r-  bob rw  carol --
+mode 2770, umask 002: file 664 group 2100   alice rw  bob rw  carol --
+</code></pre>
+<p>In the first two configurations Alice has read access only. The file is in Bob's personal group 2002, so Alice is judged as part of the other class, whose digit is 4 in both cases; the mask 002 gives the group digit write permission, but for Bob's group, and Alice is not in it. In the third configuration the file is in group 2100, Alice is a member, and the group digit 6 gives her read and write access. In all three configurations Carol has no access, because the directory's other digit is 0. Only the third configuration meets R1, R2 and R3.</p>
+<p>The model is a prediction about the kernel, so the next transcript runs the same three configurations on the kernel with the numeric identities. As in the section on ownership, it was run as root with <code>setpriv</code> and is not part of the code lab. Standard input was not a terminal; with a terminal, <code>rm</code> asks before it removes a write-protected file, and the removals of write-protected files in this transcript would wait for an answer. The program <code>probe</code> asks the kernel through <code>test -r</code> and <code>test -w</code> as each identity, and <code>stat</code> prints the mode, the owner and the group of the new files as <code>owner:group</code> numbers.</p>
+<pre><code class="language-bash">exec 2&gt;&amp;1
+# Run as root. Identities are numeric, so no account is created.
+# alice 2001:2001, bob 2002:2002, carol 2003:2003, group hpsc 2100.
+as() { u=$1; shift; case $u in
+  alice) setpriv --reuid=2001 --regid=2001 --groups=2001,2100 -- "$@";;
+  bob)   setpriv --reuid=2002 --regid=2002 --groups=2002,2100 -- "$@";;
+  carol) setpriv --reuid=2003 --regid=2003 --groups=2003      -- "$@";;
+esac; }
+probe() { # file: report r and w for each user, as the kernel decides
+  out=
+  for u in alice bob carol; do
+    r=-; w=-
+    as $u test -r "$1" &amp;&amp; r=r
+    as $u test -w "$1" &amp;&amp; w=w
+    out="$out$u $r$w  "
+  done; echo "${out%  }"; }
+d=$(mktemp -d /tmp/hpsc-root-demo.XXXX); chmod 755 $d; cd $d
+mkdir proj; chown 2001:2100 proj; chmod 770 proj
+stat -c '%A %u:%g %n' proj
+echo "--- umask 022, directory 0770"
+as bob sh -c 'umask 022; echo run1 &gt; proj/r1.dat'
+stat -c '%A %u:%g %n' proj/r1.dat; probe proj/r1.dat
+echo "--- umask 002, directory 0770"
+as bob sh -c 'umask 002; echo run2 &gt; proj/r2.dat'
+stat -c '%A %u:%g %n' proj/r2.dat; probe proj/r2.dat
+echo "--- umask 002, directory 2770 (setgid)"
+chmod 2770 proj
+stat -c '%A %u:%g %n' proj
+as bob sh -c 'umask 002; echo run3 &gt; proj/r3.dat; mkdir proj/sub'
+stat -c '%A %u:%g %n' proj/r3.dat proj/sub; probe proj/r3.dat
+echo "--- who may remove bob's file r3.dat? (needs w and x on proj, not on the file)"
+chmod 000 proj/r3.dat
+as alice rm proj/r3.dat; echo "alice rm exit status $?"; ls proj
+echo "--- carol and the directory"
+as carol ls proj; as carol test -x proj; echo "carol test -x proj exit status $?"
+cd /; rm -rf $d
+</code></pre>
+<pre><code class="output">drwxrwx--- 2001:2100 proj
+--- umask 022, directory 0770
+-rw-r--r-- 2002:2002 proj/r1.dat
+alice r-  bob rw  carol --
+--- umask 002, directory 0770
+-rw-rw-r-- 2002:2002 proj/r2.dat
+alice r-  bob rw  carol --
+--- umask 002, directory 2770 (setgid)
+drwxrws--- 2001:2100 proj
+-rw-rw-r-- 2002:2100 proj/r3.dat
+drwxrwsr-x 2002:2100 proj/sub
+alice rw  bob rw  carol --
+--- who may remove bob's file r3.dat? (needs w and x on proj, not on the file)
+alice rm exit status 0
+r1.dat
+r2.dat
+sub
+--- carol and the directory
+ls: cannot open directory 'proj': Permission denied
+carol test -x proj exit status 1
+</code></pre>
+<p>The three result lines of the kernel, <code>alice r-  bob rw  carol --</code>, <code>alice r-  bob rw  carol --</code> and <code>alice rw  bob rw  carol --</code>, are the three lines of the model, so all 18 yes-or-no answers (three configurations, three users, two rights) agree, and the modes and groups of the files agree with the model's (<code>-rw-r--r--</code> with group 2002, <code>-rw-rw-r--</code> with group 2002, <code>-rw-rw-r--</code> with group 2100). The subdirectory that Bob made in the last configuration has the mode <code>drwxrwsr-x</code> and the group 2100: the bit propagates, as the previous listing showed for the test account. Carol's attempt to list the directory ends with <code>Permission denied</code>, and the test of search permission exits with status 1. The line <code>alice rm exit status 0</code> shows a consequence that the requirement did not exclude. Alice removed Bob's file, although its mode was 000 and she was not its owner, because removal needs write and search permission on <code>proj</code>, which her group digit gives her. Every member can therefore remove any other member's files. The sticky bit (mode 3770 for the directory) would allow only the owner of a file and Alice, as owner of the directory, to remove it. The exercises return to this choice.</p>
+<p>The result is established for the model of nine permission bits, three classes selected first-match, and the setgid and mask rules, on one local file system, for three numeric identities. It is not established for a cluster. On a cluster the account and group tables come from a directory service, the home and project directories may sit on a network or parallel file system whose server also checks identities, and an ACL or a security label may allow or deny access beyond the mode bits. The chapter did not test any of these.</p>
+
+<h2 id="limits">What the model establishes and what it does not</h2>
+<p>Table 3.3 lists the statements of the lectures that this chapter tested, with the status that the tests gave them.</p>
+<div class="table-wrap"><table>
+<caption>Table 3.3. Statements of the lectures and their status in this chapter.</caption>
+<thead><tr><th scope="col">Statement of the lecture</th><th scope="col">Status</th><th scope="col">Evidence in this chapter</th></tr></thead>
+<tbody>
+<tr><td><code>whoami</code> prints the user of the session.</td><td>Confirmed; the number is what the kernel uses</td><td><code>id</code> prints name and number (session in the section on identity).</td></tr>
+<tr><td>The <code>lscpu</code> screen identifies the processor.</td><td>Read exactly</td><td>The <code>lscpu</code> slide shows <code>11th Gen Intel(R) Core(TM) i5-1135G7</code>, 1 CPU, hypervisor VMware (W1L3 7:15).</td></tr>
+<tr><td><code>free -h</code> reports 3.7G total, 1.1G used and 888M free.</td><td>Confirmed from the slide (W1L3 9:15); the <code>used</code> column of the KiB table follows the older definition</td><td>free_used.py.</td></tr>
+<tr><td>A directory is a special file that holds references to files and directories.</td><td>Confirmed; made exact</td><td>A name-to-inode table; the name is not part of the file (Ritchie and Thompson 1974; <code>names_inodes.py</code>).</td></tr>
+<tr><td>A name that starts with a dot is a hidden file.</td><td>True of <code>ls</code> only</td><td>The kernel stores the name; <code>ls</code>, <code>ls -A</code>, <code>ls -a</code> differ (<code>nav_session.sh</code>).</td></tr>
+<tr><td>The second column of <code>ls -l</code> is the number of links.</td><td>Confirmed and derived</td><td>(3.1); counts 28, 22 and 4 on the lecture's screen mean 26, 20 and 2 subdirectories; four counts checked by program.</td></tr>
+<tr><td>The date column of <code>ls -l</code>.</td><td>Made exact: modification time</td><td>Coreutils §10.1.2; the birth time is separate (<code>files_session.sh</code>).</td></tr>
+<tr><td><code>cd</code>, <code>cd -</code> and <code>cd ..</code> go to the home directory, the previous directory and the parent.</td><td>Confirmed</td><td><code>nav_session.sh</code>.</td></tr>
+<tr><td><code>rmdir</code> removes only an empty directory; <code>rm -r</code> removes a tree.</td><td>Confirmed</td><td><code>ENOTEMPTY</code>, message of the W1L4 10:45 screen reproduced.</td></tr>
+<tr><td><code>rm</code> deletes permanently.</td><td>Refined</td><td><code>rm</code> removes a name; content survives other links and is usually recoverable (Coreutils §11.5); the mode of the directory decides, not the mode of the file.</td></tr>
+<tr><td><code>mv</code> renames and moves.</td><td>Confirmed; two cases</td><td>Inside one file system the inode is kept; across file systems <code>rename</code> fails with <code>EXDEV</code> and <code>mv</code> copies and removes (Coreutils §11.4).</td></tr>
+<tr><td>The slide labels <code>&gt;</code> as redirection within the <code>cat</code> command.</td><td>Made exact</td><td>The shell truncates the target before <code>cat</code> starts; <code>cat file2 file3 &gt; file2</code> loses the data of <code>file2</code> (<code>redirect_session.sh</code>).</td></tr>
+<tr><td><code>&gt;</code> overwrites and <code>&gt;&gt;</code> appends.</td><td>Confirmed</td><td>4, 4 and 8 lines.</td></tr>
+<tr><td><code>cp -r</code> copies a directory recursively.</td><td>Confirmed; second run nests</td><td><code>project2/simpleproject</code> (<code>files_session.sh</code>).</td></tr>
+<tr><td>Execute permission on a directory lets a user traverse it.</td><td>Confirmed; read and search are independent</td><td><code>owner_class.sh</code>.</td></tr>
+<tr><td>Users fall into three categories: owner, group, others.</td><td>Confirmed; the rule is first match, not union</td><td>(3.2); mode 070 and 007 lock the owner out; kernel agrees on 1536 of 1536 owner-class requests; the group-before-other order is not tested on the kernel.</td></tr>
+<tr><td>The mode string has ten characters.</td><td>Confirmed</td><td>4096 of 4096 values decoded as GNU <code>stat</code> does; the dot after the ten characters is a security-context marker, <code>+</code> an ACL.</td></tr>
+<tr><td>Weights 4, 2, 1; modes 755, 644, 777.</td><td>Confirmed</td><td>(3.4), a bijection onto 0 to 7.</td></tr>
+<tr><td><code>chmod +x</code> without a <em>who</em> gives execute to all classes.</td><td>Conditional</td><td>All under the mask 002 (W1L4 39:45); owner and group only under 027 (24,576 cases agree with (3.5)).</td></tr>
+<tr><td>The user who creates a file is its owner by default.</td><td>Confirmed; the group depends on the directory</td><td>Effective user; effective group unless the directory has set-group-ID (<code>group_session.sh</code>).</td></tr>
+<tr><td><code>chown owner:group file</code> changes ownership.</td><td>Refined</td><td>Only a privileged process may change the owner; the lecture's prompt is <code>#</code> (W1L4 44:45); an owner may change the group to one of the owner's own groups (transcript).</td></tr>
+<tr><td>New files have <code>rw-rw-r--</code> and directories <code>rwxrwxr-x</code>; the slides give no cause.</td><td>Explained</td><td>Follows, under the conditions stated in the section on defaults, from the creation mask 002, the only mask that gives both (<code>umask_check.py</code>).</td></tr>
+</tbody></table></div>
+<p>The model establishes six things. The files of a system are inodes, and a directory is a table of names, so removal, renaming and linking are edits of tables, and the link count of a directory is two plus its subdirectories (3.1). Access is decided by one class, selected first-match, and not by the union of the classes (3.2, 3.3); the kernel agreed on every request tested: exhaustively for the owner class, and on a sample of system files without an ACL. The order between the group class and the other class (for example, a group member refused under mode 0604) was not tested against the kernel. The mode string and the octal digits are two codings of the same 12 bits (3.4). The symbolic <code>chmod</code> is a set of bit operations whose mask depends on the creation mask (3.5). The creation law (3.6) explains the default modes of new files, and, under the conditions stated in the section on defaults, the lecture's shell used the mask 002. The running case needs a directory of mode 2770 and the mask 002.</p>
+<p>The model leaves out most of what a production system adds. It has no access control lists, and the journal files of this machine show that the nine bits are not the whole rule there. It has no security labels (the dot after the mode string), no file attributes such as the immutable flag (named in <code>unlink(2)</code>), and no capabilities beyond the single notion of a privileged process. It has no network or parallel file system, where a server decides and identities must agree between machines. It has no time dimension: a program that tests <code>test -w file</code> and then writes can find the answer changed between the two steps. It gives no performance information, although the cost of <code>mv</code> across file systems, which scales with the data, matters for large results. Three limits of the evidence are listed again for the reader who wants to repeat the chapter. The transcripts with three numeric identities need root. The checks against the system files depend on the files of the machine that ran them. The lecture's screens come from a virtual machine that is not available, so statements about its umask, its security module and its <code>free</code> are inferences from the screens.</p>
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> (a) Prove that (3.4) maps the 8 subsets of \(\{r,w,x\}\) one-to-one onto \(\{0,\dots,7\}\). (b) Count the nine-bit modes in which the owner class and the group class both hold read and write and the other class holds nothing, and write them in octal. (c) Count the nine-bit modes in which at least one class holds write permission without read permission.</p>
+<details><summary>Solution</summary>
+<p>(a) Suppose two different subsets have the same sum. Remove the elements they share. The remaining sets are disjoint and not both empty, with the same sum. Let the larger of all the remaining weights be \(a\), in one of the sets. The other set holds only weights smaller than \(a\), and the sum of all weights smaller than \(a\) is less than \(a\) (4 is greater than 2+1, and 2 is greater than 1). The sums differ, which contradicts the assumption, so the map is injective. It maps 8 subsets into the 8 values 0 to 7, so it is also onto. (b) The owner digit must be 6 or 7 (read and write granted, execute free), the group digit likewise, and the other digit must be 0, so there are \(2\times2\times1=4\) modes: 0660, 0670, 0760 and 0770. (c) A class has write without read when its digit is 2 or 3, which is 2 of the 8 digits. Each class has 6 digits that are not of that kind, so \(6^3=216\) modes have no such class, and \(512-216=296\) have at least one.</p>
+</details>
+<p><strong>Exercise 2 (compute).</strong> (a) Write the four-digit octal mode of each string: <code>-rwsr-xr-x</code>, <code>drwxrws---</code>, <code>-rw-r-Sr--</code>, <code>drwxrwxrwt</code>. (b) A user has the mask 037. Compute the mode of a new file that a tool creates with the request 0666 and of a new directory created with the request 0777. (c) On the lecture's <code>ls -la</code> screen, the entry <code>.</code> has link count 22, the entry <code>..</code> (the directory <code>/home</code>) has 4, and <code>anaconda3</code> has 28. How many subdirectories does each of these directories have?</p>
+<details><summary>Solution</summary>
+<p>(a) <code>-rwsr-xr-x</code>: the set-user-ID bit is set and the owner execute bit is set (lowercase <code>s</code>), so the special digit is 4; the digits are 7 (rwx), 5 (r-x), 5 (r-x): 4755. <code>drwxrws---</code>: set-group-ID with group execute, special digit 2; owner 7, group 7, other 0: 2770. <code>-rw-r-Sr--</code>: the capital <code>S</code> in the group position means set-group-ID without group execute; special digit 2; owner <code>rw-</code> is 6, group <code>r-S</code> is 4 (read only), other <code>r--</code> is 4: 2644. <code>drwxrwxrwt</code>: sticky with other execute, special digit 1; 777: 1777. (b) \(\lnot037=511-31=480=0740\) in octal. The file: \(0666\wedge0740=0640\). The directory: \(0777\wedge0740=0740\). (c) By (3.1), \(s=n-2\): the home directory has 20 subdirectories, <code>/home</code> has 2, and <code>anaconda3</code> has 26. The first count includes hidden directories such as <code>.cache</code> and <code>.config</code>, which the screen shows.</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> A student claims: "(i) A user who is a member of a file's group can always use the group's rights on it. (ii) To remove a file, a user needs write permission on the file." Give one counterexample to each claim, using the results of this chapter.</p>
+<details><summary>Solution</summary>
+<p>(i) Let the user own a file of mode 070, and let the file's group be the user's primary group. The user is a member of the group, and the group digit is 7. By (3.2), the owner class is selected first, because \(u_q=u_f\); the owner digit is 0, so (3.3) refuses every access. The listing <code>owner_class.sh</code> shows <code>cat</code> failing with <code>Permission denied</code> for the modes 070 and 007. The claim holds only for a user who is not the owner. (ii) Removal changes the directory's table, not the file. The listing <code>files_session.sh</code> removed a file of mode 000 with <code>rm</code> and refused to remove a file of mode 666 in a directory without write permission. With the sticky bit on the directory, even write permission on the directory is not enough: the transcript shows <code>Operation not permitted</code> for Bob in a 1777 directory.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> A student wants the members of her group to edit the result files in a directory. The files have mode 444. Her shell has the mask 022. She runs <code>chmod +w *.dat</code>, and the group still cannot write. (a) Predict the mode of the files after the command. (b) State the assumption that fails. (c) Give a command that gives write permission to the group and to nobody else, and compute the mode it produces; then say why <code>chmod a+w</code> is a wrong repair.</p>
+<details><summary>Solution</summary>
+<p>(a) The clause <code>+w</code> has no <em>who</em>, so \(A=\lnot022=0755\) and \(\sigma_{\{u,g,o\}}(2)=0222\). The bits that change are \(0222\wedge0755=0200\), the owner's write bit only. The mode is \(0444\vee0200=0644\); the model listing prints this case: <code>444 +w umask 022 -&gt; 644</code>. (b) The assumption that fails is that a clause without <em>who</em> acts on all classes. By the POSIX rule, bits of the creation mask are excluded, and the mask 022 contains the write bits of the group and the other class. (c) <code>chmod g+w *.dat</code> has a <em>who</em>, so \(A=511\) and the change is \(0020\): \(0444\vee0020=0464\). The command <code>chmod ug+w</code> would also let the owner write and give 0664. The repair <code>chmod a+w</code> gives \(0444\vee0222=0666\) (the model listing prints <code>444 a+w umask 022 -&gt; 666</code>): the other class also gets write permission, which violates R2 when the directory's other digit is not 0 and is excessive in any case.</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> A principal investigator (PI) owns a directory for the results of a project. The students of the project, in the group <code>lab</code>, must create and edit files. External collaborators, in a group <code>ext</code>, must read the files and must not change them. Nobody else may read them. (a) Show that no assignment of owner, group and nine mode bits to one file meets all four requirements. (b) Propose a design that meets them for the students and the PI with mode bits only, and say what is given up. (c) Say what the sticky bit would add to the design and what it would cost.</p>
+<details><summary>Solution</summary>
+<p>(a) The rights over one file are given by three digits that apply to three sets of users: the owner, the members of one group (the file's group), and everybody else. The requirement gives three different rights to three sets that each contain users other than the owner: the students (read and write), the collaborators (read only) and the rest (none). Apart from the single owner, a file distinguishes only two sets: the members of its one group, and everyone else. So at most two of these three sets can receive different rights. If the file's group is <code>lab</code>, the collaborators fall into the other class, which must then be 0 to keep out the rest, so they get nothing. If the file's group is <code>ext</code>, the students fall into the other class. The owner class can hold the PI only, because it applies to one user ID. Hence the four requirements cannot all hold with mode bits alone. (b) Make the PI the owner of the directory, the group <code>lab</code>, mode 2770 (or 3770), make the PI a member of <code>lab</code> (otherwise the PI falls into the other class for files that students create, and the other digit is 0), and have every member work with the mask 002; then the PI and the students meet R1 to R3 of the running case, as the case section showed, and the collaborators have no access. What is given up is the collaborators' read access. Two ways to restore it lie outside the model of this chapter and were not tested here: an access control list entry for the group <code>ext</code>, which POSIX XBD 4.7 allows as an alternate mechanism and which the journal files of this machine suggest the kernel honours (the listing did not decode the ACL), or a second directory, owned by the PI, with the group <code>ext</code> and mode 2750, filled with copies that the PI makes. The copies are new inodes (the listing <code>files_session.sh</code>), so they fall out of date, and the ACL is not visible in the mode string except as a <code>+</code>. (c) With the bit (mode 3770), only the owner of a file, the PI (as owner of the directory) and a privileged process can remove or rename a file, so one student cannot remove another's files; the case-section transcript showed the opposite without the bit. The cost is that a student cannot remove or replace a file that a colleague created, even one that the student needs to rebuild, and the PI becomes the only person who can clear space.</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement).</strong> Write a C function <code>mode_string(mode_t m, char out[11])</code> that returns the ten characters of <code>ls -l</code> for a <code>st_mode</code> value, including the special bits. Write a test that creates seven files, sets the modes 0644, 0755, 04755, 02770, 01777, 03000 and 0070 with <code>chmod</code>, and compares the function's result with <code>stat -c %A</code>. Run it. Explain the output for 03000.</p>
+<details><summary>Solution</summary>
+<p>The function reads the three class digits with a shift and replaces the execute character by <code>s</code>, <code>S</code>, <code>t</code> or <code>T</code> when the matching special bit is set, as the Coreutils manual specifies. The program calls <code>stat -c %A</code> on each file through <code>popen</code> and compares the two strings.</p>
+<pre><code class="language-c" data-file="modestr.c" data-build="gcc -O2 -o modestr modestr.c" data-run="./modestr">#include &lt;fcntl.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;sys/stat.h&gt;
+#include &lt;unistd.h&gt;
+
+/* The ten characters of ls -l for a st_mode value. */
+static void mode_string(mode_t m, char out[11])
+{
+    const char *kind = "?";
+    switch (m &amp; S_IFMT) {
+    case S_IFREG: kind = "-"; break;
+    case S_IFDIR: kind = "d"; break;
+    case S_IFLNK: kind = "l"; break;
+    case S_IFIFO: kind = "p"; break;
+    case S_IFCHR: kind = "c"; break;
+    case S_IFBLK: kind = "b"; break;
+    case S_IFSOCK: kind = "s"; break;
+    }
+    out[0] = kind[0];
+    static const mode_t special[3] = { S_ISUID, S_ISGID, S_ISVTX };
+    static const char on[3] = { 's', 's', 't' }, off[3] = { 'S', 'S', 'T' };
+    for (int c = 0; c &lt; 3; c++) {
+        int bits = (m &gt;&gt; (6 - 3 * c)) &amp; 7;
+        out[1 + 3 * c] = bits &amp; 4 ? 'r' : '-';
+        out[2 + 3 * c] = bits &amp; 2 ? 'w' : '-';
+        out[3 + 3 * c] = (m &amp; special[c]) ? (bits &amp; 1 ? on[c] : off[c]) : (bits &amp; 1 ? 'x' : '-');
+    }
+    out[10] = '\0';
+}
+
+int main(void)
+{
+    char dir[] = "/tmp/hpsc-modestr-XXXXXX";
+    if (!mkdtemp(dir)) return 1;
+    if (chdir(dir)) return 1;
+    const mode_t modes[] = { 0644, 0755, 04755, 02770, 01777, 03000, 0070 };
+    int bad = 0;
+    for (size_t i = 0; i &lt; sizeof modes / sizeof modes[0]; i++) {
+        char name[16], text[11], cmd[64], line[64];
+        snprintf(name, sizeof name, "f%04o", (unsigned)modes[i]);
+        close(creat(name, 0600));
+        chmod(name, modes[i]);
+        struct stat st;
+        stat(name, &amp;st);
+        mode_string(st.st_mode, text);
+        snprintf(cmd, sizeof cmd, "stat -c %%A %s", name);
+        FILE *p = popen(cmd, "r");
+        if (!p || !fgets(line, sizeof line, p)) return 1;
+        pclose(p);
+        line[strcspn(line, "\n")] = '\0';
+        bad += strcmp(text, line) != 0;
+        printf("%04o %s %s\n", (unsigned)(st.st_mode &amp; 07777), text, strcmp(text, line) ? "DIFFERS" : "same as stat -c %A");
+    }
+    printf("disagreements: %d\n", bad);
+    char cmd[64];
+    snprintf(cmd, sizeof cmd, "rm -rf %s", dir);
+    return system(cmd) != 0 || bad;
+}
+</code></pre>
+<pre><code class="output">0644 -rw-r--r-- same as stat -c %A
+0755 -rwxr-xr-x same as stat -c %A
+4755 -rwsr-xr-x same as stat -c %A
+2770 -rwxrws--- same as stat -c %A
+1777 -rwxrwxrwt same as stat -c %A
+3000 ------S--T same as stat -c %A
+0070 ----rwx--- same as stat -c %A
+disagreements: 0
+</code></pre>
+<p>All seven strings equal GNU <code>stat</code>'s, so the disagreement count is 0. The mode 03000 has the special bits for set-group-ID and sticky and no permission bits. The group position has no execute bit, so the set-group-ID bit appears as capital <code>S</code>, and the other position has no execute bit, so the sticky bit appears as capital <code>T</code>: <code>------S--T</code>. The mode 0070 shows that the group digit alone is set and the owner digit is 0, the situation of the section on permissions in which the owner is locked out. The agreement of seven strings is a smaller test than the 4096 values of the Python decoder, and it does not test the file types other than regular files.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li>Recordings: <a href="https://www.youtube.com/watch?v=t8tAOMqb3qc">W1L3, Mastering Linux Directory and File Management</a> (slides: contents, <code>whoami</code>, <code>uname -a</code>, <code>lscpu</code>, <code>free</code>, files and directories, <code>pwd</code>, <code>ls -la</code>, <code>cd</code> and its variants, <code>mkdir</code>, <code>mv</code>); <a href="https://www.youtube.com/watch?v=bc4gkkRVn4Q">W1L4, Understanding File Permissions and Ownership in Linux</a> (slides: <code>touch</code>, text editors, <code>rm</code>, <code>cat</code>, <code>cp</code>, authorization, the ten-character structure, <code>chmod</code> symbolic and numeric, <code>chown</code>), NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay, 2025.</li>
+<li>D. M. Ritchie and K. Thompson, <a href="https://www.cs.berkeley.edu/~brewer/cs262/unix.pdf">"The UNIX Time-Sharing System"</a>, Communications of the ACM 17(7), July 1974, pp. 365 to 375 (electronic version recreated by E. A. Brewer). §3.2, p. 366: a file does not exist within a directory; each directory has at least two entries; §3.2, p. 367: no arbitrary links to directories; §3.4, p. 367: no link between file system hierarchies; §3.5, p. 367: seven protection bits and the set-user-ID bit; §4, pp. 368 to 369: the i-node fields, link creation and removal, link count.</li>
+<li>The Open Group, <a href="https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/V1_chap04.html">POSIX.1-2024 (Issue 8), Base Definitions, chapter 4 "General Concepts"</a>: §4.5 Directory Protection (sticky-bit deletion conditions); §4.7 File Access Permissions (class selection, privileged processes, additional and alternate mechanisms); §4.8 File Hierarchy (the hierarchy is a directed graph).</li>
+<li>The Open Group, <a href="https://pubs.opengroup.org/onlinepubs/9799919799/utilities/chmod.html">POSIX.1-2024 <code>chmod</code></a>: who may change a mode; the symbolic-mode grammar and the exception for bits of the creation mask when the <em>who</em> is omitted. <a href="https://pubs.opengroup.org/onlinepubs/9799919799/utilities/umask.html">POSIX.1-2024 <code>umask</code></a>: the file mode creation mask. <a href="https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/sys_stat.h.html"><code>sys/stat.h</code></a> (read for the names of the mode bits).</li>
+<li>Linux man-pages project (pages as fetched on 2026-10-26 from man7.org): <a href="https://man7.org/linux/man-pages/man7/inode.7.html">inode(7)</a> (fields, mode bit values, owner of a new file, sticky-bit meaning); <a href="https://man7.org/linux/man-pages/man7/path_resolution.7.html">path_resolution(7)</a> (resolution steps, the three-class selection rule); <a href="https://man7.org/linux/man-pages/man7/credentials.7.html">credentials(7)</a> (effective and supplementary IDs); <a href="https://man7.org/linux/man-pages/man2/open.2.html">open(2)</a> (<code>O_TRUNC</code>, <code>O_APPEND</code>, group of a new file, mode and umask); <a href="https://man7.org/linux/man-pages/man2/mkdir.2.html">mkdir(2)</a>; <a href="https://man7.org/linux/man-pages/man2/rmdir.2.html">rmdir(2)</a>; <a href="https://man7.org/linux/man-pages/man2/link.2.html">link(2)</a>; <a href="https://man7.org/linux/man-pages/man2/unlink.2.html">unlink(2)</a>; <a href="https://man7.org/linux/man-pages/man2/rename.2.html">rename(2)</a>; <a href="https://man7.org/linux/man-pages/man7/symlink.7.html">symlink(7)</a> (permissions of a symbolic link); <a href="https://man7.org/linux/man-pages/man2/chmod.2.html">chmod(2)</a>; <a href="https://man7.org/linux/man-pages/man2/chown.2.html">chown(2)</a> (who may change owner and group); <a href="https://man7.org/linux/man-pages/man1/free.1.html">free(1)</a> (the definition of <code>used</code>); <a href="https://man7.org/linux/man-pages/man5/login.defs.5.html">login.defs(5)</a> (<code>UMASK</code>, the initial file mode creation mask used by <code>pam_umask</code>); the comment on <code>USERGROUPS_ENAB</code> in <code>/etc/login.defs</code> of Ubuntu 24.04 (shadow 4.13) on the verification machine (022 becomes 002 for private user groups); <a href="https://man7.org/linux/man-pages/man8/pam_umask.8.html">pam_umask(8)</a> (option <code>usergroups</code>: for a user who is not root and whose name equals the primary group name, the group bits of the mask are set equal to the owner bits).</li>
+<li>Filesystem Hierarchy Standard, <a href="https://refspecs.linuxfoundation.org/FHS_3.0/fhs-3.0.pdf">Version 3.0</a>, The Linux Foundation, 19 March 2015 (read from the PDF; the HTML edition was not served to the fetching client). Chapter 2: shareable and static files; §3.8 <code>/home</code>; §3.18 <code>/tmp</code>; §5.15 <code>/var/tmp</code>.</li>
+<li>GNU Coreutils 9.4 manual (read from the copy installed with the verification system, <code>info coreutils</code>; the web edition at gnu.org refused the fetching client): §10.1.2 What information is listed (file types, <code>s</code>, <code>S</code>, <code>t</code>, <code>T</code>, the <code>.</code> and <code>+</code> markers, modification time); §11.4 <code>mv</code> (copy and remove across file systems); §11.5 <code>rm</code> (prompting, recovery warning); §27.1 Structure of File Mode Bits; §27.2.6 The Umask and Protection; §27.5 Directories and the Set-User-ID and Set-Group-ID Bits.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-02-operating-systems-and-linux-kernel.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-04-processes-text-memory-and-networking.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>
