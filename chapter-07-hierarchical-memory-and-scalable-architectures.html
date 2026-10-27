@@ -1,0 +1,794 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="711ac9ae0e32b42ea467222a6ad703ec5fd47076fef55cf0ebfc265c7f3b4060"><title>Hierarchical memory and scalable architectures · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>Hierarchical memory and scalable architectures</h1>
+<p class="lead">A matrix of 4096 × 4096 doubles (134 MB) is summed twice, once along the rows and once along the columns of its row-major storage. Both loops perform the same 16.8 million additions on the same numbers. On this chapter's machine the row-order loop takes 0.79 ns per element and the column-order loop 13.8 ns, a ratio of 17.5 (13.7 to 22.0 in five runs). Two smaller matrices, whose sizes differ by 5 %, show slowdowns that differ by a factor of 4: with 512 columns (2.1 MB) the column-order loop is 4.5 times slower than the row-order loop, and with 500 columns (2.0 MB) it is 1.08 times slower. The two loops differ only in the order in which they visit memory. This chapter defines the objects that explain the difference (lines, sets, ways, reuse distance), derives the miss rates that the geometry of a cache predicts, and checks the prediction against two independent simulators and against measurements. It then asks the same question at the scale of many processors: what a processor pays to read a location that another processor has written, a location in the memory of another socket, and a location in another computer.</p>
+<p class="source-note">Grounded in one recording of the NPTEL course <em>High Performance Scientific Computing</em> (Prof. Shivasubramanian Gopalakrishnan, IIT Bombay): <a href="https://www.youtube.com/watch?v=iBMlMcT2Q_4">W2L5, Hierarchical Memory Systems and Scalable Architectures in Large-Scale Computing</a>. <strong>Lecture material:</strong> the four memory technologies (static RAM, dynamic RAM, flash, hard disk); the read and write cycles on the address and data buses; the wish for unlimited fast memory and the principle of locality; the growing gap between processor and memory speed and its three remedies (interleaving, wider paths, cache); the memory hierarchy from registers to remote storage; the cache as a buffer of lines with tag, data and status bits, the cache controller, the read algorithm and the three mapping schemes (named, not developed); hit rate, hit time and miss penalty; the coherency problem, write-through and snooping; shared and distributed memory in multiple-instruction machines; symmetric multiprocessing (SMP), uniform and non-uniform memory access (UMA, NUMA); clusters, their benefits and the bandwidth, latency and offloading attributes of the interconnect. <strong>Research extensions:</strong> Drepper (2007, cell structure of SRAM and DRAM, address decomposition, associativity, write policies, MESI, NUMA, measured cache effects); Denning (2005, locality as a distance); Kim, Hill and Wood (1991, stack simulation after Mattson et al. 1970); Kelly's lecture notes after Hennessy and Patterson (average memory access time, the three kinds of miss); the Linux kernel documentation of NUMA memory policy; SGI press and slide material on the Altix ICE 8400 and Altix UV; Al-Fares et al. (2008, fat-tree capacity and oversubscription); Intel ARK (the machine). <strong>Original teaching constructions:</strong> the formal model of lines, sets and traces; the proof that a fully associative LRU cache hits exactly when the reuse distance is below its capacity; the derivation of the set-conflict capacity of a constant-stride pattern; the interleaving model; the overlap model and its Little's-law reading of the row-order and column-order measurements; the coherence traffic counts; the bisection-width table; the running case, all programs and measurements, and the six exercises.</p>
+
+<h2 id="model">The objects of the chapter and the running case <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=6s">W2L5 0:06</a></h2>
+<p>The memory of a computer is a sequence of bytes, each with a non-negative integer <em>address</em>. An <em>access</em> is one load or one store of a word (here 8 bytes, one <code>double</code>) at an address \(x\). A <em>trace</em> is the sequence of addresses that a program accesses, in program order. Every claim of this chapter is a claim about a trace and a machine.</p>
+<p>A <em>cache</em> is a small, fast memory that holds copies of aligned blocks of memory. The block is a <em>line</em> of \(b\) bytes; \(b=64\) on the machine of this chapter. The line number of the address \(x\) is \(\ell(x)=\lfloor x/b\rfloor\), and the offset of \(x\) in its line is \(x \bmod b\). The cache is organised in \(S\) <em>sets</em> of \(a\) <em>ways</em> each. A line \(\ell\) may be held only in the set with index \(\ell \bmod S\) and occupies one of the \(a\) ways of that set. The remaining part of the line number, \(\lfloor \ell/S\rfloor\), is the <em>tag</em> that tells which of the lines that share a set is the resident one. The capacity of the cache is \(C=aS\) lines, or \(M=abS\) bytes. The extreme cases have names: \(a=1\) is a <em>direct-mapped</em> cache, \(S=1\) a <em>fully associative</em> cache, and the case between them an \(a\)-way <em>set-associative</em> cache. An access <em>hits</em> if its line is resident and <em>misses</em> otherwise; after a miss the line is fetched from the next level and replaces a resident line of the same set chosen by the <em>replacement policy</em>. This chapter uses <em>least recently used</em> (LRU): the victim is the line of the set whose last use is oldest. A real processor may use an approximation of LRU, which the sources opened for this chapter do not specify.</p>
+<p>Three quantities describe the cost of a cache. The <em>hit time</em> \(t_h\) is the time of an access that hits. The <em>miss rate</em> \(m_r\) is the number of misses divided by the number of accesses, and \(h=1-m_r\) is the <em>hit rate</em> that the lecture uses. The <em>miss penalty</em> \(t_m\) is the extra time that a miss adds. They combine into the average memory access time, derived in the section on hit rate:</p>
+\[
+\mathrm{AMAT}=t_h+m_r\,t_m. \tag{7.1}
+\]
+<p>The second half of the chapter changes the question from "how long does one access take" to "which processors can reach which memory, and at what cost". Let \(p\) be the number of processors. Let \(t(i,x)\) be the time that processor \(i\) needs to complete a read of address \(x\) that misses in all its caches. A machine has <em>uniform memory access</em> (UMA) if \(t(i,x)\) is the same for every processor \(i\) and address \(x\), and <em>non-uniform memory access</em> (NUMA) if the processors share one address space and \(t(i,x)\) depends on \(i\) and \(x\). A machine has <em>distributed memory</em> if each processor reaches only its own memory by loads and stores and reaches the memory of the others by sending messages. The time of a message of \(m\) bytes is modelled as \(T_{\text{msg}}(m)=\alpha+\beta m\), with the latency \(\alpha\) in seconds and the inverse bandwidth \(\beta\) in seconds per byte, as in the book-wide notation. The concurrency of a system that completes \(X\) requests per second with a latency of \(L\) seconds per request is \(\lambda=XL\) requests in flight (Little's law, used in the section on hit rate).</p>
+<p><strong>The running case</strong> is the sum of the elements of an \(N\times N\) matrix of doubles \(A\) stored row by row (row-major), so that \(A_{ij}\) lies at byte address \(8(iN+j)\) relative to the start of the array. The <em>row-order</em> sum visits \(A_{i0},A_{i1},\dots\) for \(i=0,1,\dots\), that is, consecutive addresses. The <em>column-order</em> sum visits \(A_{0j},A_{1j},\dots\) for \(j=0,1,\dots\), that is, addresses \(8N\) bytes apart. Both loops perform \(N^2\) additions, and both read each element once. The book's other running problems (Jacobi iteration, midpoint \(\pi\)) return in later chapters; the matrix sum is used here because its two orders have identical arithmetic and the largest possible difference in memory behaviour. In the last section the matrix is distributed over \(p\) computers and the sum becomes a reduction.</p>
+<p>All measurements come from one machine: an Intel Core i5-12450H laptop under Windows 11, programs built and run in a WSL 2 Ubuntu 24.04 guest by gcc 13.3 (<code>-O2</code>). The processor is a hybrid design with 4 performance cores of 2 hardware threads and 4 efficient cores of 1 hardware thread: 8 cores and 12 logical processors, with a 12 MB shared "Intel Smart Cache" and at most 2 memory channels (<a href="https://www.intel.com/content/www/us/en/products/sku/132222/intel-core-i512450h-processor-12m-cache-up-to-4-40-ghz/specifications.html">Intel ARK</a>, read 2026-10-26; chapter 11 gives the clock frequencies). The ARK page lists four memory types the processor supports (DDR5, DDR4, LPDDR5, LPDDR4x) and no bandwidth figure; the type installed in this laptop was not determined, so this chapter quotes no peak memory bandwidth. The session below shows what the guest reports; a script printed each command before running it, and the output is unedited. The guest's view is synthetic: it lists 6 cores with 2 threads each and the same cache geometry for every logical processor, while Windows decides on which physical core a thread runs. The single thread of every timing program in this chapter may run on a performance core or on an efficient core, and the sessions were run while other jobs shared the machine. The consequence is run-to-run variation, which the text reports as ranges over five runs. A timing listing is checked only by its return code; the output printed under it is one sample run, the fifth of the five.</p>
+<pre><code class="language-bash">$ gcc --version | head -1
+gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+$ nproc
+12
+$ lscpu | grep -E 'Model name|Thread|Core|Socket|L1d|L2|L3|NUMA node\(s\)'
+Model name:                           12th Gen Intel(R) Core(TM) i5-12450H
+Thread(s) per core:                   2
+Core(s) per socket:                   6
+Socket(s):                            1
+L1d cache:                            288 KiB (6 instances)
+L2 cache:                             7.5 MiB (6 instances)
+L3 cache:                             12 MiB (1 instance)
+NUMA node(s):                         1
+$ for i in 0 2 3; do d=/sys/devices/system/cpu/cpu0/cache/index$i; echo "L$(cat $d/level) $(cat $d/type) $(cat $d/size) ways=$(cat $d/ways_of_associativity) sets=$(cat $d/number_of_sets) line=$(cat $d/coherency_line_size)"; done
+L1 Data 48K ways=12 sets=64 line=64
+L2 Unified 1280K ways=10 sets=2048 line=64
+L3 Unified 12288K ways=8 sets=24576 line=64
+$ ls /sys/devices/system/node
+has_cpu
+has_generic_initiator
+has_memory
+has_normal_memory
+node0
+online
+possible
+power
+uevent
+</code></pre>
+<p>The guest reports one NUMA node, so the operating system sees this machine as uniform memory access, and no NUMA factor can be measured on it. The cache geometry gives \(M=abS\) in each case: \(12\times64\times64\ \mathrm{B}=48\ \mathrm{KiB}\) for the level-1 data cache (L1d), \(10\times2048\times64\ \mathrm{B}=1280\ \mathrm{KiB}\) for the level-2 cache (L2), and \(8\times24576\times64\ \mathrm{B}=12\ \mathrm{MiB}\) for the level-3 cache (L3). These are the numbers that the simulators below use.</p>
+
+
+<h2 id="technologies">Memory technologies, the processor–memory gap and two hardware remedies <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=39s">W2L5 0:39</a></h2>
+<p>The lecture compares four storage technologies in one table (slide at <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=75s">W2L5 1:15</a>). Static RAM (SRAM) stores a bit in a flip-flop, is volatile, and reads in "&gt; 10 nanoseconds"; its stated advantage is the fastest access and its disadvantages are density and power; its use is the cache. Dynamic RAM (DRAM) stores a bit in a capacitor, is volatile, reads in "~ 40 nanoseconds", has the best density and capacity and the disadvantage of speed; its use is main memory. Flash stores a bit in a transistor, retains data without power, reads faster than a hard disk and slower than RAM, writes slower than it reads, and serves as solid-state drive and for the boot firmware. A hard disk stores a bit in a magnetic material, retains data, reads in "10s of milliseconds", has the highest capacity and is the secondary storage. The lecture then describes how a processor uses memory (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=141s">W2L5 2:21</a>): in a read, the load instruction is decoded, the address is placed on the address bus, the memory sees the read signal and places the data on the data bus, and the processor accepts it; in a write, the store instruction places the address on the address bus and the data on the data bus, and the memory stores the data at that address. The model of this chapter keeps one property of these two cycles: an access is a transaction whose duration is set by the memory that answers it, not by the processor that asks.</p>
+<p><strong>Why not all memory is SRAM.</strong> Drepper (2007, §2.1.1–2.1.2, pp. 5–6) gives the cell structures behind the lecture's table. An SRAM cell has six transistors that form two cross-coupled inverters; its state is stable while power is applied and is available as soon as the word line is raised. A DRAM cell has one transistor and one capacitor; the capacitor leaks, so each cell must be refreshed (for most chips every 64 ms); reading discharges the capacitor, so every read is followed by a recharge; and the small charge needs a sense amplifier. Drepper concludes that the cell of a DRAM occupies "many times" less chip area than that of an SRAM and that "the (quite dramatic) difference in cost wins". These statements agree with the lecture's entries for density and power, and they show that "speed" for DRAM is a consequence of the charge-sensing step, not an independent property. The cost argument is the reason for the hierarchy of this chapter: a machine with only SRAM would be faster and would cost more per bit by the ratio of the cell areas, and the lecture states the same trade-off in words at <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=271s">W2L5 4:31</a>.</p>
+<p><strong>The numbers of the slide against the measured ones.</strong> The slide's read times are properties of a memory device. A program observes the time from the issue of a load to the arrival of its data, which includes the caches that the load passes, the memory controller and the translation of the address. The pointer-chase measurement of the next section gives, on this machine, about 1.2 to 1.5 ns for data in the L1 cache (1.19 to 1.53 ns over five runs), 3.7 to 4.4 ns in the L2 cache, and 123 to 162 ns for data that must come from DRAM (five runs; one outlier of 267 ns excluded). The last figure is 3.1 to 4.1 times the slide's 40 ns, and the first is 6.5 to 8.4 times smaller than the slide's "&gt; 10 ns" for SRAM; the slide's numbers therefore describe neither the cache nor the memory as a program sees them on this machine. Drepper's table for a Pentium M (2007, §3.2, p. 16) gives 1, 3, 14 and 240 cycles for a register, the L1 data cache, the L2 cache and main memory: the ratio of main memory to the L1 data cache was \(240/3=80\) on that processor, against 108 to 118 on this one in the fifth run (129 to 141 ns over 1.2 ns).</p>
+<p><strong>The gap.</strong> The lecture states that early memory parts were faster than the processors that used them (a processor needing data in 150 ns could be served by a memory that delivered it in 120 ns), and that processor speed then grew by 52 % per year while memory speed grew more slowly, so that the processor waits (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=364s">W2L5 6:04</a>). The slide gives the rates as "Processor 52% annually" and "Memory 7% annually" on a logarithmic plot from 1980 to 2010 and credits the figure to a web site (rankred.com). The sources opened for this chapter do not state these rates (Hennessy and Patterson was not opened), so they are lecture claims. The plot does allow an internal check. A constant 52 % per year for 30 years is a factor \(1.52^{30}=2.9\times10^{5}\), and a constant 7 % per year is \(1.07^{30}=7.6\). The plotted memory curve ends near 7, as 7 % per year predicts, and the plotted processor curve ends near \(2\times10^{4}\) (read from the slide, uncertain by a factor of about 1.5), which is about 14 times below \(2.9\times10^{5}\). The label "52 % annually" therefore describes a part of the period, and the plotted gap at 2010 is about \(2\times10^{4}/7\approx3\times10^{3}\), not \(2.9\times10^{5}/7.6\approx3.8\times10^{4}\). The gap that the lecture describes is real for latency (the measurement above), but the single growth rate on the slide should not be extrapolated. The title of Wulf and McKee (1995) gave the effect its common name, the "memory wall". Their paper was not opened. Ertl's critique, which was opened, describes its argument as assuming a fixed miss probability. The row-order and column-order sums of this chapter show a miss rate of 0.125 and 1.0 for one matrix on one machine, which is a direct counterexample to a miss rate that is fixed independently of the access pattern.</p>
+<p><strong>Remedy 1: interleaved banks.</strong> The lecture's first remedy (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=432s">W2L5 7:12</a>) places even addresses in one bank and odd addresses in another, so that the memory delays of consecutive accesses overlap (the slide's wording). The model is this. A memory has \(n_{\mathrm{b}}\) banks and word \(w\) lives in bank \(w \bmod n_{\mathrm{b}}\). A bank that starts an access is busy for \(\tau\) cycles. The processor issues one request per cycle, in order, and stalls when the bank it needs is busy. For a stream of words at addresses \(0,\sigma,2\sigma,\dots\) (stride \(\sigma\)), the banks visited are \(k\sigma \bmod n_{\mathrm{b}}\). The multiples of \(\sigma\) modulo \(n_{\mathrm{b}}\) form a cyclic group with \(n_{\mathrm{b}}/\gcd(n_{\mathrm{b}},\sigma)\) elements, so the stream uses \(\kappa=n_{\mathrm{b}}/\gcd(n_{\mathrm{b}},\sigma)\) distinct banks, in a fixed cyclic order. A bank is revisited after \(\kappa\) requests. If \(\kappa\ge\tau\), the bank is free again when it is needed, no request stalls, and the rate is one word per cycle. If \(\kappa\lt\tau\), a block of \(\kappa\) requests takes \(\tau\) cycles, since the first bank of the block is the one that limits when the next block can start. The steady-state rate is therefore</p>
+\[
+r=\min\!\Bigl(1,\ \frac{\kappa}{\tau}\Bigr),\qquad \kappa=\frac{n_{\mathrm{b}}}{\gcd(n_{\mathrm{b}},\sigma)}\ \text{words per cycle}. \tag{7.2}
+\]
+<p>The program simulates the model with \(\tau=6\) cycles for 1 to 16 banks and strides 1, 2, 8 and 16, measures the rate between request 500 and request 1000, and prints it beside (7.2). The run checks all 20 entries exactly.</p>
+<pre><code class="language-python" data-file="interleave.py" data-run="python3 interleave.py">"""Interleaved memory banks: words per cycle for a stream with a constant stride.
+
+Model: n banks; word w lives in bank w mod n; a bank is busy for BUSY cycles after it starts an access;
+the processor issues one request per cycle, in order, and stalls when the bank it needs is busy.
+"""
+from math import gcd
+
+BUSY = 6
+
+
+def finish(banks, stride, words):
+    """Cycle at which the last of `words` accesses completes."""
+    free = [0] * banks                    # first cycle at which each bank can start a new access
+    issue = 0
+    end = 0
+    for k in range(words):
+        bank = (k * stride) % banks
+        start = max(issue, free[bank])
+        free[bank] = start + BUSY
+        end = start + BUSY
+        issue = start + 1
+    return end
+
+
+print(f"busy time {BUSY} cycles; steady-state words per cycle: simulated / formula min(1, kappa/busy), kappa = banks/gcd(banks, stride)")
+print(f"{'banks':&gt;5} " + " ".join(f"{'stride ' + str(s):&gt;15}" for s in (1, 2, 8, 16)))
+for banks in (1, 2, 4, 8, 16):
+    cells = []
+    for stride in (1, 2, 8, 16):
+        rate = 500 / (finish(banks, stride, 1000) - finish(banks, stride, 500))
+        used = banks // gcd(banks, stride)
+        cells.append(f"{rate:5.3f} / {min(1.0, used / BUSY):5.3f}")
+    print(f"{banks:5d} " + " ".join(f"{c:&gt;15}" for c in cells))
+</code></pre>
+<pre><code class="output">busy time 6 cycles; steady-state words per cycle: simulated / formula min(1, kappa/busy), kappa = banks/gcd(banks, stride)
+banks        stride 1        stride 2        stride 8       stride 16
+    1   0.167 / 0.167   0.167 / 0.167   0.167 / 0.167   0.167 / 0.167
+    2   0.333 / 0.333   0.167 / 0.167   0.167 / 0.167   0.167 / 0.167
+    4   0.667 / 0.667   0.333 / 0.333   0.167 / 0.167   0.167 / 0.167
+    8   1.000 / 1.000   0.667 / 0.667   0.167 / 0.167   0.167 / 0.167
+   16   1.000 / 1.000   1.000 / 1.000   0.333 / 0.333   0.167 / 0.167</code></pre>
+<p>The simulated and predicted rates agree in all 20 cells. Two banks give 0.333 words per cycle at stride 1, twice the 0.167 of one bank, and still 3 times below the issue rate of 1 word per cycle; \(n_{\mathrm{b}}\ge\tau\) banks are needed for the full rate, which is 8 banks for \(\tau=6\) if \(n_{\mathrm{b}}\) is a power of two. The table also shows the failure that the lecture does not mention. At stride 8 with 8 banks, \(\gcd(8,8)=8\), so \(\kappa=1\): every request goes to bank 0, and the rate is 0.167, the rate of a single bank. A power-of-two stride on a power-of-two number of banks defeats interleaving. The same arithmetic, with sets in place of banks, defeats caches in the section on the cache and is the cause of the 4.5-fold slowdown of the 512-column matrix in the lead. Interleaving raises the throughput of independent requests. It does not shorten the latency of one request, which is why it does not appear in the pointer-chase measurement.</p>
+<p><strong>Remedy 2: wider paths.</strong> The second remedy keeps the access time and moves more bits per access. The lecture's example is the Pentium, a 32-bit processor with a 64-bit data path to memory, which fetches two words per cycle (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=496s">W2L5 8:16</a>). The bandwidth of a path is its width in bytes times the number of transfers per second, so doubling the width doubles the bandwidth of a stream. It does not change the time of a single dependent access. The Intel ARK page of this machine lists "Max # of Memory Channels: 2", which is the same remedy applied to the channels: the processor reaches memory over two independent paths. A program uses the added bandwidth only if it keeps enough accesses in flight, a condition that the section on hit rate states with Little's law. The third remedy, the cache, is the subject of the remaining sections of the single-processor part.</p>
+
+
+<h2 id="locality">Locality, reuse distance and the memory hierarchy <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=592s">W2L5 9:52</a></h2>
+<p>The lecture states the requirement (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=240s">W2L5 4:00</a>): programmers want an unlimited amount of fast memory, fast memory is costly, and an all-SRAM memory is unviable because of its power and price. It then observes that programs show a <em>principle of locality</em> (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=301s">W2L5 5:01</a>) and that a memory system can use it to appear both fast and large. The slide (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1035s">W2L5 17:15</a>) gives two kinds. <em>Temporal locality</em>: a referenced location is likely to be referenced again in the near future. <em>Spatial locality</em>: a referenced location makes a nearby location likely to be referenced in the near future. The loop-counter example of the lecture (the variable \(i\) is accessed in every iteration) is temporal locality, and the array example (consecutive elements are accessed one after another) is spatial locality.</p>
+<p>Denning (2005, p. 23) records how locality was defined from 1980: an object \(x\) is in the locality set at time \(t\) if its distance \(\delta(x,t)\) from the processor (written \(D(x,t)\) in the article) is at most a threshold \(T\), where the distance can be a time (the time since the last reference) or a space (the number of addresses away). The definition makes both kinds of locality quantities that can be measured. This chapter counts the time distance in lines.</p>
+<p><strong>Reuse distance.</strong> Let a trace of line numbers be \(\ell_1,\ell_2,\dots\). For the access \(t\) let \(u\lt t\) be the previous access to the same line, \(\ell_u=\ell_t\). The <em>reuse distance</em> \(d_t\) is the number of <em>distinct</em> lines among \(\ell_{u+1},\dots,\ell_{t-1}\); if there is no such \(u\), then \(d_t=\infty\). Temporal locality is a small reuse distance. Spatial locality appears as reuse distance 0, because two consecutive accesses to neighbouring words of one line are two accesses to one line. Once the unit is the line, one number carries both kinds.</p>
+<p><strong>Theorem 1</strong> (stack property, after Mattson et al. 1970). In a fully associative cache of \(C\) lines with LRU replacement, starting empty, the access \(t\) hits if and only if</p>
+\[
+d_t \lt C. \tag{7.3}
+\]
+<p><em>Proof.</em> Keep a list, the <em>stack</em>, of all lines used so far, ordered from the most recently used to the least recently used. The claim is that the cache holds exactly the first \(C\) entries of the stack. It is true at the start (both are empty). Suppose it is true before access \(t\) to the line \(\ell\). If \(\ell\) is among the first \(C\) entries, the access hits, the cache does not change, and moving \(\ell\) to the front permutes only the first \(C\) entries among themselves, so the claim stays true. If \(\ell\) is deeper in the stack or absent, the access misses, the cache removes its least recently used line, which is the entry number \(C\) of the old stack, and inserts \(\ell\); these are the first \(C\) entries of the new stack, because \(\ell\) moves to the front and the old entry number \(C\) moves to position \(C+1\). It remains to locate \(\ell\) in the stack. Exactly the distinct lines used since the previous use of \(\ell\) stand in front of it, so \(\ell\) is at depth \(d_t+1\), and it is among the first \(C\) entries if and only if \(d_t+1\le C\). \(\square\)</p>
+<p>The theorem says that a cache of \(C\) lines turns every access with a reuse distance below \(C\) into a hit and every other access into a miss. The proof uses full associativity (one stack for the whole cache) and LRU. For a set-associative cache the same argument applies to each set separately, with \(C=a\) and with the reuse distance counted only over lines of that set; the next section uses this form. A real processor may use a different replacement policy, so the theorem is exact for the model and approximate for the hardware.</p>
+<p>The program checks the theorem. It builds the trace of two sweeps over a \(32\times32\) matrix of doubles (8 KiB, 128 lines), once in row order and once in column order, computes every reuse distance with a stack, simulates a fully associative LRU cache directly with an ordered dictionary for five capacities, and compares the number of hits with the number of accesses whose distance is below \(C\). The program is deterministic, so the check is exact.</p>
+<pre><code class="language-python" data-file="reuse.py" data-run="python3 reuse.py">"""Reuse distance and LRU: an access hits in a fully associative LRU cache of C lines iff its reuse distance is below C.
+
+Trace: two sweeps over a 32 x 32 matrix of doubles (8 KiB = 128 lines of 64 bytes), summed in row order or column order.
+The reuse distance of an access is the number of distinct other lines used since the previous use of its line.
+"""
+from collections import OrderedDict
+
+N, SWEEPS = 32, 2
+INF = float("inf")
+
+
+def trace(order):
+    lines = []
+    for _ in range(SWEEPS):
+        for outer in range(N):
+            for inner in range(N):
+                i, j = (outer, inner) if order == "row" else (inner, outer)
+                lines.append((i * N + j) * 8 // 64)
+    return lines
+
+
+def reuse_distances(lines):
+    stack, result = [], []                 # stack[0] is the most recently used line
+    for line in lines:
+        if line in stack:
+            k = stack.index(line)          # k distinct lines were used since the last use of this line
+            result.append(k)
+            stack.pop(k)
+        else:
+            result.append(INF)             # first use: infinite reuse distance
+        stack.insert(0, line)
+    return result
+
+
+def lru_hits(lines, capacity):
+    cache, hits = OrderedDict(), 0
+    for line in lines:
+        if line in cache:
+            hits += 1
+            cache.move_to_end(line)
+        else:
+            if len(cache) == capacity:
+                cache.popitem(last=False)  # evict the least recently used line
+            cache[line] = True
+    return hits
+
+
+print(f"{'order':&gt;5} {'C':&gt;4} {'LRU hits':&gt;9} {'distance &lt; C':&gt;13}  agree")
+for order in ("row", "col"):
+    lines = trace(order)
+    dist = reuse_distances(lines)
+    for capacity in (16, 31, 32, 127, 128):
+        simulated = lru_hits(lines, capacity)
+        predicted = sum(d &lt; capacity for d in dist)
+        print(f"{order:&gt;5} {capacity:4d} {simulated:9d} {predicted:13d}  {simulated == predicted}")
+    finite = sorted({d for d in dist if d != INF})
+    print(f"{order:&gt;5} distinct finite reuse distances: {finite}, first uses: {sum(d == INF for d in dist)}")
+</code></pre>
+<pre><code class="output">order    C  LRU hits  distance &lt; C  agree
+  row   16      1792          1792  True
+  row   31      1792          1792  True
+  row   32      1792          1792  True
+  row  127      1792          1792  True
+  row  128      1920          1920  True
+  row distinct finite reuse distances: [0, 127], first uses: 128
+  col   16         0             0  True
+  col   31         0             0  True
+  col   32      1792          1792  True
+  col  127      1792          1792  True
+  col  128      1920          1920  True
+  col distinct finite reuse distances: [31, 127], first uses: 128</code></pre>
+<p>All ten pairs agree. The row-order trace has two reuse distances: 0 (for the 7 of every 8 accesses that use the line fetched by the previous one) and 127 (for the second sweep, after all other 127 lines). It has 128 first uses. It therefore has 1792 hits for every capacity from 1 to 127 (7/8 of 2048 accesses) and 1920 at \(C=128\), when the second sweep also hits. The column-order trace has the distances 31 and 127. The distance 31 arises because the access to \(A_{ij}\) with \(j\bmod8\ne0\) uses the line used by \(A_{i,j-1}\), and between the two accesses the loop touched the 31 other lines of a column. The column order has 0 hits at \(C=16\) and \(C=31\) and 1792 at \(C=32\). For a matrix of \(N\) rows the distance is \(N-1\), so the column-order sum reuses lines if and only if \(C\ge N\). The cache that is large enough for the column sweep must hold the \(N\) lines that the inner loop touches, which is the <em>working set</em> of that loop in Denning's sense (the distinct items referenced in a window of the recent past). For the L1d of this machine, \(C=768\), so Theorem 1 predicts that the column-order sum of a matrix with \(N\ge769\) misses on every access in a fully associative L1d. A 1000 × 1000 matrix is such a case.</p>
+
+<p><strong>The hierarchy.</strong> The lecture's slide (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=592s">W2L5 9:52</a>, picture at <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=724s">W2L5 12:04</a>) draws seven levels: registers (level 0), L1, L2 and L3 caches, main memory, local hard disk and remote storage. Each level holds the units retrieved from the level below it: registers hold words from the L1 cache, the caches hold lines, main memory holds blocks from the local disk, and the local disk holds files from remote servers. Towards the processor the levels are smaller, faster and costlier per byte. The goal is to provide the capacity of the cheapest level, with the speed of the fastest level for the accesses that hit in it. The slide labels the registers as level 0 of the hierarchy. This chapter does not treat them as a cache: the compiler assigns values to registers, while a cache holds lines without any instruction naming it, which is the property that makes the effect of caches visible only as time. The lecture also says that the levels from the registers to the L3 cache are SRAM, which agrees with the cost argument of the previous section.</p>
+<p>The hierarchy can be measured with a program whose accesses cannot overlap. In a <em>pointer chase</em> the loaded value is the address of the next load. The program below allocates \(n\) lines, stores in each line the index of the next line along one random cycle through all lines (Sattolo's shuffle with a fixed seed), and times \(3\times10^{6}\) to \(2\times10^{7}\) dependent loads for working sets from 4 KiB to 128 MiB. The time per load is the latency of the level that serves the access. Theorem 1 predicts the shape of the curve. A cyclic traversal of \(n\) lines has reuse distance \(n-1\) for every access, so a fully associative LRU cache of \(C\) lines hits on all accesses if \(n\le C\) and on none if \(n\gt C\): the latency is a step function of the working set, with one step at the capacity of each level. The program prints the minimum of three repetitions. The run is checked by its return code. The output is one sample, the fifth of five runs.</p>
+<pre><code class="language-c" data-file="chase.c" data-build="gcc -O2 -fopenmp chase.c -o chase" data-run="./chase" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;omp.h&gt;
+
+/* Pointer chase: every load needs the address returned by the previous load, so loads cannot overlap. */
+static uint64_t state = 88172645463325252ULL;
+static uint64_t next_random(void)            /* xorshift64, fixed seed */
+{
+    state ^= state &lt;&lt; 13; state ^= state &gt;&gt; 7; state ^= state &lt;&lt; 17;
+    return state;
+}
+
+/* ns per dependent load over one random cycle through all 64-byte lines of a working set. */
+static double chase(size_t bytes)
+{
+    size_t n = bytes / 64;                              /* one pointer per line */
+    size_t *order = malloc(n * sizeof *order);
+    size_t *next = aligned_alloc(64, n * 64);
+    for (size_t i = 0; i &lt; n; i++) order[i] = i;
+    for (size_t i = n - 1; i &gt; 0; i--) {                /* Sattolo's shuffle: one cycle through all lines */
+        size_t j = next_random() % i;
+        size_t t = order[i]; order[i] = order[j]; order[j] = t;
+    }
+    for (size_t i = 0; i &lt; n; i++)
+        next[order[i] * 8] = order[(i + 1) % n] * 8;    /* word index of the next line */
+    size_t loads = (bytes &lt;= ((size_t)1 &lt;&lt; 20)) ? 20000000 : 3000000;
+    double best = 1e30;
+    size_t p = 0;
+    for (int rep = 0; rep &lt; 3; rep++) {
+        double t0 = omp_get_wtime();
+        for (size_t k = 0; k &lt; loads; k++) p = next[p];
+        double t = omp_get_wtime() - t0;
+        if (t &lt; best) best = t;
+    }
+    if (p == (size_t)-1) printf("never\n");             /* keeps the loop alive */
+    free(order); free(next);
+    return best * 1e9 / loads;
+}
+
+int main(void)
+{
+    printf("%12s %12s\n", "working set", "ns per load");
+    for (size_t bytes = 4096; bytes &lt;= ((size_t)128 &lt;&lt; 20); bytes *= 2)
+        printf("%9zu KiB %12.2f\n", bytes / 1024, chase(bytes));
+    return 0;
+}
+</code></pre>
+<pre><code class="output"> working set  ns per load
+        4 KiB         1.20
+        8 KiB         1.19
+       16 KiB         1.22
+       32 KiB         1.24
+       64 KiB         3.66
+      128 KiB         3.70
+      256 KiB         3.82
+      512 KiB         4.58
+     1024 KiB         7.01
+     2048 KiB        23.16
+     4096 KiB       106.90
+     8192 KiB       121.27
+    16384 KiB       129.41
+    32768 KiB       130.39
+    65536 KiB       132.29
+   131072 KiB       141.12</code></pre>
+<p>The L1 and L2 steps appear where the model puts them. Over five runs the latency is 1.19 to 1.53 ns for working sets of 4 to 32 KiB, jumps to 3.66 to 4.38 ns at 64 KiB, and stays between 3.66 and 4.44 ns from 64 to 256 KiB. The L1d capacity of 48 KiB lies between 32 and 64 KiB, where the jump occurs. The L2 capacity of 1.25 MiB (1280 KiB) lies between 1 and 2 MiB. The curve rises before it: the latency is 4.5 to 4.8 ns at 512 KiB, 7.0 to 9.1 ns at 1 MiB and 23 to 37 ns at 2 MiB. One candidate for the rise before the capacity is limited associativity: a 1 MiB working set fills 16384 of the 20480 lines of the L2, but the lines are spread over the 2048 sets by their physical addresses, and a set that receives more than 10 lines evicts some of them. Misses in the first-level data TLB (4 KiB pages) and runs on an efficient core, whose L2 differs, are other candidates. The chapter has not separated them. The 2 MiB point is a mixture of L2 hits and misses.</p>
+<p>The L3 does not appear. For 4 MiB, a third of the 12 MiB L3, the latency is already 107 to 126 ns, and for 16 MiB it is 123 to 136 ns, so the 4 MiB loads see between 0.8 and 1.0 times the latency of DRAM. For 128 MiB the latency is 141 to 162 ns. A mixture of L3 hits and DRAM accesses would give values between the L3 latency, which lies above the 3.7 to 4.4 ns of the L2, and the 123 ns of DRAM. Four explanations are possible and the measurement does not separate them: other jobs on the machine evict lines from the L3, which all 12 logical processors share; address translation adds time that grows with the working set, and in a virtual machine a TLB miss can need a walk of both the guest and the host page tables; the thread ran on an efficient core, whose L2 (2 MB shared by a cluster of four efficient cores, <a href="https://www.servethehome.com/intel-12th-gen-core-alder-lake-details-at-intel-innovation-2021/">ServeTheHome</a>, which also gives 1.25 MB for a performance core) differs from the geometry that the guest reports for every logical processor; or the L3 latency of this processor is higher than assumed. A separate trial with 2 MiB guest pages (<code>madvise(MADV_HUGEPAGE)</code>, with the kernel reporting 65 536 kB of huge pages for a 64 MiB region) changed the latency by at most 22 % at every size in two sessions; because the host may still map the region with 4 KiB pages, the trial does not exclude translation. It is not part of the listing. The chapter draws no conclusion about the size or the latency of the L3 from this measurement. Drepper (2007, §3.2, p. 17 and §3.3.2, pp. 20–21) shows the same step shape, with plateaus at the L1d and L2 sizes and a jump to a few hundred cycles beyond the L2, for a processor without an L3.</p>
+
+
+<h2 id="cache">Inside a cache: lines, tags, sets and the conflict capacity <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=826s">W2L5 13:46</a></h2>
+<p>The lecture describes the cache as a small, fast buffer between the processor and main memory that holds copies of portions of main memory. When the processor asks for a word, its address is checked in the cache. If the word is present, it is returned at once. If it is not, the cache controller sends the address to main memory, which answers with a <em>block</em>, a few 32-bit words in the lecture's example, and the neighbouring words are brought in because they are likely to be accessed next (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=925s">W2L5 15:25</a>). A cache has three parts (slide at <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1118s">W2L5 18:38</a>): a directory store with one <em>tag</em> per line that records where in main memory the line came from, a data section, and status bits, among them a <em>valid</em> bit and a <em>dirty</em> bit. The picture of the lecture (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1182s">W2L5 19:42</a>) shows lines with the tags 100, 300 and 580, each holding the words that start at that address. The cache controller is hardware that copies the information automatically and intercepts reads and writes before they reach the memory controller; it works without any involvement of the processor or the software (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1275s">W2L5 21:15</a>). The lecture's read algorithm (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1343s">W2L5 22:23</a>) is: look at the address, search the tags; on a match return the data (a hit); otherwise read a line from main memory, return the data to the processor and update the cache, which raises the question "which line do we replace?". The lecture names the mapping schemes (direct mapped, \(n\)-way set associative, fully associative) and states that there is no time to treat them (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1409s">W2L5 23:29</a>). This section develops what the lecture omits, because the mapping scheme decides the miss rate in the lead.</p>
+<p><strong>The size of the line.</strong> The lecture's example block is a few words. Drepper (2007, §3.2, p. 15) states that early caches had lines of 32 bytes and that "nowadays the norm is 64 bytes"; the machine of this chapter reports 64 bytes (session in the first section), which is 16 words of 32 bits or 8 doubles. The size can be observed. The program below reads every \(\sigma\)-th double of a 128 MiB array with four independent sums, for \(\sigma=1,2,4,\dots,64\), and prints the time per element that it touches. If a miss fetches a whole line of 8 doubles, the number of lines fetched per touched element is \(\sigma/8\) for \(\sigma\le8\) (every line is touched, and \(8/\sigma\) touched elements share it) and 1 for \(\sigma\ge8\) (each touched element is in a line of its own). A cost that is proportional to the lines fetched therefore grows in proportion to \(\sigma\) up to \(\sigma=8\), the doubling of the time per element with each doubling of the stride, and then stays constant. The knee of the curve at \(\sigma=8\) measures the line size: \(8\times8\ \mathrm{B}=64\ \mathrm{B}\). The run is checked by its return code, and the output is one sample.</p>
+<pre><code class="language-c" data-file="stride.c" data-build="gcc -O2 -fopenmp stride.c -o stride" data-run="./stride" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;omp.h&gt;
+
+/* Touch every s-th double of a 128 MiB array; report the time per touched element. */
+int main(void)
+{
+    size_t n = (size_t)16 &lt;&lt; 20;                        /* 16 Mi doubles = 128 MiB */
+    double *a = malloc(n * sizeof(double));
+    for (size_t i = 0; i &lt; n; i++) a[i] = 1.0;
+    printf("%7s %12s %10s\n", "stride", "ns/element", "ns/line");
+    for (size_t s = 1; s &lt;= 64; s *= 2) {
+        double best = 1e30, sum = 0.0;
+        for (int rep = 0; rep &lt; 5; rep++) {
+            double t0 = omp_get_wtime();
+            double acc[4] = {0, 0, 0, 0};
+            for (size_t i = 0; i + 3 * s &lt; n; i += 4 * s) {   /* four independent chains */
+                acc[0] += a[i]; acc[1] += a[i + s]; acc[2] += a[i + 2 * s]; acc[3] += a[i + 3 * s];
+            }
+            sum = acc[0] + acc[1] + acc[2] + acc[3];
+            double t = omp_get_wtime() - t0;
+            if (t &lt; best) best = t;
+        }
+        double touched = (double)(n / (4 * s)) * 4;
+        double lines = (s &gt;= 8) ? touched : (double)n / 8;
+        if (sum &lt; 0) printf("never\n");
+        printf("%7zu %12.3f %10.3f\n", s, best * 1e9 / touched, best * 1e9 / lines);
+    }
+    free(a);
+    return 0;
+}
+</code></pre>
+<pre><code class="output"> stride   ns/element    ns/line
+      1        0.624      4.995
+      2        1.158      4.632
+      4        1.973      3.947
+      8        3.943      3.943
+     16        6.441      6.441
+     32        7.480      7.480
+     64        5.775      5.775</code></pre>
+<p>The time per element is 0.62 ns at \(\sigma=1\), then 1.16, 1.97 and 3.94 ns: the factors are 1.86, 1.70 and 2.00 for the three doublings below the knee, and 6.3 in total against the 8 that the model predicts for a cost that is only proportional to the lines. Over the five runs the ratio of the times at \(\sigma=8\) and \(\sigma=1\) lies between 5.6 and 13.3. Above the knee the model predicts no change, and the measurement shows a rise by a factor of 1.3 to 1.7 from \(\sigma=8\) to \(\sigma=16\) and 1.16 in the sample from \(\sigma=16\) to \(\sigma=32\). The cause of the rise above the knee was not isolated; candidates are page crossings, which become more frequent as the stride grows (at \(\sigma=64\) a 4 KiB page holds 8 touched elements), and the behaviour of the hardware prefetchers. The sharp change in slope at \(\sigma=8\) is consistent with a 64-byte line, and the sizes reported by the session agree with it.</p>
+<p><strong>Status bits and the tag.</strong> The valid bit says that a line holds data (after power-up every line is invalid). The dirty bit says that the line has been written and that the next level has not been updated. The lecture associates the dirty bit with "non-coherency" in multiprocessor systems; Drepper (2007, §3.2, p. 16) defines it more generally: a line that "has been written to and which has not been written back to main memory is said to be dirty". A dirty line therefore exists in a single-processor machine whenever the cache is write-back, and the bit is a property of the write policy; the next-but-one section returns to it. The reason for a line, and not a word, as the unit is the tag: for a 32-bit word the tag "might need 32 bits or more" (Drepper, p. 15), an overhead of 100 % or more, whereas a line of 64 bytes carries one tag. For an address of \(w_a\) bits, a line of \(b=2^{o}\) bytes and \(S=2^{s}\) sets, the tag has \(w_a-s-o\) bits. For the L1d of this machine (\(o=6\), \(s=6\)) and an assumed address width of \(w_a=40\) bits, the tag has 28 bits per 512 bits of data, an overhead of 5.5 %; the processor's actual physical address width was not determined.</p>
+<p><strong>Address decomposition and associativity.</strong> The model of the first section fixes where a line may go. For \(b=2^{o}\) and \(S=2^{s}\), the low \(o\) bits of an address are the offset in the line, the next \(s\) bits are the set index and the remaining bits are the tag (Drepper, §3.2, pp. 15–16). The size of the cache is</p>
+\[
+M=b\,a\,S\quad\text{bytes},\qquad C=aS\ \text{lines}. \tag{7.4}
+\]
+<p>The extreme designs differ in the number of tag comparisons per lookup. A fully associative cache compares the address tag with the tags of all \(C\) lines. Drepper (§3.3.1, pp. 17–18) works out that a 4 MB cache with 64-byte lines has 65 536 entries and that full associativity is "practical for small caches" only, a few dozen entries at most, such as the translation lookaside buffers of some processors. A direct-mapped cache (\(a=1\)) needs one comparator and is fast, but "only works well if the addresses used by the program are evenly distributed" over the index bits. A set-associative cache compares \(a\) tags in parallel and is the compromise. Drepper's measurement of a compiler run (Table 3.1, p. 19) shows the misses falling with associativity, and he states that for an 8 MB cache "going from direct mapping to 2-way set associative cache saves almost 44% of the cache misses" and that above 8 ways the gain is small for a single thread (p. 19). The guest reports 12, 10 and 8 ways for the L1d, L2 and L3 of this machine.</p>
+<p><strong>The conflict capacity.</strong> Associativity matters for the running case through the following lemma. Consider a loop that reads \(K\) lines at line numbers \(\ell_0,\ell_0+\sigma,\dots,\ell_0+(K-1)\sigma\), with the stride \(\sigma\) a whole number of lines, and then reads them again in the same order. The column-order sum has this form, with \(K=N\) and \(\sigma=N/8\) when \(N\) is a multiple of 8, because the next column reads the same lines again for 7 of every 8 columns.</p>
+<p><strong>Lemma 2</strong> (conflict capacity). In an LRU cache with \(S\) sets and \(a\) ways, every access of the second and later passes over \(K\) lines of stride \(\sigma\) lines hits if and only if</p>
+\[
+K\le C_{\mathrm{eff}}(\sigma)=\frac{a\,S}{\gcd(S,\sigma)}. \tag{7.5}
+\]
+<p><em>Proof.</em> The set index of line \(\ell_0+k\sigma\) is \((\ell_0+k\sigma)\bmod S\). As \(k\) increases, this index repeats with the period \(q=S/\gcd(S,\sigma)\): the multiples of \(\sigma\) modulo \(S\) are the elements of the subgroup of the integers modulo \(S\) generated by \(\sigma\), and that subgroup has \(q\) elements. The \(K\) lines are therefore spread in turn over \(q\) sets, and the fullest set receives \(\lceil K/q\rceil\) of them. Within one set the lines are read in the same cyclic order in every pass, so each access has a reuse distance, counted over the lines of the set, equal to the number of lines of that set minus one. By Theorem 1 applied to the set (capacity \(a\)), the accesses to a set hit if and only if the set receives at most \(a\) lines. Every set receives at most \(a\) lines if and only if \(\lceil K/q\rceil\le a\), which is \(K\le aq\). \(\square\)</p>
+<p>Equation (7.5) explains the lead. For the L1d (\(a=12\), \(S=64\)) and \(N=512\): \(\sigma=64\) lines, \(\gcd(64,64)=64\), so \(C_{\mathrm{eff}}=12\) lines. All 512 lines of a column fall into one set, which holds 12, and the column-order sum misses on every access although the 512 lines would fit in the 768 lines of the L1d. For \(N=1024\), \(\sigma=128\), the capacity is again 12. For \(N=1000\), \(\sigma=125\) and \(\gcd(64,125)=1\), so \(C_{\mathrm{eff}}=768\), and \(N=1000\gt768\) is a capacity miss, predicted by Theorem 1 as well. In the L2 (\(a=10\), \(S=2048\)), \(N=512\) gives \(\gcd(2048,64)=64\) and \(C_{\mathrm{eff}}=10\times32=320\lt512\): the L2 misses too. For \(N=1000\) the L2 has \(C_{\mathrm{eff}}=20480\ge1000\) and hits. The classification of the misses follows Kelly's lecture notes (after Hennessy and Patterson): a <em>compulsory</em> miss is a miss in an infinite cache, a <em>capacity</em> miss is a miss in a fully associative cache of the same size, and a <em>conflict</em> miss is a miss in the \(a\)-way cache that is a hit in the fully associative cache of the same size. The 512-column matrix suffers conflict misses (a fully associative L1d would hit, since \(512\le768\)), and the 1000-column matrix suffers capacity misses. For \(N=500\) the row length is 4000 bytes, which is 62.5 lines, not a whole number, so the lemma does not apply directly; the rows spread over the sets nearly evenly and the prediction is that the sum behaves like a fully associative cache.</p>
+<p>The program simulates the three levels of this machine as the guest reports them: L1d 48 KiB 12-way, L2 1280 KiB 10-way, L3 12 MiB 8-way (24 576 sets, with the set index taken as the line number modulo the number of sets), all with 64-byte lines and LRU replacement within each set, and each level is consulted only when the level above misses. It runs the row-order and column-order trace of an \(N\times N\) matrix for five values of \(N\) and prints the misses of each level per access. The simulation is deterministic, and the check is exact.</p>
+<pre><code class="language-python" data-file="cachesim.py" data-run="python3 cachesim.py">"""Trace-driven simulation of a 3-level LRU cache hierarchy on row-order and column-order matrix sums.
+
+Geometry: the sizes, associativities and 64-byte lines that the WSL guest reports for this machine.
+Every level uses LRU replacement inside a set. A level is consulted only when the level above misses.
+Only reads are simulated (the matrix sum reads each element once).
+"""
+LINE = 64
+LEVELS = [("L1d", 48 * 1024, 12), ("L2", 1280 * 1024, 10), ("L3", 12 * 1024 * 1024, 8)]
+
+
+class Cache:
+    def __init__(self, size, ways):
+        self.ways = ways
+        self.sets = size // (ways * LINE)    # cache size = line size x associativity x number of sets
+        self.rows = [[] for _ in range(self.sets)]   # one list of line numbers per set, LRU first
+        self.misses = 0
+
+    def access(self, line):
+        row = self.rows[line % self.sets]    # set index = line number mod number of sets
+        if line in row:
+            row.remove(line)
+            row.append(line)
+            return True
+        self.misses += 1
+        if len(row) == self.ways:
+            row.pop(0)                       # evict the least recently used line of the set
+        row.append(line)
+        return False
+
+
+def simulate(n, order):
+    caches = [Cache(size, ways) for _, size, ways in LEVELS]
+    last, accesses = -1, 0
+    for outer in range(n):
+        for inner in range(n):
+            i, j = (outer, inner) if order == "row" else (inner, outer)
+            line = (i * n + j) * 8 // LINE
+            accesses += 1
+            if line == last:                 # the line of the previous access is in L1: a hit
+                continue
+            last = line
+            for cache in caches:
+                if cache.access(line):
+                    break
+    return accesses, [c.misses for c in caches]
+
+
+print(f"{'n':&gt;5} {'order':&gt;5} {'L1 miss':&gt;8} {'L2 miss':&gt;8} {'L3 miss':&gt;8}   (misses per access)")
+for n in (500, 512, 1000, 1024, 2048):
+    for order in ("row", "col"):
+        accesses, misses = simulate(n, order)
+        print(f"{n:5d} {order:&gt;5} " + " ".join(f"{m / accesses:8.4f}" for m in misses))
+</code></pre>
+<pre><code class="output">    n order  L1 miss  L2 miss  L3 miss   (misses per access)
+  500   row   0.1250   0.1250   0.1250
+  500   col   0.1260   0.1260   0.1250
+  512   row   0.1250   0.1250   0.1250
+  512   col   1.0000   1.0000   0.1250
+ 1000   row   0.1250   0.1250   0.1250
+ 1000   col   1.0000   0.1250   0.1250
+ 1024   row   0.1250   0.1250   0.1250
+ 1024   col   1.0000   1.0000   0.1250
+ 2048   row   0.1250   0.1250   0.1250
+ 2048   col   1.0000   1.0000   1.0000</code></pre>
+<p>The row-order sum has the miss rate 0.1250 at every level for every \(N\): one miss for each of the 8 doubles of a line, all of them compulsory. The column-order sum agrees with the lemma and with Theorem 1. At \(N=500\) the miss rate in L1 is 0.1260, which is 0.001 above the compulsory rate; some sets receive more than 12 of the 500 lines. At \(N=512\) it is 1.0000 in L1 and L2 and 0.1250 in L3 (the lemma gives \(C_{\mathrm{eff}}=12\) and 320 lines against 512). At \(N=1000\) it is 1.0000 in L1 (capacity) and 0.1250 in L2. At \(N=1024\) it is 1.0000 in L1 and L2. At \(N=2048\) all three levels miss on every access. The L2 and L3 results are statements about the model. The simulator indexes every level by the virtual line number modulo the number of sets. The index bits of the L1d (bits 6 to 11 of the address) lie inside the 4 KiB page offset, so virtual and physical indexing agree there. The 2048 sets of the L2 need bits 6 to 16, and bits 12 to 16 come from the physical page frame, so the hardware L2 is indexed differently from the model. The L3 result at \(N=2048\) holds for the modulo mapping used here: \(24576=3\times2^{13}\), \(\gcd(24576,256)=256\), \(C_{\mathrm{eff}}=8\times96=768\lt2048\). A real L3 spreads addresses over its slices by a hash function that the sources of this chapter do not describe, so the simulated L3 result is a statement about the model, not about the hardware; the L2 results are directional too, because the hardware L2 is indexed by physical address (set-index bits 12 to 16 come from the page frame), while the simulator uses the virtual line number.</p>
+<p>A second, independent simulator checks the first for the L1d. Valgrind's Cachegrind, configured with the L1d geometry (<code>--D1=49152,12,64</code>), counts the level-1 data read misses of each function of a program that sums the matrix in both orders. Cachegrind requires a power-of-two number of sets in its last-level cache, so the session sets a 16 MiB, 16-way <code>--LL</code>; the setting does not enter the level-1 read-miss counts. The program is listed below: it fills the matrix, sums it in both orders in two separate functions, and prints the two sums, so the run is exact. The session shows the commands and the totals for the functions <code>sum_rows</code> and <code>sum_cols</code>.</p>
+<pre><code class="language-c" data-file="sumcg.c" data-build="gcc -O1 -g sumcg.c -o sumcg" data-run="./sumcg 512">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+/* Sum an n x n matrix of doubles in row order or column order; one function per order. */
+__attribute__((noinline)) static double sum_rows(const double *a, int n)
+{
+    double s = 0.0;
+    for (int i = 0; i &lt; n; i++)
+        for (int j = 0; j &lt; n; j++)
+            s += a[(size_t)i * n + j];
+    return s;
+}
+
+__attribute__((noinline)) static double sum_cols(const double *a, int n)
+{
+    double s = 0.0;
+    for (int j = 0; j &lt; n; j++)
+        for (int i = 0; i &lt; n; i++)
+            s += a[(size_t)i * n + j];
+    return s;
+}
+
+int main(int argc, char **argv)
+{
+    int n = atoi(argv[1]);
+    double *a = aligned_alloc(64, (size_t)n * n * sizeof(double));
+    for (size_t m = 0; m &lt; (size_t)n * n; m++) a[m] = 1.0;
+    printf("%.0f %.0f\n", sum_rows(a, n), sum_cols(a, n));
+    return 0;
+}
+</code></pre>
+<pre><code class="output">262144 262144</code></pre>
+<pre><code class="language-bash">$ gcc -O1 -g sumcg.c -o sumcg
+$ for n in 500 512 1000 1024; do
+&gt;   valgrind --tool=cachegrind --cache-sim=yes --D1=49152,12,64 --LL=16777216,16,64 \
+&gt;     --cachegrind-out-file=cg.out.$n ./sumcg $n &gt; /dev/null 2&gt; /dev/null
+&gt;   echo "n = $n"
+&gt;   awk '/^fn=/{f=substr($0,4)} /^[0-9]/{m[f]+=$6} END{print "  sum_rows", m["sum_rows"]; print "  sum_cols", m["sum_cols"]}' cg.out.$n
+&gt; done
+n = 500
+  sum_rows 31245
+  sum_cols 31495
+n = 512
+  sum_rows 32769
+  sum_cols 262145
+n = 1000
+  sum_rows 125001
+  sum_cols 1000001
+n = 1024
+  sum_rows 131073
+  sum_cols 1048577
+</code></pre>
+<p>The counts are the numbers of read misses of 250 000 accesses (\(N=500\)), 262 144 (\(N=512\)), 1 000 000 (\(N=1000\)) and 1 048 576 (\(N=1024\)). Cachegrind gives 31 495 (column order) and 31 245 (row order) at \(N=500\), against 31 500 and 31 250 from the simulator's rounded rates; 262 145 and 32 769 at \(N=512\), against 262 144 and 32 768; 1 000 001 and 125 001 at \(N=1000\), against 1 000 000 and 125 000; and 1 048 577 and 131 073 at \(N=1024\), against 1 048 576 and 131 072. The two simulators agree to within 5 misses in every case, which is at most 0.016 %. The excess of one miss in most counts and the deficit of five at \(N=500\) were not traced. The agreement checks the implementation of the simulator and the use of the L1d geometry; it does not check the L2 or L3 counts, and it does not check that the hardware behaves like an LRU cache. The measurement of the section on hit rate does that, with the limits stated there.</p>
+<p>The prediction is not limited to diagnosis. The conflict capacity (7.5) depends on \(\gcd(S,\sigma)\), so a change of the row length that makes \(\sigma\) coprime with \(S\) restores the full capacity. Adding 8 doubles to each row of the 512-column matrix makes the row length 520 doubles, \(\sigma=65\) lines, \(\gcd(64,65)=1\) and \(C_{\mathrm{eff}}=768\ge512\). Exercise 6 asks for the measurement of this change.</p>
+
+
+<h2 id="amat">Hit rate, average access time and the limit of the model <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1447s">W2L5 24:07</a></h2>
+<p>The lecture measures the efficiency of a cache by the hit rate, the number of cache hits divided by the number of memory requests (times 100 for a percentage), counted over read hits, write hits or both, and it names two further quantities, the hit time and the miss penalty (slide at <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1455s">W2L5 24:15</a>). It adds that the cost can be stated in cycles for a hit and for a miss. The three quantities combine into one number, the average memory access time. Kelly's lecture notes, which follow Hennessy and Patterson (6th edition, appendix B.3, p. B-22), write it as \(\mathrm{AMAT}=t_h+m_r t_m\). The derivation is short. Every access pays the hit time \(t_h\), because the cache is searched first. The fraction \(m_r\) of the accesses misses and pays the miss penalty \(t_m\) in addition. The expected time of an access is (7.1). For a hierarchy of caches the miss penalty of one level is the average access time of the next, so with the local miss rates \(m_1,m_2,m_3\) (misses of a level divided by the accesses that reach it), the hit times \(t_1,t_2,t_3\) of the three cache levels (the time that consulting a level adds) and the memory time \(t_{\text{mem}}\) (the time that a memory access adds),</p>
+\[
+\mathrm{AMAT}=t_1+m_1\bigl(t_2+m_2\,(t_3+m_3\,t_{\text{mem}})\bigr). \tag{7.6}
+\]
+<p>The sensitivity to the miss rate follows from (7.1): \(\partial\,\mathrm{AMAT}/\partial m_r=t_m\). With the hit time of 1.2 ns and the DRAM latency of about 130 ns that the pointer chase measured (the fifth run: 129 to 132 ns for 16 to 64 MiB), one percentage point of miss rate adds 1.3 ns, which is more than the hit time itself. A miss rate of 0.125, the compulsory rate of the row-order sum, gives \(1.2+0.125\times130=17.5\) ns, 14.5 times the hit time. For a dependent chain of loads, the model is exact by construction: in the pointer chase at 128 KiB all loads are served by the L2 (Theorem 1) and the average time is the L2 service time, 3.7 ns in the fifth run. That is a check of the bookkeeping, not of the model's reach.</p>
+<p><strong>Where the model fails.</strong> The sum loop gives a test that is not circular. At \(N=4096\) the simulator and Lemma 2 predict that the row-order sum misses once per line, \(m_r=0.125\), and the column-order sum misses on every access, \(m_r=1\), with the misses served by DRAM in the model (for the column order at \(N=4096\): \(\sigma=512\) lines, \(C_{\mathrm{eff}}=12\), 40 and 384 lines in L1, L2 and L3 under the modulo mapping, against 4096 lines needed). Equation (7.1) with \(t_h=1.2\) ns and \(t_m=130\) ns predicts 17.5 ns per element for the row order and 131 ns for the column order. The sample shows 0.79 ns and 13.8 ns (table below), which is 22 and 9.5 times shorter. The model also fails for loops that always hit: for \(N=250\) and 500 the sum takes 0.46 to 0.50 ns per element, 2.4 to 2.6 times less than the hit time of 1.2 ns. The assumption that fails is the one in the derivation: each access completes before the next one starts. The latency \(t_h\) of 1.2 ns is the time of a load whose address depends on the previous load. In the sum loop the loads are independent of each other; only the additions form a chain, and the processor can have many loads in flight while the additions wait. A latency model describes dependent accesses. For independent accesses the quantity that limits the loop is a rate.</p>
+<p>Little's law connects the two. A system that completes \(X\) accesses per second with a latency of \(L\) seconds each has on average \(\lambda=XL\) accesses in flight. Let a loop produce \(\mu\) line misses per element, each with a latency \(L\), and let \(c\) be the average number of misses in flight. Then misses complete at the rate \(c/L\) and the time per element cannot be less than</p>
+\[
+t_{\text{elt}}\ \ge\ \max\Bigl\{t_{\text{add}},\ \frac{\mu L}{c}\Bigr\}, \tag{7.7}
+\]
+<p>where \(t_{\text{add}}\) is the time per element of the dependent chain of additions (0.46 ns in the sample, the value for the matrices that fit in the L1 or L2 cache). The bound (7.7) is not a prediction, because \(c\) is not known in advance. Solved for \(c\), it gives the average concurrency that a measurement implies. For the row-order sum at \(N=4096\), \(\mu=1/8\), \(L=130\) ns and \(t_{\text{elt}}=0.79\) ns, so \(c=0.125\times130/0.79=20.6\) lines in flight; the loop reads 8 bytes per 0.79 ns, 10.1 GB/s from a single thread. For the column-order sum, \(\mu=1\) and \(t_{\text{elt}}=13.8\) ns, so \(c=130/13.8=9.4\). This value assumes that every column miss goes to DRAM, which holds only for the modulo-mapped L3 of the simulator. A hashing L3 of 12 MiB can hold the 256 KiB of one column between passes; if it does, \(L\) is the L3 latency, which the pointer chase did not measure, and the implied concurrency is \(L_3/13.8\) ns, lower than 9.4. These are implied averages under the assumption that every miss waits 130 ns for DRAM. They are not measured concurrencies. The sources opened for this chapter do not describe the hardware prefetchers or the limit of the processor on outstanding misses, and the chapter does not separate the contribution of the out-of-order execution of the loop from that of the prefetchers. The row-order stream moves 8 bytes per 0.79 ns; whether the 10.1 GB/s is a bandwidth limit of the memory system or of a single thread was not determined, and the treatment of bandwidth-bound loops, with the STREAM benchmark and the roofline model, belongs to chapter 10.</p>
+<div class="table-wrap"><table>
+<caption>Table 7.1. Column-order against row-order sum of an \(N\times N\) matrix of doubles: miss rates of the simulated column order and times measured on this machine (the fifth run; the range of the ratio over five runs).</caption>
+<thead><tr><th scope="col">\(N\)</th><th scope="col">Matrix</th><th scope="col">Column order: misses per access in L1 / L2 / L3 (simulator or lemma)</th><th scope="col">Row order, ns per element</th><th scope="col">Column order, ns per element</th><th scope="col">Ratio, sample</th><th scope="col">Ratio, five runs</th></tr></thead>
+<tbody>
+<tr><td>250</td><td>0.50 MB</td><td>predicted to fit L1 (250 lines \(\lt768\); not simulated)</td><td>0.46</td><td>0.46</td><td>1.00</td><td>0.97 to 1.01</td></tr>
+<tr><td>500</td><td>2.00 MB</td><td>0.126 / 0.126 / 0.125</td><td>0.46</td><td>0.50</td><td>1.08</td><td>1.02 to 1.08</td></tr>
+<tr><td>512</td><td>2.10 MB</td><td>1.000 / 1.000 / 0.125</td><td>0.47</td><td>2.12</td><td>4.52</td><td>3.84 to 4.52</td></tr>
+<tr><td>1000</td><td>8.00 MB</td><td>1.000 / 0.125 / 0.125</td><td>0.75</td><td>1.27</td><td>1.70</td><td>1.17 to 1.70</td></tr>
+<tr><td>1024</td><td>8.39 MB</td><td>1.000 / 1.000 / 0.125</td><td>0.52</td><td>3.11</td><td>5.95</td><td>5.95 to 6.42</td></tr>
+<tr><td>2048</td><td>33.55 MB</td><td>1.000 / 1.000 / 1.000</td><td>0.74</td><td>9.08</td><td>12.32</td><td>10.73 to 19.11</td></tr>
+<tr><td>4096</td><td>134.22 MB</td><td>1 / 1 / 1 (lemma; modulo-mapped L3)</td><td>0.79</td><td>13.80</td><td>17.45</td><td>13.66 to 21.96</td></tr>
+</tbody></table></div>
+<p>The program below produced the times. It sums the matrix in both orders for eight values of \(N\), checks that each sum equals \(N^2\), and prints the minimum of five repetitions of each loop. The run is checked by its return code; the output is the fifth of five runs.</p>
+<pre><code class="language-c" data-file="rowcol.c" data-build="gcc -O2 -fopenmp rowcol.c -o rowcol" data-run="./rowcol" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;omp.h&gt;
+
+/* Sum an n x n matrix of doubles stored row-major, in row order and in column order. */
+static double sum_rows(const double *a, int n)
+{
+    double s = 0.0;
+    for (int i = 0; i &lt; n; i++)
+        for (int j = 0; j &lt; n; j++)
+            s += a[(size_t)i * n + j];
+    return s;
+}
+
+static double sum_cols(const double *a, int n)
+{
+    double s = 0.0;
+    for (int j = 0; j &lt; n; j++)
+        for (int i = 0; i &lt; n; i++)
+            s += a[(size_t)i * n + j];
+    return s;
+}
+
+static double best_ns_per_element(double (*f)(const double *, int), const double *a, int n, double *result)
+{
+    double best = 1e30;
+    for (int rep = 0; rep &lt; 5; rep++) {
+        double t0 = omp_get_wtime();
+        *result = f(a, n);
+        double t = omp_get_wtime() - t0;
+        if (t &lt; best) best = t;
+    }
+    return best * 1e9 / ((double)n * n);
+}
+
+int main(void)
+{
+    const int sizes[] = {250, 500, 512, 1000, 1024, 2000, 2048, 4096};
+    printf("%6s %10s %12s %12s %8s\n", "n", "matrix", "row ns/elt", "col ns/elt", "col/row");
+    for (int k = 0; k &lt; (int)(sizeof sizes / sizeof sizes[0]); k++) {
+        int n = sizes[k];
+        double *a = malloc((size_t)n * n * sizeof(double));
+        for (size_t m = 0; m &lt; (size_t)n * n; m++) a[m] = 1.0;     /* the sum of every element is 1.0 */
+        double r1, r2;
+        double tr = best_ns_per_element(sum_rows, a, n, &amp;r1);
+        double tc = best_ns_per_element(sum_cols, a, n, &amp;r2);
+        if (r1 != (double)n * n || r2 != (double)n * n) { printf("wrong sum\n"); return 1; }
+        printf("%6d %7.2f MB %12.2f %12.2f %8.2f\n", n, (double)n * n * 8 / 1e6, tr, tc, tc / tr);
+        free(a);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">     n     matrix   row ns/elt   col ns/elt  col/row
+   250    0.50 MB         0.46         0.46     1.00
+   500    2.00 MB         0.46         0.50     1.08
+   512    2.10 MB         0.47         2.12     4.52
+  1000    8.00 MB         0.75         1.27     1.70
+  1024    8.39 MB         0.52         3.11     5.95
+  2000   32.00 MB         0.66         3.93     5.93
+  2048   33.55 MB         0.74         9.08    12.32
+  4096  134.22 MB         0.79        13.80    17.45</code></pre>
+<p>Table 7.1 shows three things. First, the slowdown follows the level that serves the misses, in the order that the simulator gives. A matrix whose column fits the L1 shows a ratio of 0.97 to 1.08 (\(N=250\), 500). When the misses are served by the L2 (\(N=1000\)) the ratio is 1.2 to 1.7. When they are served by the L3 or memory in the simulation (\(N=512\), 1024) it is 3.8 to 6.4, and when all simulated levels miss (\(N=2048\), 4096) it is 11 to 22. The simulator does not predict the size of the ratio, only its direction and the point where it changes. Second, the measured ratios are below the latency ratios. The L2 service time is 3.1 times the L1 time (3.7 against 1.2 ns) and the DRAM time is about 108 times, but the measured ratios are 1.7 and 17.5, which are lower by the factors 1.8 and 6.2: overlap hides part of the latency, as (7.7) says. Third, the ratio is not a property of the matrix alone. It is a property of the matrix, the cache geometry and the loop. Neighbouring sizes, 500 and 512, differ by a factor of 4.2 in the column-order time (0.50 and 2.12 ns), although they differ by 2.4 % in \(N\) and 4.9 % in the size of the matrix. The measurements also vary between runs (the ratio at \(N=2048\) ranges from 10.7 to 19.1), which is the effect of the other jobs on the machine and of the placement of the thread on a performance or an efficient core, and it limits the quantitative reading of the table to its orders of magnitude.</p>
+<p>The model of this section therefore has two parts with separate domains. The miss counts of the simulator are exact for the L1d geometry and the LRU assumption, as the independent Cachegrind check of the L1d shows; the L1d index bits lie inside the 4 KiB page offset, so virtual and physical indexing agree there. For the L2 and the L3 the simulator indexes sets by virtual line number, while the hardware indexes the L2 by physical address (its set-index bits 12 to 16 come from the page frame) and hashes the L3 over slices; their results are directional. The average access time (7.1) is a latency model for dependent accesses. For independent accesses the bound (7.7) applies, with a concurrency that has to be measured. A programmer who optimises the sum therefore has two separate tools: change the order or the layout so that the miss rate falls (the padding of the previous section), and, when misses remain, make them independent so that they overlap.</p>
+
+
+<h2 id="coherence">Writes, coherence and snooping <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1478s">W2L5 24:38</a></h2>
+<p>The lecture states the coherency problem in three sentences (slide at <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1515s">W2L5 25:15</a>). It arises when the data in a cache differ from the data in main memory, so that one of them is stale. It concerns systems in which more than one entity uses the memory, such as multiprocessors, and not a single processor. It is avoided by a write-through policy, in which main memory is updated whenever the processor updates the cache, together with <em>snooping</em>: the cache controller of one processor watches the memory bus for writes to locations that it holds in its cache and updates the cache when required. The lecture does not treat write-back caches, and the earlier statement that the dirty bit "indicates non-coherency" belongs to them. This section separates the write policy from coherence and counts what each costs.</p>
+<p><strong>Write policies.</strong> A <em>write-through</em> cache sends every store to the next level at once, so the cache and the memory never differ and a line can be discarded at any time. A <em>write-back</em> cache changes only its own copy, sets the dirty bit, and writes the line to the next level when it evicts it. Drepper (2007, §3.3.3, p. 25) calls write-through "the simplest way to implement cache coherency" and "not very fast", since a program that changes a local variable over and over would send the traffic of every change to the bus, and write-back "significantly better performing, which is why most memory in a system with a decent processor is cached this way". A store to a line that is not resident first loads the line, because no instruction changes a whole line at once (Drepper, §3.2, p. 16). In a write-back cache a line that differs from memory is normal, in a single-processor machine too. The dirty bit records this, and it is not a sign of incoherence.</p>
+<p><strong>Coherence.</strong> Coherence is a property of several caches: the processors must not see different values for the same location. Drepper (2007, §3.2, p. 16) states the rules that a coherent set of caches maintains: "A dirty cache line is not present in any other processor's cache" and "Clean copies of the same cache line can reside in arbitrarily many caches". A cache line is thus either modifiable in exactly one cache or readable in many, and the line, not the word, is the unit. The protocol that implements the rules in most processors is MESI (Drepper, §3.3.4, pp. 25–26). Each line in each cache is in one of four states: <em>modified</em> (changed locally, the only copy), <em>exclusive</em> (unchanged, known to be the only copy), <em>shared</em> (unchanged, possibly in other caches) and <em>invalid</em>. Each cache snoops the requests of the others. Table 7.2 lists the transitions that Drepper describes.</p>
+<div class="table-wrap"><table>
+<caption>Table 7.2. MESI transitions of one line in one cache (Drepper 2007, §3.3.4, p. 26). RFO is a request for ownership.</caption>
+<thead><tr><th scope="col">State</th><th scope="col">Local read</th><th scope="col">Local write</th><th scope="col">Another cache reads</th><th scope="col">Another cache writes</th></tr></thead>
+<tbody>
+<tr><td>Modified</td><td>hit, stays M</td><td>hit, stays M</td><td>sends the line, memory is updated, becomes S</td><td>sends the line, becomes I</td></tr>
+<tr><td>Exclusive</td><td>hit, stays E</td><td>hit, becomes M, no bus transaction</td><td>becomes S</td><td>becomes I</td></tr>
+<tr><td>Shared</td><td>hit, stays S</td><td>announces an RFO, others become I, becomes M</td><td>stays S</td><td>becomes I</td></tr>
+<tr><td>Invalid</td><td>miss; becomes S if another cache has the line, else E</td><td>RFO, becomes M</td><td>no action</td><td>no action</td></tr>
+</tbody></table></div>
+<p>The lecture's remedy keeps the memory always current, and the snooping controller then only has to react to the writes that it sees on the bus. The remedy works. Its cost is that every store reaches the bus. MESI keeps stores local and moves lines only when another cache asks for them. The program counts the bus events of four scenarios on two cores with the protocol of Table 7.2. A scenario is a sequence of reads or writes by core 0 or core 1 on one line (the scenario in which each core writes a line of its own uses two lines). The program counts reads that miss and use the bus, ownership requests (a write that finds the line in state S or I), line transfers from a modified copy to the requesting cache (memory is updated only when the request is a read), and the writes that a write-through cache would send to memory (one per store). After every step it asserts the invariant of the rules above: a modified or exclusive copy is the only valid copy. The program is deterministic, and the check is exact.</p>
+<pre><code class="language-python" data-file="coherence.py" data-run="python3 coherence.py">"""MESI write-invalidate protocol for one cache line shared by two cores, with bus-traffic counts.
+
+State of the line in each core's cache: M modified, E exclusive, S shared, I invalid.
+Counted: bus reads (a read miss), ownership requests (a write that needs the line or must invalidate
+other copies), line transfers from a modified copy to the requesting cache (memory is updated only
+when the request is a read), and the memory writes a write-through cache would issue.
+"""
+
+
+def run(ops, cores=2):
+    state = ["I"] * cores
+    bus_reads = ownership = transfers = writes = 0
+    for core, op in ops:
+        others = [c for c in range(cores) if c != core]
+        if op == "R":
+            if state[core] == "I":
+                bus_reads += 1
+                if any(state[c] == "M" for c in others):
+                    transfers += 1                        # the owner sends the line; memory is updated
+                shared = any(state[c] != "I" for c in others)
+                for c in others:
+                    if state[c] != "I":
+                        state[c] = "S"
+                state[core] = "S" if shared else "E"
+        else:
+            writes += 1
+            if state[core] in ("I", "S"):
+                ownership += 1
+                if any(state[c] == "M" for c in others):
+                    transfers += 1                        # the owner sends the line and becomes invalid
+                for c in others:
+                    state[c] = "I"
+            state[core] = "M"                              # E -&gt; M is silent: no bus transaction
+        # invariant: a modified or exclusive copy is the only valid copy
+        assert not (any(s in "ME" for s in state) and sum(s != "I" for s in state) &gt; 1), state
+    return writes, bus_reads, ownership, transfers
+
+
+n = 1000
+# each scenario is a list of operation sequences, one sequence per cache line; counts are summed over the lines
+scenarios = {
+    "both cores write one line, alternately": [[(k % 2, "W") for k in range(2 * n)]],
+    "core 0 writes it, then core 1 writes it": [[(0, "W")] * n + [(1, "W")] * n],
+    "each core writes a line of its own": [[(0, "W")] * n, [(1, "W")] * n],
+    "both cores read one line": [[(k % 2, "R") for k in range(2 * n)]],
+}
+print(f"{'scenario':&lt;42} {'writes':&gt;6} {'bus reads':&gt;9} {'ownership':&gt;9} {'transfers':&gt;9} {'write-through':&gt;13}")
+for name, lines in scenarios.items():
+    w, r, o, t = (sum(column) for column in zip(*(run(ops) for ops in lines)))
+    print(f"{name:&lt;42} {w:6d} {r:9d} {o:9d} {t:9d} {w:13d}")
+</code></pre>
+<pre><code class="output">scenario                                   writes bus reads ownership transfers write-through
+both cores write one line, alternately       2000         0      2000      1999          2000
+core 0 writes it, then core 1 writes it      2000         0         2         1          2000
+each core writes a line of its own           2000         0         2         0          2000
+both cores read one line                        0         2         0         0             0</code></pre>
+<p>The write-through column is the same for every write scenario: 2000 memory writes for 2000 stores, whether or not the line is shared, and 0 for reads. Under MESI the cost depends on the sharing. When each core writes a line of its own, 2000 stores cause 2 ownership requests, one per line, and the other 1998 stores find the line in state M or E and use no bus. When one core finishes before the other starts, there are 2 ownership requests and 1 line transfer. When the two cores alternate on one line, every store finds the line modified in the other cache: 2000 ownership requests, 1999 of them answered by a transfer of the 64-byte line from the other cache. Alternating writers cost 3999 bus events (2000 ownership requests and 1999 line transfers) against write-through's 2000 memory writes, and the line moves from one cache to the other 1999 times, so MESI is not a gain in this case. Write-through sends 2000 writes to memory and must still invalidate or update the other copy, which the program does not count, so its column is a lower bound. Two readers cost 2 bus reads in total, one each, and then no traffic: read sharing is free.</p>
+<p>The alternating scenario is the model of <em>false sharing</em>. Two threads that write different words of one line have no data race (chapter 11 gives the definition) and still alternate their ownership of the line, because the unit of coherence is the line of 64 bytes and not the word. Chapter 11 measured the cost on this machine: for 8 threads, counters that all lay in one line were 2.0 to 2.6 times slower than counters with a line of their own (one sample and three earlier runs). Drepper (2007, §3.3.4, p. 27) reports that a four-processor machine with a shared bus lost up to 34 % of the speed of its fastest thread for four threads that only read, and 93 % for four threads that increment, when they walked a linked list; the first figure comes from bus bandwidth, with no invalidation involved, and the second adds the traffic of the modified lines that the processors write back.</p>
+<p>The model has four limits. It treats one line and two cores, with no timing; the number of messages is not the time they take. It is a snooping protocol in which every cache sees every request; large machines cannot broadcast every request, and the lecture does not treat the directory protocols that replace the broadcast (the sources opened for this chapter do not describe them). The protocol states are those that Drepper describes; processors add states and optimisations. And coherence concerns the writes to one location; the order in which the writes to different locations become visible to other threads is the memory model of chapter 13.</p>
+
+
+<h2 id="smp-numa">Shared memory: SMP, UMA and NUMA <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1582s">W2L5 26:22</a></h2>
+<p>The lecture recalls the multiple-instruction, multiple-data (MIMD) machine of the previous lecture and asks how its memory is implemented. There are two ways: <em>shared memory</em>, also called tightly coupled, with the variants SMP and NUMA, and <em>distributed memory</em>, also called loosely coupled, of which the cluster is the example. The slide on symmetric multiprocessing (SMP, <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1616s">W2L5 26:56</a>) defines it as a stand-alone computer with two or more processors of comparable compute power that share the same memory and input-output facilities, are connected by a bus or another interconnection scheme "such that memory access time for all processors is almost the same", can all perform the same function, and are controlled by one integrated operating system. The block diagram shows processors with private caches on a shared bus that leads to one main memory and to the input-output adapters. The slide on non-uniform memory access (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1745s">W2L5 29:05</a>) defines uniform memory access (UMA) by two equalities, the access time of a processor is the same for all parts of memory and is the same for different processors, calls SMP "a type of UMA architecture", and defines NUMA as the case in which every processor reaches all of main memory but with an access time that depends on the part accessed, so that for each processor a different region is fast and a different region is slow. The slide "Why NUMA is needed" (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1877s">W2L5 31:17</a>) gives the reason: SMP has a practical limit on the number of processors and the amount of memory, set by "electrical/PCB design constraints", "typically 64 processors maximum, most expensive machines around"; NUMA keeps the flat address space and the single operating-system image and extends the limit "to hundreds to thousands of physical processors/cores", with "SGI's Altix ICE 8400 (&gt; 64K cores)" as the example. The picture (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1910s">W2L5 31:50</a>) shows two nodes, each with a processor and local memory, joined by an inter-socket connection, with local access to the memory of the same node and remote access to the other, and a server board with four processors and one memory per processor.</p>
+<p><strong>The cost of non-uniformity.</strong> The definitions of the first section make the lecture's statement quantitative. Let \(t_{\text{loc}}\) be the time of a miss served by the memory of the processor's own node and \(t_{\text{rem}}\) the time of a miss served by another node. The ratio \(\rho=t_{\text{rem}}/t_{\text{loc}}\) is the <em>NUMA factor</em> (Drepper 2007, §5.1, pp. 42–43). If a fraction \(r\) of the misses of a processor go to remote memory, the average miss time is the weighted mean</p>
+\[
+\bar t=(1-r)\,t_{\text{loc}}+r\,\rho\,t_{\text{loc}}=t_{\text{loc}}\bigl(1+r(\rho-1)\bigr). \tag{7.8}
+\]
+<p>For an assumed factor \(\rho=1.5\) (an illustrative value, not a measurement), a processor with no remote accesses has \(\bar t=t_{\text{loc}}\), one with half of its misses remote has \(1.25\,t_{\text{loc}}\), and one with all its misses remote has \(1.5\,t_{\text{loc}}\). The lecture states "which region is fast and which is slow is different" for each processor; (7.8) shows that the program, through \(r\), decides how much of the difference it pays. The value of \(\rho\) depends on the machine. Drepper (§5.1, p. 43) describes the large shared-memory machines of SGI as making a "reasonably low" factor possible but, with several thousand processors and a limited interconnect capacity, as having a factor that is "dynamic and can reach unacceptable levels depending on the workload".</p>
+<p>The operating system decides \(r\) when it places the pages of an array. The Linux kernel documentation (<a href="https://docs.kernel.org/admin-guide/mm/numa_memory_policy.html">NUMA memory policy</a>) states that the system default policy, once the system is running, is "local allocation": a page is allocated on the node of the processor on which the allocation takes place (during boot the default interleaves allocations across the nodes). Linux allocates the physical page when a process first touches it (the author's statement of demand paging; the policy document speaks of "page allocations"), so under this policy the thread that first touches a page decides its node. A matrix initialised by one thread lies entirely on that thread's node, and in the parallel sum every thread on another node has \(r=1\). Initialising the matrix with the same thread-to-block assignment as the later loops gives \(r\approx0\). Drepper (§5.2, p. 44) describes the default of 2007 differently: the memory was striped over all nodes ("by default, not allocated exclusively on the local node"). The two statements concern different kernel versions, and a reader of a current kernel should rely on the documentation, not on the 2007 text. The kernel documentation also lists other policies that a process may select; the chapter does not use them.</p>
+<p><strong>The limit of the bus.</strong> The lecture's argument for the limit of an SMP is electrical. A bandwidth argument gives the same limit from the quantities of this chapter. Let a shared bus (or a single memory controller) deliver at most \(B_{\text{bus}}\) bytes per second to the \(p\) processors, and let one processor, running its program, demand \(g\) bytes per second from memory (the line size times its miss rate times its rate of accesses). While \(pg\le B_{\text{bus}}\) each processor receives \(g\), and when \(pg\gt B_{\text{bus}}\) each receives at most \(B_{\text{bus}}/p\). The bus saturates at
+\[
+p^{*}=\frac{B_{\text{bus}}}{g}\tag{7.9}
+\]
+processors. Caches act on \(g\): by (7.1) and the definition of the miss rate, a program with a higher hit rate has a smaller \(g\) and a larger \(p^{*}\), so the processor caches of the lecture's block diagram are what makes a shared bus usable at all. For an illustration, the row-order sum of this chapter reads 10.1 GB/s from one thread; a bus that supplies four times that, 40 GB/s, saturates at \(p^{*}=4\) such threads, while the same threads working in cache (the 0.46 ns per element of Table 7.1) would demand almost no bus. The value \(B_{\text{bus}}\) of this machine was not measured and the peak memory bandwidth was not determined, so the numbers illustrate the saturation arithmetic of (7.9) and are not a measurement. Drepper measured the effect on a four-processor machine with one shared bus (§3.3.4, p. 27): four threads that only read were up to 34 % slower than one, and four threads that increment were up to 93 % slower, the effect that the previous section quoted. The lecture's "64 processors" is a claim about a class of expensive machines; no source opened for this chapter states it, and the bandwidth limit above shows only that some limit exists, not its value.</p>
+<p><strong>This machine.</strong> The guest reports one NUMA node and the kernel lists only <code>node0</code> (session in the first section), so the machine is a UMA machine from the point of view of the operating system, and the chapter can measure no NUMA factor on it. It is also not an SMP in the lecture's strict sense, because the processors are not of comparable compute power: the performance cores and the efficient cores differ in clock frequency (chapter 11 gives 4.40 and 3.30 GHz as the maximum turbo frequencies). The memory is uniform and the processors are not. NUMA therefore appears in this chapter only as a model, (7.8), and as the first-touch consequence of the kernel documentation; exercise 4 uses both.</p>
+<p><strong>The example of the slide.</strong> Three sources allow a check of the lecture's example. SGI's own text on the Altix ICE 8400 (the press text as reprinted by <a href="https://scientific-computing.com/press-releases/altix-ice-8400">Scientific Computing World</a>; the page carries no date) calls the product "the next generation of the Altix ICE scale-out high performance computing (HPC) blade platform" with "through and through Quad Data Rate InfiniBand interconnect", states "up to 128 processors (1,536 cores) per cabinet" and says that it "easily and affordably scales to up to 65,536 compute nodes with integrated single or dual plane InfiniBand backplane interconnect". A slide deck by an SGI employee on the Altix UV (<a href="https://indico.desy.de/event/3878/contributions/68457/attachments/44738/55009/SGI-Wolff-ZKI_UV.pdf">R. Wolff, SGI Altix UV, DESY/ZKI</a>; undated) describes the UV 1000 as "SMP SSI" (a single system image) with "up to 256 Intel Nehalem-EX/Westmere-EX Sockets" and "up to 16TB main memory", connected by the NUMAlink 5 interconnect, and, as an MPP of "up to 256 hardware connected partitions", "up to 32768 sockets" with 2 PB of globally addressable memory. Drepper (§5.1, p. 43) describes SGI's Altix as machines "designed specifically to be interconnected" by NUMAlink, with "several thousands" of processors, and adds that clusters of commodity machines with fast networks "are no NUMA machines; they do not implement a shared address space". Two differences from the slide follow. The slide's "&gt; 64K cores" is consistent with the vendor text: 65,536 compute nodes with multi-core processors (1,536 cores per 128 processors) exceed 64K cores. But SGI describes the ICE 8400 as a scale-out blade platform whose nodes are joined by InfiniBand; such a system is a cluster of nodes with separate memories, which Drepper excludes from NUMA and which the lecture's own taxonomy places in the cluster category of the next section. And SGI's shared-memory NUMA product of that generation was the Altix UV, with a single system image of up to 256 sockets (of the Nehalem-EX/Westmere-EX generation) and 16 TB. The lecture's point, that NUMA machines extend a single address space beyond a bus-based SMP (256 sockets of the Altix UV against the 64 processors of the lecture), stands; the slide attaches it to the wrong product line.</p>
+
+
+<h2 id="cluster">Clusters, the interconnect and the cost of distance <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1946s">W2L5 32:26</a></h2>
+<p>The lecture defines a cluster as a switching fabric, a fast network of high bandwidth, that connects \(n\) compute nodes, each of which is itself a multiprocessor, NUMA or SMP. It lists four benefits (slide at <a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=1995s">W2L5 33:15</a>): <em>extreme scalability</em>, thousands of machines; <em>incremental scalability</em>, nodes can be added as the need grows (for example, a cluster of 100 nodes can be extended by 100 more); <em>high availability</em>, since the failure of a node "does not affect overall loss of service" and software can handle the fault tolerance; and <em>superior price and performance</em>, since commodity building blocks give the compute power of a single large machine "at a much lower cost". The slide on the attributes of the network (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=2042s">W2L5 34:02</a>) states that its objective is to move data from the memory of one node to the memory of another. <em>Bandwidth</em> is the amount of data transferred per unit time and depends on the raw data rate of the physical layer (the lecture adds that it is set by the speed of the link from the node to the switch). <em>Latency</em> is "time taken for a packet to reach destination from source", which matters for many small messages and for processors that wait for control and synchronisation messages. The last attribute is <em>offloading</em>: the network interface card takes over the transfer, the check of correctness and the retransmission, which frees the host processor for computation. The lecture closes by stating that the cluster is the most common architecture of supercomputers because of its scalability and cost effectiveness (<a class="timestamp" href="https://www.youtube.com/watch?v=iBMlMcT2Q_4&amp;t=2139s">W2L5 35:39</a>).</p>
+<p><strong>The message model.</strong> In distributed memory the data of another node arrive in a message. The time of a message of \(m\) bytes is modelled as</p>
+\[
+T_{\text{msg}}(m)=\alpha+\beta m, \tag{7.10}
+\]
+<p>with the latency \(\alpha\) and the inverse bandwidth \(\beta\) (the bandwidth is \(1/\beta\)). The rate that a message of \(m\) bytes achieves is \(m/T_{\text{msg}}(m)=\beta^{-1}\,m/(m+\alpha/\beta)\), which reaches half of the bandwidth at the message size \(m_{1/2}=\alpha/\beta\): then \(T_{\text{msg}}=2\alpha\) and the rate is \(m_{1/2}/(2\alpha)=1/(2\beta)\). Messages much shorter than \(m_{1/2}\) take about \(\alpha\) and are limited by latency; messages much longer take about \(\beta m\) and are limited by bandwidth. This is the lecture's statement that latency matters for small messages and bandwidth for large amounts of data, with a number attached. Chapter 14 fits \(\alpha\) and \(\beta\) from a ping-pong measurement; this chapter uses assumed values for a 100 Gbit/s link, \(\alpha=1.5\ \mu\mathrm{s}\) and \(1/\beta=12.5\ \mathrm{GB/s}\), which are illustrations and not measurements of any system. Then \(m_{1/2}=18.75\) KB. One double (8 bytes) takes \(1.5\ \mu\mathrm{s}\), a rate of 5.3 MB/s, 0.04 % of the bandwidth; a message of 1 MB takes \(1.5+80=81.5\ \mu\mathrm{s}\), a rate of 12.3 GB/s, 98 % of it. The latency of 1.5 µs is 11.5 times the DRAM latency of 130 ns that this chapter measured, so the memory of another node is one more level of the hierarchy, larger and slower than the local DRAM, and the locality arguments of the earlier sections apply to it with a larger penalty.</p>
+<p><strong>The matrix sum on \(p\) nodes.</strong> Distribute the \(N\times N\) matrix of the running case over \(p\) nodes by blocks of \(N/p\) rows. Each node sums its \(N^2/p\) elements at the row-order rate \(t_{\text{elt}}\), and the \(p\) partial sums are combined by a reduction in \(\lceil\log_2p\rceil\) rounds of one 8-byte message each (chapter 15 derives the reduction trees). If the data already lie distributed,</p>
+\[
+T_p=\frac{N^2}{p}\,t_{\text{elt}}+\lceil\log_2p\rceil\,(\alpha+8\beta). \tag{7.11}
+\]
+<p>With \(N=4096\), the sample row-order time \(t_{\text{elt}}=0.79\) ns (one thread of this machine, standing for a node) and the assumed \(\alpha\) and \(\beta\): \(T_1=16\,777\,216\times0.79\ \mathrm{ns}=13.25\) ms; for \(p=64\), the compute time is 0.207 ms, the reduction is \(6\times(1.5\ \mu\mathrm{s}+0.64\ \mathrm{ns})=9.0\ \mu\mathrm{s}\), and \(T_{64}=0.216\) ms, a speedup of 61.3 and an efficiency of 0.96. The result depends on where the data are. If the matrix starts on one node, that node must send \((p-1)/p\) of its \(8N^2=134.2\) MB through its own link, and the time cannot be less than \(\tfrac{63}{64}\times134.2\ \mathrm{MB}\times\beta=10.57\) ms. Then \(T_{64}\ge10.57+0.207+0.009=10.79\) ms, a speedup of 1.23. Moving the data takes 80 % as long as summing them on one node. The cluster pays off only if the data are produced where they are used, which is the distributed-memory form of the first-touch rule of the previous section. The same arithmetic shows why the clusters of the lecture scale: each node brings its own memory system, so the aggregate memory bandwidth grows in proportion to \(p\), whereas the bandwidth of a shared bus is divided among the processors, (7.9).</p>
+<p><strong>Availability.</strong> The lecture's claim of high availability concerns a service that continues when a node fails. For independent node failures with exponentially distributed times and a mean time between failures \(\Theta\) per node, the failure rate of \(p\) nodes is \(p/\Theta\) and the system fails on average every \(\Theta/p\). For \(p=10\,000\) and an assumed \(\Theta=5\) years \(\approx43\,800\) h that is 4.4 h. A job whose processes depend on one another does not survive the loss of one of them unless the program has saved its state, so the claim holds for a service that moves work to another node and not for a tightly coupled job without checkpoints. The model and the value of \(\Theta\) are assumptions of this chapter.</p>
+<p><strong>Topology and bisection width.</strong> The lecture treats the network as one switching fabric. The shape of the fabric limits how much data can cross it, and a number summarises the limit. Remove links from a network of \(p\) nodes until it falls into two halves of \(p/2\) nodes. The smallest number of links that must be removed over all such splits is the <em>bisection width</em> \(\omega\). The program finds it by exhaustive search over all splits of 16 nodes for five topologies, together with the number of links and the diameter (the largest number of links on a shortest path between two nodes). The search is deterministic, and the check is exact. This subsection is an extension of the chapter's author: the lecture does not mention topologies.</p>
+<pre><code class="language-python" data-file="topology.py" data-run="python3 topology.py">"""Bisection width, diameter and link count of interconnection networks, by exhaustive search for 16 nodes.
+
+Bisection width: the fewest links whose removal splits the nodes into two halves of equal size.
+"""
+from itertools import combinations
+from collections import deque
+
+
+def ring(n):
+    return {frozenset((i, (i + 1) % n)) for i in range(n)}
+
+
+def grid(rows, cols, wrap):
+    edges = set()
+    for r in range(rows):
+        for c in range(cols):
+            if c + 1 &lt; cols or wrap:
+                edges.add(frozenset((r * cols + c, r * cols + (c + 1) % cols)))
+            if r + 1 &lt; rows or wrap:
+                edges.add(frozenset((r * cols + c, ((r + 1) % rows) * cols + c)))
+    return edges
+
+
+def hypercube(d):
+    return {frozenset((v, v ^ (1 &lt;&lt; b))) for v in range(1 &lt;&lt; d) for b in range(d)}
+
+
+def complete(n):
+    return {frozenset(e) for e in combinations(range(n), 2)}
+
+
+def bisection(n, edges):
+    best = len(edges)
+    for rest in combinations(range(1, n), n // 2 - 1):     # node 0 is always in the first half
+        half = {0, *rest}
+        best = min(best, sum((a in half) != (b in half) for a, b in map(tuple, edges)))
+    return best
+
+
+def diameter(n, edges):
+    adj = {v: [] for v in range(n)}
+    for a, b in map(tuple, edges):
+        adj[a].append(b)
+        adj[b].append(a)
+    worst = 0
+    for s in range(n):
+        dist, queue = {s: 0}, deque([s])
+        while queue:
+            v = queue.popleft()
+            for w in adj[v]:
+                if w not in dist:
+                    dist[w] = dist[v] + 1
+                    queue.append(w)
+        worst = max(worst, max(dist.values()))
+    return worst
+
+
+print(f"{'topology':&lt;18} {'nodes':&gt;5} {'links':&gt;5} {'diameter':&gt;8} {'bisection':&gt;9}  formula for the bisection width")
+cases = [
+    ("ring", 16, ring(16), "2"),
+    ("4 x 4 mesh", 16, grid(4, 4, False), "sqrt(n) = 4"),
+    ("4 x 4 torus", 16, grid(4, 4, True), "2 sqrt(n) = 8"),
+    ("hypercube, d = 4", 16, hypercube(4), "n/2 = 8"),
+    ("fully connected", 16, complete(16), "n^2/4 = 64"),
+]
+for name, n, edges, formula in cases:
+    print(f"{name:&lt;18} {n:5d} {len(edges):5d} {diameter(n, edges):8d} {bisection(n, edges):9d}  {formula}")
+</code></pre>
+<pre><code class="output">topology           nodes links diameter bisection  formula for the bisection width
+ring                  16    16        8         2  2
+4 x 4 mesh            16    24        6         4  sqrt(n) = 4
+4 x 4 torus           16    32        4         8  2 sqrt(n) = 8
+hypercube, d = 4      16    32        4         8  n/2 = 8
+fully connected       16   120        1        64  n^2/4 = 64</code></pre>
+<p>The values agree with the formulas stated in the last column for \(p=16\): a ring has \(\omega=2\), a \(\sqrt p\times\sqrt p\) mesh \(\sqrt p\), the torus (the mesh with wrap-around links) \(2\sqrt p\), the hypercube \(p/2\) and the fully connected network \(p^2/4\). The program verifies \(p=16\) only; the formulas for other \(p\) are the standard ones and are not proved here. The cost grows with the bisection width: 16 links for the ring against 32 for the torus and the hypercube and 120 for the fully connected network, while the diameter falls from 8 to 4 and 1. A bound on the time of a communication pattern follows. If each node of one half sends \(m\) bytes to a node of the other half, \(pm/2\) bytes cross the cut. The cut has \(\omega\) links, each carrying \(1/\beta\) bytes per second in each direction, so</p>
+\[
+T\ \ge\ \frac{p\,m\,\beta}{2\,\omega}. \tag{7.12}
+\]
+<p>For \(p=1024\), \(m=1\) MB and the assumed \(1/\beta=12.5\) GB/s, (7.12) gives 20.5 ms for a ring (\(\omega=2\)), 0.64 ms for a \(32\times32\) torus (\(\omega=64\)) and 0.08 ms for a hypercube of dimension 10 (\(\omega=512\)); the hypercube needs 5120 links and 10 per node, the torus 2048 links and 4 per node, and the fully connected network would need 523 776 links. Large clusters use another design, the fat tree. Al-Fares et al. (2008, §3, p. 66) show that a fat tree built from \(k\)-port switches connects \(k^3/4\) hosts, which is 27 648 hosts for \(k=48\), and they define the <em>oversubscription</em> of a network as the ratio of the worst-case aggregate bandwidth that the hosts can achieve to the total bisection bandwidth (§2.1, p. 64); a ratio of 1:1 means that every host can communicate with any other at the full rate of its interface. Bound (7.12) is a lower bound for one pattern. It ignores the latency that grows with the number of hops, the contention of several flows on one link and the routing that a real network uses. Chapter 10 treats the organisation of large systems, and chapter 16 uses \(\alpha\) and \(\beta\) for the halo exchange of a domain decomposition.</p>
+<p>The lecture's offloading attribute has a concrete example in the SGI slide deck cited in the previous section: the hub chip of the Altix UV "offloads programming models MPI, UPC" and the interconnect has a "communications offload capability". The deck does not give the size of the effect, and the chapter has no measurement of offloading.</p>
+
+
+<h2 id="limits">What the models establish and what they do not</h2>
+<p>Table 7.3 lists the statements of the lecture that this chapter tested or could check, with the status that the checks gave them.</p>
+<div class="table-wrap"><table>
+<caption>Table 7.3. Statements of the lecture and their status in this chapter.</caption>
+<thead><tr><th scope="col">Statement of the lecture</th><th scope="col">Status</th><th scope="col">Evidence in this chapter</th></tr></thead>
+<tbody>
+<tr><td>Read time of SRAM "&gt; 10 ns", of DRAM "~ 40 ns".</td><td>Refined: device time against time seen by a program</td><td>Pointer chase on this machine: 1.2 to 1.5 ns (L1), 3.7 to 4.4 ns (L2), 123 to 162 ns (DRAM, five runs); the slide's figures describe neither level as a program sees it.</td></tr>
+
+<tr><td>Processors improve 52 % per year and memories 7 % per year (1980–2010).</td><td>Not verified</td><td>The opened sources do not state the rates. A constant 52 % for 30 years is \(2.9\times10^{5}\); the slide's curve ends near \(2\times10^{4}\).</td></tr>
+<tr><td>Interleaving overlaps memory delays.</td><td>Confirmed in a model, with a failure case</td><td>Rate \(\min(1,\kappa/\tau)\), (7.2), verified in 20 cases; a stride of 8 on 8 banks runs at the rate of one bank.</td></tr>
+<tr><td>A wider path fetches more data per access.</td><td>Confirmed for bandwidth, not for latency</td><td>The latency of a dependent access is unchanged by width or channels.</td></tr>
+
+<tr><td>The cache fetches a block of a few 32-bit words.</td><td>Refined</td><td>The line is 64 bytes (16 words, 8 doubles); the knee of <code>stride.c</code> is at a stride of 8 doubles.</td></tr>
+<tr><td>The dirty bit indicates non-coherency.</td><td>Refined</td><td>Dirty means written and not yet written back; it exists in a single-processor write-back cache (Drepper §3.2, p. 16).</td></tr>
+<tr><td>Mapping schemes: direct, \(n\)-way, fully associative (not developed).</td><td>Developed</td><td>\(M=baS\); conflict capacity \(aS/\gcd(S,\sigma)\), (7.5); 4.2 times difference in time between \(N=500\) and \(N=512\).</td></tr>
+<tr><td>Hit rate, hit time and miss penalty describe cache efficiency.</td><td>Confirmed; the average time is exact only for dependent accesses</td><td>For the sums at \(N=4096\) the serial prediction is 22 and 9.5 times the measured time; implied concurrency 20.6 and 9.4 lines.</td></tr>
+<tr><td>The coherency problem is avoided by write-through, with snooping.</td><td>Correct but costly; most caches are write-back with MESI</td><td>2000 memory writes against 2 ownership requests for private lines; for alternating writers, 2000 ownership requests and 1999 line transfers (<code>coherence.py</code>).</td></tr>
+<tr><td>SMP is limited to about 64 processors.</td><td>Not verified</td><td>No opened source states the number; the bandwidth argument gives \(p^{*}=B_{\text{bus}}/g\), (7.9).</td></tr>
+<tr><td>Altix ICE 8400 (&gt; 64K cores) is an example of NUMA.</td><td>Refined: the core count agrees with the vendor text, the NUMA label does not</td><td>SGI describes the ICE 8400 as an InfiniBand scale-out blade platform scaling to 65,536 compute nodes (more than 64K cores for multi-core nodes); such a system is a cluster. The shared-memory NUMA product is the Altix UV (256 sockets, 16 TB).</td></tr>
+
+<tr><td>A cluster node can fail without loss of service.</td><td>True for services; qualified for coupled jobs</td><td>System mean time between failures \(\Theta/p\): 4.4 h for \(p=10\,000\), \(\Theta=5\) years (assumed).</td></tr>
+</tbody></table></div>
+<p>The models establish the following results. A fully associative LRU cache hits exactly when the reuse distance is below its capacity (Theorem 1, checked on ten cases of two traces). A set-associative cache retains a constant-stride pattern only up to \(aS/\gcd(S,\sigma)\) lines (Lemma 2), and this predicts the L1d miss rates of the row-order and column-order sums, as two simulators agree, and the direction of the L2 and L3 results. The average memory access time \(t_h+m_rt_m\) describes dependent accesses. For independent accesses the time per element is bounded below by \(\mu L/c\), and the concurrency \(c\) must be measured. The interleaved-bank rate is \(\min(1,\kappa/\tau)\). The mean latency under non-uniform memory access is \(t_{\text{loc}}(1+r(\rho-1))\). The message time is \(\alpha+\beta m\), and the bisection width of a network bounds the time of a pattern that crosses it. The coherence traffic of a line depends on how the writes of the cores alternate.</p>
+<p>The models leave out much. Replacement is LRU; real processors use approximations of it that the opened sources do not specify, and a cyclic scan over one line more than the capacity defeats exact LRU entirely (exercise 3). The simulators model reads only, one line size, no hardware prefetch, no translation of virtual addresses (page tables and the translation lookaside buffer, which add time that grows with the working set), and no write traffic of the matrix sum. The L2 and L3 are indexed by virtual line number; the hardware L2 is physically indexed and the L3 hashes addresses over slices, so L2 and L3 results are directional. The coherence model has two cores and one line, snooping and no directory, and it says nothing about the order in which writes to different locations become visible (chapter 13). The overlap bound (7.7) has an unmeasured concurrency, and the chapter does not separate the out-of-order execution of the loop from the prefetchers.</p>
+<p>The measurements have their own limits. They come from one machine, a hybrid processor in a virtual machine, with other jobs running; the thread may run on a performance core or an efficient core, so run-to-run variation is large (the ratio of column to row order at \(N=2048\) ranged from 10.7 to 19.1). The pointer chase does not show an L3 plateau, and the chapter has no explanation of it. The sizes and associativities are those that the guest reports, and the guest's view is synthetic. This machine has one NUMA node, so the NUMA factor was not measured and the NUMA section is a model plus documentation. The values \(\alpha=1.5\ \mu\mathrm{s}\), \(1/\beta=12.5\) GB/s, \(\rho=1.5\) and \(\Theta=5\) years are assumptions used for arithmetic, not data about any system, and the cluster results that depend on them (the speedups of 61.3 and 1.23, the bisection times, the system failure interval) are illustrations of the models. The topology program verifies \(p=16\) only. The hierarchy below the main memory (flash, disk, remote storage), virtual memory, high-bandwidth memories and the memory of accelerators are not treated: chapter 10 treats the memory wall, the STREAM measurement and the roofline model, chapter 21 the memory types of GPUs.</p>
+
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> An \(N\times N\) matrix of doubles with \(N=512\) is stored with a row length (leading dimension) of \(\mathrm{ld}\) doubles, \(\mathrm{ld}\ge N\), and is summed in column order. Take \(\mathrm{ld}\) to be a multiple of 8, so that the row stride is a whole number \(\sigma=\mathrm{ld}/8\) of 64-byte lines. (a) Use Lemma 2 to derive the condition on \(\sigma\) under which all 512 lines of a column survive in the L1d (\(a=12\), \(S=64\)) until the next column. (b) List the values of \(\mathrm{ld}\) between 512 and 576 that satisfy it. (c) Derive the corresponding condition for the L2 (\(a=10\), \(S=2048\)) and say which of the values of \(\mathrm{ld}\) from (b) and of \(\mathrm{ld}\in\{512,528,576\}\) satisfy it.</p>
+<details><summary>Solution</summary>
+<p>(a) Lemma 2 requires \(K=512\le aS/\gcd(S,\sigma)=768/\gcd(64,\sigma)\). The gcd of 64 with any integer is a power of 2, and \(768/2=384\lt512\), so the condition holds if and only if \(\gcd(64,\sigma)=1\): \(\sigma\) must be odd. (The condition \(N\le768\) of Theorem 1 is met.) (b) \(\mathrm{ld}=8\sigma\) with \(\sigma=65,\dots,72\) and \(\sigma\) odd gives \(\mathrm{ld}=520,536,552,568\). The even values fail: \(\sigma=66\) (\(\mathrm{ld}=528\)) has \(\gcd=2\) and \(C_{\mathrm{eff}}=384\); \(\sigma=68\) has 192; \(\sigma=72\) (\(\mathrm{ld}=576\)) has \(\gcd=8\) and 96; and \(\sigma=64\) (\(\mathrm{ld}=512\)) has 12. (c) For the L2, \(512\le10\times2048/\gcd(2048,\sigma)\) means \(\gcd(2048,\sigma)\le40\), that is, \(\gcd\le32\), so \(\sigma\) may be divisible by 32 but not by 64. \(\sigma=64\) (\(\mathrm{ld}=512\)) has \(\gcd=64\) and fails, with \(C_{\mathrm{eff}}=320\). \(\sigma=66\) (528) has \(\gcd=2\) and \(\sigma=72\) (576) has \(\gcd=8\); both pass, with 10240 and 2560 lines. In the L1 only \(\mathrm{ld}=520\), 536, 552 and 568 keep the column; in the L2 every \(\mathrm{ld}\) of the list except 512 does. The prediction for a column-order sum of the four values 512, 520, 528 and 576 is therefore: 512 is served by the L3 or memory, 528 and 576 are served by the L2, and 520 hits in the L1.</p>
+</details>
+<p><strong>Exercise 2 (compute).</strong> A program has an L1 miss rate of 4 % and an L2 local miss rate of 25 %. The L1 hit time is \(t_1=1.2\) ns, an L2 hit adds \(t_2=2.5\) ns, and a memory access adds \(t_{\text{mem}}=126\) ns. (a) Compute the average memory access time with (7.6) (two cache levels). (b) Compute it if the L2 local miss rate is halved. (c) Compute it if the L1 miss rate is halved instead. (d) Which change is better, and by how much of the miss penalty?</p>
+<details><summary>Solution</summary>
+<p>With two cache levels (7.6) reads \(\mathrm{AMAT}=t_1+m_1(t_2+m_2t_{\text{mem}})\). (a) \(t_2+m_2t_{\text{mem}}=2.5+0.25\times126=34.0\) ns and \(\mathrm{AMAT}=1.2+0.04\times34.0=1.2+1.36=2.56\) ns, 2.1 times the hit time. (b) \(2.5+0.125\times126=18.25\) ns and \(\mathrm{AMAT}=1.2+0.04\times18.25=1.93\) ns. (c) \(\mathrm{AMAT}=1.2+0.02\times34.0=1.88\) ns. (d) The miss term \(m_1(t_2+m_2t_{\text{mem}})\) of (a) is 1.36 ns. Halving \(m_1\) removes 0.68 ns of it. Halving \(m_2\) removes \(0.04\times15.75=0.63\) ns. The two changes are nearly equal, and halving \(m_1\) is better by 0.05 ns, because \(m_1\) multiplies the whole penalty of the next level and \(m_2\) multiplies only its memory part.</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> A student claims: "A fully associative cache with LRU replacement never has more misses than a direct-mapped cache of the same capacity." Give a trace that refutes the claim and compute the numbers for a cache of \(C=8\) lines.</p>
+<details><summary>Solution</summary>
+<p>Take the cyclic trace of \(C+1=9\) lines, \(0,1,\dots,8,0,1,\dots,8,\dots\), repeated 100 times (900 accesses). Every access after the first pass has the reuse distance 8, since the 8 other lines are used in between. By Theorem 1 the fully associative LRU cache of \(C=8\) lines hits only if \(d\lt8\), so it misses on all 900 accesses. The direct-mapped cache has 8 sets, and line \(\ell\) goes to set \(\ell\bmod8\). Lines 1 to 7 are alone in their sets and hit after their first miss. Lines 0 and 8 share set 0 and evict each other, so each pass has 2 misses. The misses are \(9\) in the first pass and \(2\) in each of the other 99 passes: \(9+198=207\). A short simulation of both caches (not part of the listings) gave 900 and 207. The claim is false because LRU evicts the line that a cyclic scan needs next, while the direct-mapped cache happens to keep seven of the nine lines. The pointer chase of the section on locality is this trace, and the sharp step at the cache size is the same effect: a working set of \(C+1\) lines misses on every access.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> A student runs a latency-bound loop over a large array on a machine with 2 sockets and 8 threads per socket, with equal static shares of the iterations. The array was initialised by thread 0 before the loop. The speedup of the 16 threads over one thread is 9.8, and the student expected about 16. Assume for the arithmetic that a thread on the node that holds the array has the miss time \(t_{\text{loc}}\), that the NUMA factor is \(\rho=1.6\) (hypothetical numbers, not a measurement), and that nothing else limits the loop. (a) Name the assumption of the student's expectation that fails. (b) Compute the speedup that the model predicts. (c) Compute it if the array is initialised by the 16 threads with the same assignment as the loop, and if its pages are interleaved evenly over the two nodes.</p>
+<details><summary>Solution</summary>
+<p>(a) The expectation \(T_{16}=T_1/16\) assumes uniform memory access: every thread proceeds at the speed of the thread that was measured alone. Under the policy "local allocation" the thread that first touches a page decides its node (section on shared memory), so the whole array lies on the node of thread 0. (b) The 8 threads on that node have \(r=0\) and a miss time \(t_{\text{loc}}\). The 8 threads on the other node have \(r=1\) and by (7.8) a miss time \(\rho\,t_{\text{loc}}=1.6\,t_{\text{loc}}\). With equal shares of the work, the loop ends when the slowest thread ends, so the time is 1.6 times that of an all-local run, and the speedup is \(16/1.6=10.0\), against the measured 9.8 (the same structure as \(S_p=p\,v_{\min}\) of chapter 11, with \(v_{\min}=1/\rho\)). (c) With parallel initialisation every thread has \(r=0\) and the speedup is 16. With interleaved pages every thread has \(r=\tfrac12\), the miss time is \(t_{\text{loc}}(1+0.5\times0.6)=1.3\,t_{\text{loc}}\) for every thread, and the speedup is \(16/1.3=12.3\). The model assumes a latency-bound loop. A loop limited by the bandwidth of the inter-socket link would give other numbers.</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> A time step of a simulation needs, in each process, \(10^{5}\) values of 8 bytes that lie in the memory of other processes; the indices of the values are known at the start of the step. Compare (i) a cluster with the assumed \(\alpha=1.5\ \mu\mathrm{s}\) and \(1/\beta=12.5\) GB/s that fetches the values one at a time, with the requests serialised, each fetch being a request message and a reply message of 8 bytes; (ii) the same cluster with all requests batched into one request message (4 bytes per index) and one reply message; (iii) a NUMA machine with \(t_{\text{loc}}=130\) ns and an assumed \(\rho=2.5\), fetching the values (a) one after another and (b) with 10 reads in flight at a time. Give the time of the communication part of the step for each and say which design to choose. Then say what changes if each index depends on the value fetched before it.</p>
+<details><summary>Solution</summary>
+<p>(i) Each fetch is a request and a reply, \(2(\alpha+8\beta)\approx3.0\ \mu\mathrm{s}\), so \(10^{5}\) serialised fetches take 300 ms. (ii) The request message has \(4\times10^{5}\) bytes: \(\alpha+\beta m=1.5\ \mu\mathrm{s}+4\times10^{5}\times80\ \mathrm{ps}=1.5+32=33.5\ \mu\mathrm{s}\). The reply has \(8\times10^{5}\) bytes: \(1.5+64=65.5\ \mu\mathrm{s}\). The total is 99 µs, which is about 3030 times shorter than (i). (iii) A remote read takes \(2.5\times130=325\) ns. (a) Reads one after another take \(10^{5}\times325\ \mathrm{ns}=32.5\) ms; (b) with 10 in flight the bound \(\mu L/c\) of (7.7) gives 3.25 ms. If the indices are known in advance, the batched cluster (99 µs) is 33 times faster than the NUMA machine with overlap (3.25 ms), and the choice is the cluster, with the cost that the programmer must collect the indices and exchange them. If each index depends on the value fetched before it, batching is impossible: the cluster needs \(10^{5}\) dependent request–reply pairs, at least 300 ms, against 32.5 ms for the NUMA machine, so the NUMA machine is 9.2 times faster, and the choice reverses. The decision depends on whether the access pattern allows batching, not on the nominal bandwidth of either machine. The numbers are those of assumed parameters.</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement).</strong> Change the column-order sum of <code>rowcol.c</code> to use a leading dimension: allocate \(N\times\mathrm{ld}\) doubles and read <code>a[i * ld + j]</code>. For \(N=512\) and \(\mathrm{ld}\in\{512,520,528,576\}\), predict the order of the four times with the result of exercise 1, run the program, and compare. State what the measurement can and cannot distinguish.</p>
+<details><summary>Solution</summary>
+<p>The change is the signature <code>sum_cols(const double *a, int n, int ld)</code>, the index <code>(size_t)i * ld + j</code>, the allocation <code>malloc((size_t)n * ld * sizeof(double))</code> and a fill loop over all \(N\times\mathrm{ld}\) elements. The prediction of exercise 1 is: 512 slowest (served by the L3 or memory), then 528 and 576 (served by the L2), and 520 fastest (hits in the L1). The simulator of the section on the cache, run with the row length \(N+8=520\) instead of \(N\), gives the miss rates 0.1250 in all three levels for the column order at \(N=512\), which is the compulsory rate. In three runs of the changed program (minimum of 7 repetitions each) the column-order times in ns per element were: \(\mathrm{ld}=512\): 2.29, 2.78, 2.40; 520: 1.09, 0.83, 0.62; 528: 0.91, 1.33, 0.76; 576: 0.96, 1.07, 0.79. The measurement separates 512 from the other three: within each run its time is 2.1 to 3.9 times theirs, and the model says that the L3 serves it. It does not separate 520 from 528 and 576: the three ranges, 0.62 to 1.09, 0.76 to 1.33 and 0.79 to 1.07 ns, overlap. This agrees with the model only in part. The model says that 528 and 576 are served by the L2 and 520 by the L1, and the section on hit rate showed that an L2-served column costs only 1.2 to 1.7 times a row, a difference of the size of the run-to-run variation. The prediction of the order of the last three values is therefore not tested by this measurement.</p>
+</details>
+
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li>Recording: <a href="https://www.youtube.com/watch?v=iBMlMcT2Q_4">W2L5, Hierarchical Memory Systems and Scalable Architectures in Large-Scale Computing</a> (slides: memory technologies primer, processor and memory speeds, how to bridge the gap, locality, memory hierarchy, inside a cache, basic architecture of a cache, cache controller, cache read algorithm, cache mapping, cache efficiency, cache coherency problem, SMP, UMA and NUMA, why NUMA is needed, NUMA implementation, benefits of cluster, attributes of an HPC network), NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay, 2025.</li>
+<li>U. Drepper, <a href="https://akkadia.org/drepper/cpumemory.pdf">"What every programmer should know about memory"</a>, version 1.0 (2007). §2.1.1–2.1.2, pp. 5–6: the six-transistor SRAM cell and the one-transistor, one-capacitor DRAM cell, refresh every 64 ms, "the (quite dramatic) difference in cost wins"; §3.2, pp. 15–16: 64-byte lines, split of an address into tag, set and offset, dirty line, the rules that a dirty line is in no other cache and clean copies may be in many, and the cycle counts 1, 3, 14 and 240 of a Pentium M; Figure 3.4, p. 17: three plateaus of access time; §3.3.1, pp. 17–19: fully associative, direct-mapped and set-associative caches, the relation cache size = line size × associativity × number of sets, Table 3.1 and the 44 % saving from 2-way associativity for an 8 MB cache, little gain above 8 ways; §3.3.2, pp. 20–21: the working-set measurement; §3.3.3, p. 25: write-through and write-back; §3.3.4, pp. 25–27: MESI and its transitions, request for ownership, and the measured slowdowns of up to 34 % (read) and 93 % (increment) on four processors with a shared bus; §5.1–5.2, pp. 42–44: NUMA factor, SGI's Altix as a NUMA machine, clusters that "are no NUMA machines", and the default striping of memory in 2007.</li>
+<li>P. J. Denning, <a href="https://denninginstitute.com/pjd/PUBS/CACMcols/cacmJul05.pdf">"The Locality Principle"</a>, Communications of the ACM 48(7) (2005) 19–24. p. 23: locality defined from 1980 by a distance \(D(x,t)\le T\), with the time since the last reference as the temporal distance and the number of addresses away as the spatial distance; the working set \(W(t,T)\).</li>
+<li>Y. H. Kim, M. D. Hill and D. A. Wood, <a href="https://ftp1.cs.wisc.edu/markhill/Papers/sigmetrics91_fully_assoc.pdf">"Implementing stack simulation for highly-associative memories"</a> (University of Wisconsin–Madison, 1991; extended abstract as distributed at the site). Introduction: Mattson et al.'s stack simulation applies to LRU memories with the same number of sets, and "the first k elements of the stack give the blocks in a memory of size k blocks"; a reference is "to stack distance k if it accesses the k-th block in the stack". Used as the secondary pointer to R. L. Mattson, J. Gecsei, D. R. Slutz and I. L. Traiger, "Evaluation techniques for storage hierarchies", IBM Systems Journal 9(2) (1970) 78–117, which was not opened.</li>
+<li>P. H. J. Kelly, <a href="https://www.doc.ic.ac.uk/~phjk/AdvancedCompArchitecture/Lectures/pdfs/Ch04-part1-MoreOnCaches-MissRateReduction-Hardware.pdf">Advanced Computer Architecture, chapter 4, part 1: caches and memory systems</a>, Imperial College London (lecture notes dated October 2026, partly based on Hennessy and Patterson). \(\mathrm{AMAT}=\mathrm{HitTime}+\mathrm{MissRate}\times\mathrm{MissPenalty}\), cited there to Hennessy and Patterson, 6th edition, appendix B.3, p. B22, and the classification of misses as compulsory, capacity and conflict (with coherence as a possible fourth). Hennessy and Patterson's book itself was not opened.</li>
+<li>W. A. Wulf and S. A. McKee, "Hitting the memory wall: implications of the obvious", ACM SIGARCH Computer Architecture News 23(1) (1995) 20–24. Cited for the title only. The bibliographic data were checked in Crossref; the paper could not be opened (the library copy answered with an empty page, the publisher's page with a refusal). A. Ertl, <a href="https://www.complang.tuwien.ac.at/anton/memory-wall.html">"The Memory Wall Fallacy"</a>, was opened and is cited for its description of the paper's argument (compulsory misses inevitable, a fixed miss probability) and for its own criticism.</li>
+<li>The Linux kernel documentation, <a href="https://docs.kernel.org/admin-guide/mm/numa_memory_policy.html">NUMA memory policy</a>, read 2026-10-26: the system default policy once the system is running is "local allocation", an allocation on the node of the processor where it takes place; during boot the default interleaves across nodes.</li>
+<li>M. Al-Fares, A. Loukissas and A. Vahdat, <a href="http://ccr.sigcomm.org/online/files/p63-alfares.pdf">"A scalable, commodity data center network architecture"</a>, ACM SIGCOMM 2008, pp. 63–74. §2.1, p. 64: the definition of oversubscription against the bisection bandwidth; §3, p. 66: a fat tree built from \(k\)-port switches supports \(k^3/4\) hosts; the abstract: 48-port switches give full bisection bandwidth for up to 27 648 hosts.</li>
+<li>SGI, press text on the Altix ICE 8400 as reprinted by <a href="https://scientific-computing.com/press-releases/altix-ice-8400">Scientific Computing World</a> (undated page). "Scale-out" blade platform, quad data rate InfiniBand, up to 128 processors (1,536 cores) per cabinet, up to 65,536 compute nodes. R. Wolff, <a href="https://indico.desy.de/event/3878/contributions/68457/attachments/44738/55009/SGI-Wolff-ZKI_UV.pdf">SGI Altix Ultraviolet</a>, slides (SGI; undated): UV 1000 with a single system image of up to 256 sockets and 16 TB of shared memory over NUMAlink 5, up to 32768 sockets in the hybrid configuration, hub offload of MPI and UPC. Both are vendor material, not datasheets.</li>
+<li>Intel, <a href="https://www.intel.com/content/www/us/en/products/sku/132222/intel-core-i512450h-processor-12m-cache-up-to-4-40-ghz/specifications.html">Intel Core i5-12450H processor specifications (ARK)</a>, read 2026-10-26: 8 cores (4 performance, 4 efficient), 12 threads, 12 MB Intel Smart Cache, at most 2 memory channels, memory types DDR5 4800, DDR4 3200, LPDDR5 5200 and LPDDR4x 4267 MT/s, launched Q1 2022; no memory bandwidth figure.</li>
+<li>ServeTheHome, <a href="https://www.servethehome.com/intel-12th-gen-core-alder-lake-details-at-intel-innovation-2021/">Intel 12th Gen Core Alder Lake details at Intel Innovation 2021</a>. Each performance core has 1.25 MB of L2 cache and each cluster of four efficient cores shares 2 MB of L2. A secondary source, used only to list the core type as a candidate cause of the missing L3 plateau; the Intel optimization manual was not opened.</li>
+<li>Other chapters of this book, cited for material not repeated here: chapter 6 (processor, pipelines, latency and throughput of instructions), chapter 10 (memory wall, STREAM, roofline, organisation of large systems), chapter 11 (the machine, false sharing, \(S_p=p\,v_{\min}\)), chapter 13 (memory model), chapters 14 and 15 (\(\alpha\)–\(\beta\) fit, reduction trees), chapter 16 (halo exchange and the \(\alpha\)–\(\beta\) cost of decomposition), chapter 21 (GPU memory).</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-06-hpc-components-and-node-architecture.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-08-concurrency-and-synchronization.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

@@ -1,0 +1,446 @@
+{
+  "chapter": 7,
+  "title": "Hierarchical memory and scalable architectures",
+  "status": "revised after review round 2",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "iBMlMcT2Q_4",
+      "label": "W2L5",
+      "playlist_index": 13,
+      "duration_seconds": 2222
+    }
+  ],
+  "frames_viewed": {
+    "iBMlMcT2Q_4": [
+      "f0003",
+      "f0004",
+      "f0013",
+      "f0015",
+      "f0017",
+      "f0025",
+      "f0035",
+      "f0038",
+      "f0041",
+      "f0043",
+      "f0046",
+      "f0047",
+      "f0048",
+      "f0049",
+      "f0051",
+      "f0053",
+      "f0055",
+      "f0056",
+      "f0057",
+      "f0058",
+      "f0061",
+      "f0063",
+      "f0064",
+      "f0065",
+      "f0066",
+      "f0067",
+      "f0069"
+    ]
+  },
+  "lecture_corrections": [
+    "Dirty bit: the lecture says the dirty bit indicates non-coherency in multiprocessor systems. Drepper (2007, 3.2, p. 16) defines a dirty line as written and not yet written back, which occurs in a single-processor write-back cache. The chapter separates the write policy from coherence.",
+    "Memory speeds on the slide (SRAM '> 10 ns', DRAM '~ 40 ns') are device times. Pointer-chase measurements on this machine give 1.2 to 1.5 ns (L1), 3.7 to 4.4 ns (L2) and 123 to 162 ns (DRAM) as seen by a program (five runs, one 267 ns outlier excluded). Both are recorded with what each measures.",
+    "Cache block: the lecture's example block is a few words. The line of this machine is 64 bytes (16 words of 32 bits, 8 doubles), reported by sysfs and visible as the knee of the stride benchmark at a stride of 8 doubles; Drepper (p. 15) gives 32 bytes for early caches and 64 bytes as the norm.",
+    "Slide 'Processor 52% annually, Memory 7% annually' (credited to rankred.com): the rates are not in the sources opened (Hennessy and Patterson, Wulf and McKee were not opened). A constant 52 % for 30 years is 2.9e5, but the plotted processor curve ends near 2e4 (read by eye), so the label cannot describe the whole period.",
+    "NUMA example: the slide gives 'SGI's Altix ICE 8400 (> 64K cores)' as a NUMA machine. The core count is consistent with SGI's text (up to 65,536 compute nodes with multi-core processors, 1,536 cores per 128 processors), but SGI describes the ICE 8400 as a scale-out blade platform with quad data rate InfiniBand, which is a cluster of nodes with separate memories and is not NUMA (Drepper p. 43). SGI's shared-memory NUMA product of that generation was the Altix UV (single system image of up to 256 sockets and 16 TB, NUMAlink 5). Sources are vendor press text and a vendor slide deck, not datasheets.",
+    "Write-through: the lecture presents write-through with snooping as the way to avoid the coherency problem. This works but sends every store to the bus; most caches are write-back with a protocol such as MESI (Drepper 3.3.3, p. 25). The chapter quantifies the difference (coherence.py).",
+    "SMP limit 'typically 64 processors': no source opened states this number; recorded as a lecture claim."
+  ],
+  "source_uncertainties": [
+    "Wulf and McKee (1995), 'Hitting the memory wall', ACM SIGARCH CAN 23(1) 20-24: the paper could not be opened (library copy returned an empty page behind a web firewall; the ACM page returned HTTP 403). Bibliographic data were checked in Crossref. The chapter cites the title only. Ertl's critique (opened) is cited for its description of the paper's argument; the paper's own growth rates were not read.",
+    "Hennessy and Patterson, Computer Architecture: A Quantitative Approach, was not opened. The AMAT formula and the three kinds of miss are cited to P. H. J. Kelly's Imperial College lecture notes (opened), which cite 6th edition appendix B.3, p. B22. The 52 %/7 % growth rates of the lecture slide are therefore unverified lecture claims.",
+    "Mattson, Gecsei, Slutz and Traiger (1970), IBM Systems Journal 9(2) 78-117, was not opened. The stack property is attributed to it through Kim, Hill and Wood (1991), whose extended abstract (opened) describes the stack and stack distance; Theorem 1 is proved in the chapter and checked by reuse.py.",
+    "SGI sources: the Altix ICE 8400 text is a press text reprinted on a web page that carries no date; the Altix UV material is an undated slide deck by an SGI employee that names the Nehalem-EX/Westmere-EX generation. Neither is a datasheet. The cores per ICE 8400 node were not stated; the lecture's '> 64K cores' agrees with the text by arithmetic (65,536 nodes with multi-core processors). That the ICE 8400 is a distributed-memory machine is the chapter's inference from 'scale-out blade platform' and InfiniBand, supported by Drepper p. 43.",
+    "The lecture's SMP limit of about 64 processors has no source among those opened. The chapter derives a bandwidth bound (p* = B_bus/g) and does not state a value.",
+    "Linux first-touch behaviour: the NUMA memory policy document (opened) states that the default policy is local allocation, an allocation on the node of the CPU where the allocation takes place. That a page is allocated when first touched (demand paging) is the author's statement and was not read in the document. Drepper (2007, 5.2, p. 44) describes striping as the 2007 default; the chapter prefers the current documentation and says so.",
+    "Intel ARK was read through a fetch agent on 2026-10-26 (8 cores, 4 P and 4 E, 12 threads, 12 MB Intel Smart Cache, at most 2 memory channels, four memory types, launched Q1 2022; no bandwidth figure). The installed memory type of the laptop was not determined, so no peak bandwidth is quoted.",
+    "Cache geometry (L1d 48 KiB 12-way, L2 1280 KiB 10-way, L3 12288 KiB 8-way, 64-byte lines) is what the WSL guest reports through sysfs for every logical processor; the guest's view is synthetic (6 cores x 2 threads reported for a 4P+4E processor). The simulators use these numbers. The L3 simulation uses modulo indexing; real L3 caches hash addresses over slices, so L3 results are directional. The physical address width was not determined; the tag-overhead example assumes 40 bits.",
+    "Timing measurements are noisy: hybrid core placement of the single thread, a virtual machine, and other jobs on the machine. Each timing listing prints the fifth of five runs; ranges quoted in the text are over those five runs. The sizes of effects are orders of magnitude, not precise values.",
+    "The pointer chase shows no L3 plateau (latency at 4 MiB is 107 to 126 ns, 0.8 to 1.0 times the DRAM latency at 16 MiB). The cause was not determined. Candidates: other jobs evicting L3 lines; address translation (in a virtual machine a TLB miss can need a walk of both the guest and the host page tables; no source for this was opened); a run on an efficient core, whose L2 is 2 MB shared by four cores (ServeTheHome; the E-core L1d size was not sourced) while the guest reports the performance-core geometry for every logical processor; or a higher L3 latency than assumed. A trial with madvise(MADV_HUGEPAGE) (65,536 kB of huge pages reported for a 64 MiB region) changed latencies by at most 22 % at every size in two sessions; the host may still map the region with 4 KiB pages, so the trial does not exclude translation. The trial is not part of the listings.",
+    "The rise of the chase latency before the L2 capacity (4.5 to 4.8 ns at 512 KiB, 7.0 to 9.1 ns at 1 MiB) has three untested candidates: limited associativity with physical page placement, first-level data TLB misses, and runs on an efficient core. The rise of the stride benchmark above the knee (1.3 to 1.7 times from stride 8 to 16) was not isolated (page crossings and prefetchers are candidates).",
+    "Cachegrind (Valgrind 3.22) was run with --D1=49152,12,64 and a 16 MiB 16-way LL because it needs a power-of-two number of sets in the last level; only the D1 read misses of the two summing functions were compared, so no second simulator checked an L2 or L3 count. The L1d index bits lie inside the 4 KiB page offset, so the virtual-address model is exact for the L1d; the hardware L2 is physically indexed and the L3 hashed, so the simulator's L2 and L3 results are directional. The Valgrind manual was not opened. The simulators differ by at most 5 misses in 31,500 (0.016 %); the excess of one miss in most Cachegrind counts and the deficit of five at N = 500 were not traced.",
+    "The concurrencies of the overlap section (20.6 and 9.4 lines in flight) are implied averages that assume every miss waits 130 ns; the processor's limit on outstanding misses and the behaviour of its prefetchers are not described by any source opened.",
+    "Values alpha = 1.5 microseconds, 1/beta = 12.5 GB/s, NUMA factor rho = 1.5 and 2.5, mean time between failures of 5 years per node, and independent exponential failures are assumptions used for arithmetic. The speedups 61.3 and 1.23, the bisection times and the failure interval of 4.4 h are illustrations of the models, not data.",
+    "Topology: topology.py verifies bisection width, diameter and link count for 16 nodes only; formulas for other sizes are the standard ones and are not proved. Al-Fares et al. (2008) were read for the abstract, section 2.1 (oversubscription definition, p. 64) and section 3 (k^3/4 hosts, p. 66) only.",
+    "Exercise 6 reports three runs of a variant of rowcol.c (leading dimension) that is not in the repository; the numbers are those runs.",
+    "The implied concurrency of the column-order sum at N = 4096 (9.4 lines) assumes that every miss goes to DRAM; a hashing 12 MiB L3 may hold the 256 KiB of one column between passes, in which case L is the unmeasured L3 latency and the concurrency is lower."
+  ],
+  "sections": [
+    {
+      "section": "The objects of the chapter and the running case",
+      "video_id": "iBMlMcT2Q_4",
+      "start": 6.0,
+      "end": 39.0,
+      "lecture_material": "Agenda of the lecture: memory technologies, hierarchy and cache, SMP, NUMA and cluster.",
+      "research_extension": "Intel ARK for the machine; guest sysfs for the cache geometry.",
+      "teaching_construction": "Formal model of lines, sets, ways, traces, UMA and NUMA, distributed memory; the row-order and column-order matrix sum as running case.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "Memory technologies, the processor-memory gap and two hardware remedies",
+      "video_id": "iBMlMcT2Q_4",
+      "start": 39.0,
+      "end": 592.0,
+      "lecture_material": "Table of SRAM, DRAM, flash, hard disk; read and write cycles; the gap; interleaving; wider paths.",
+      "research_extension": "Drepper 2.1 (cell structures, refresh, cost); Pentium M cycle counts; internal check of the 52 %/7 % plot.",
+      "teaching_construction": "Interleaved-bank rate min(1, kappa/tau) with proof and simulation (interleave.py); comparison of slide speeds with measured latencies.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Locality, reuse distance and the memory hierarchy",
+      "video_id": "iBMlMcT2Q_4",
+      "start": 271.0,
+      "end": 826.0,
+      "lecture_material": "Requirements, temporal and spatial locality, the hierarchy from registers to remote storage, hit and miss.",
+      "research_extension": "Denning (2005) locality as a distance; Mattson et al. stack property via Kim, Hill and Wood.",
+      "teaching_construction": "Reuse distance; Theorem 1 (hit iff distance < C) with proof and check (reuse.py); pointer-chase measurement of the hierarchy (chase.c).",
+      "evidence_class": "theorem"
+    },
+    {
+      "section": "Inside a cache: lines, tags, sets and the conflict capacity",
+      "video_id": "iBMlMcT2Q_4",
+      "start": 826.0,
+      "end": 1447.0,
+      "lecture_material": "Cache as buffer of lines, directory store, data, status bits, controller, read algorithm, mapping schemes named.",
+      "research_extension": "Drepper 3.2, 3.3.1 (address split, associativity, Table 3.1); Kelly notes (compulsory, capacity, conflict misses); Cachegrind check.",
+      "teaching_construction": "Line-size measurement (stride.c); Lemma 2 (conflict capacity aS/gcd(S, sigma)); three-level LRU simulator (cachesim.py); independent Cachegrind session; padding prediction.",
+      "evidence_class": "theorem"
+    },
+    {
+      "section": "Hit rate, average access time and the limit of the model",
+      "video_id": "iBMlMcT2Q_4",
+      "start": 1447.0,
+      "end": 1478.0,
+      "lecture_material": "Hit rate, hit time, miss penalty.",
+      "research_extension": "AMAT after Hennessy and Patterson via Kelly's notes; Little's law.",
+      "teaching_construction": "Multi-level AMAT; test against the sum loops; overlap bound t >= max(t_add, mu L / c) and implied concurrency; Table 7.1 (rowcol.c).",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "Writes, coherence and snooping",
+      "video_id": "iBMlMcT2Q_4",
+      "start": 1478.0,
+      "end": 1549.0,
+      "lecture_material": "Coherency problem, write-through, snooping.",
+      "research_extension": "Drepper 3.2, 3.3.3, 3.3.4 (write policies, MESI, RFO, shared-bus measurements).",
+      "teaching_construction": "MESI simulator with invariant check and traffic counts for four scenarios (coherence.py); link to false sharing of chapter 11.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Shared memory: SMP, UMA and NUMA",
+      "video_id": "iBMlMcT2Q_4",
+      "start": 1549.0,
+      "end": 1976.0,
+      "lecture_material": "Shared and distributed memory, SMP definition and diagram, UMA and NUMA, why NUMA is needed, NUMA implementation, Altix ICE 8400 example.",
+      "research_extension": "Drepper 5.1, 5.2 (NUMA factor, Altix, default policy in 2007); Linux NUMA memory policy documentation; SGI press text and slide deck.",
+      "teaching_construction": "NUMA mean latency model; bus saturation p* = B_bus/g; first-touch consequence; correction of the ICE 8400 example.",
+      "evidence_class": "product specification"
+    },
+    {
+      "section": "Clusters, the interconnect and the cost of distance",
+      "video_id": "iBMlMcT2Q_4",
+      "start": 1946.0,
+      "end": 2170.0,
+      "lecture_material": "Cluster definition and benefits, bandwidth, latency and offloading of the HPC network.",
+      "research_extension": "Al-Fares et al. 2008 (fat tree, oversubscription); SGI hub offload.",
+      "teaching_construction": "alpha-beta message model and half-bandwidth size; distributed matrix sum T_p; availability model; bisection-width table and bound (topology.py).",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "What the models establish and what they do not",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Claims of the lecture collected in Table 7.3.",
+      "research_extension": "None beyond the sections above.",
+      "teaching_construction": "Claims-status table; statement of what the models leave out.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Exercises",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "None.",
+      "teaching_construction": "Six exercises with solutions (derive, compute, counterexample, diagnose an assumption, design judgment, implementation and measurement).",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Primary sources",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Recording and slides.",
+      "research_extension": "All cited sources with the claim each supports.",
+      "teaching_construction": "None.",
+      "evidence_class": "definition"
+    }
+  ],
+  "references": [
+    {
+      "title": "U. Drepper, What every programmer should know about memory, version 1.0 (2007)",
+      "url": "https://akkadia.org/drepper/cpumemory.pdf",
+      "supports": "SRAM and DRAM cell structure and cost (pp. 5-6); 64-byte lines, address split, dirty line, coherence rules, Pentium M cycle counts (pp. 15-16); associativity and Table 3.1 (pp. 17-19); write policies (p. 25); MESI and shared-bus slowdowns (pp. 25-27); NUMA factor, Altix, clusters are not NUMA, 2007 default striping (pp. 42-44)",
+      "page_checked": "full text, pages as cited (printed page numbers equal PDF page numbers)"
+    },
+    {
+      "title": "P. J. Denning, The Locality Principle, Communications of the ACM 48(7), 2005, 19-24",
+      "url": "https://denninginstitute.com/pjd/PUBS/CACMcols/cacmJul05.pdf",
+      "supports": "Locality defined since 1980 by a distance D(x,t) <= T with temporal and spatial distances; working set W(t,T)",
+      "page_checked": "full text; the definition is on p. 23"
+    },
+    {
+      "title": "Y. H. Kim, M. D. Hill, D. A. Wood, Implementing stack simulation for highly-associative memories (University of Wisconsin-Madison, 1991)",
+      "url": "https://ftp1.cs.wisc.edu/markhill/Papers/sigmetrics91_fully_assoc.pdf",
+      "supports": "Mattson et al.'s stack simulation for LRU memories; the first k stack entries give the blocks of a memory of k blocks; definition of stack distance",
+      "page_checked": "introduction and section 2 of the extended abstract"
+    },
+    {
+      "title": "R. L. Mattson, J. Gecsei, D. R. Slutz, I. L. Traiger, Evaluation techniques for storage hierarchies, IBM Systems Journal 9(2), 1970, 78-117",
+      "url": "https://doi.org/10.1147/sj.92.0078",
+      "supports": "Origin of the stack property used in Theorem 1 (cited through Kim, Hill and Wood)",
+      "page_checked": "not opened"
+    },
+    {
+      "title": "P. H. J. Kelly, Advanced Computer Architecture, chapter 4 part 1, Imperial College London (lecture notes dated October 2026)",
+      "url": "https://www.doc.ic.ac.uk/~phjk/AdvancedCompArchitecture/Lectures/pdfs/Ch04-part1-MoreOnCaches-MissRateReduction-Hardware.pdf",
+      "supports": "AMAT = HitTime + MissRate x MissPenalty (citing Hennessy and Patterson 6th ed. appendix B.3, p. B22); compulsory, capacity and conflict misses",
+      "page_checked": "first slides (AMAT) and the 3 Cs slide"
+    },
+    {
+      "title": "J. L. Hennessy, D. A. Patterson, Computer Architecture: A Quantitative Approach, 6th ed., appendix B.3",
+      "url": "",
+      "supports": "Cited only through Kelly's notes",
+      "page_checked": "not opened"
+    },
+    {
+      "title": "W. A. Wulf, S. A. McKee, Hitting the memory wall: implications of the obvious, ACM SIGARCH Computer Architecture News 23(1), 1995, 20-24",
+      "url": "https://doi.org/10.1145/216585.216588",
+      "supports": "Title cited as the origin of the term memory wall; bibliographic data checked in Crossref",
+      "page_checked": "not opened"
+    },
+    {
+      "title": "A. Ertl, The Memory Wall Fallacy",
+      "url": "https://www.complang.tuwien.ac.at/anton/memory-wall.html",
+      "supports": "Description of the Wulf and McKee argument as assuming a fixed miss probability, and its criticism",
+      "page_checked": "full page"
+    },
+    {
+      "title": "The Linux kernel documentation, NUMA memory policy",
+      "url": "https://docs.kernel.org/admin-guide/mm/numa_memory_policy.html",
+      "supports": "System default policy once running is local allocation (allocation on the node of the CPU where it takes place); interleave during boot",
+      "page_checked": "system default policy and local allocation passages; read 2026-10-26"
+    },
+    {
+      "title": "M. Al-Fares, A. Loukissas, A. Vahdat, A scalable, commodity data center network architecture, ACM SIGCOMM 2008, 63-74",
+      "url": "http://ccr.sigcomm.org/online/files/p63-alfares.pdf",
+      "supports": "Oversubscription defined against bisection bandwidth (section 2.1, p. 64); a k-port fat tree supports k^3/4 hosts (section 3, p. 66); 48-port switches, 27,648 hosts at full bisection bandwidth (abstract)",
+      "page_checked": "abstract, sections 2.1 and 3"
+    },
+    {
+      "title": "SGI, Altix ICE 8400 press text, reprinted by Scientific Computing World (undated page)",
+      "url": "https://scientific-computing.com/press-releases/altix-ice-8400",
+      "supports": "Scale-out blade platform; quad data rate InfiniBand; up to 128 processors (1,536 cores) per cabinet; up to 65,536 compute nodes",
+      "page_checked": "full press text"
+    },
+    {
+      "title": "R. Wolff (SGI), SGI Altix Ultraviolet, slides (undated)",
+      "url": "https://indico.desy.de/event/3878/contributions/68457/attachments/44738/55009/SGI-Wolff-ZKI_UV.pdf",
+      "supports": "UV 1000 with single system image of up to 256 sockets and 16 TB shared memory over NUMAlink 5; up to 32768 sockets in the hybrid configuration; hub offload of MPI and UPC",
+      "page_checked": "text of the first slides and the product summary slide"
+    },
+    {
+      "title": "Intel Core i5-12450H processor specifications (ARK)",
+      "url": "https://www.intel.com/content/www/us/en/products/sku/132222/intel-core-i512450h-processor-12m-cache-up-to-4-40-ghz/specifications.html",
+      "supports": "8 cores (4 performance, 4 efficient), 12 threads, 12 MB Intel Smart Cache, at most 2 memory channels, supported memory types, launch Q1 2022",
+      "page_checked": "specifications page, read 2026-10-26 through a fetch agent"
+    },
+    {
+      "title": "ServeTheHome, Intel 12th Gen Core Alder Lake details at Intel Innovation 2021",
+      "url": "https://www.servethehome.com/intel-12th-gen-core-alder-lake-details-at-intel-innovation-2021/",
+      "supports": "Each performance core has 1.25 MB of L2 cache; each cluster of four efficient cores shares 2 MB of L2 (used only to list core-type placement as a candidate cause)",
+      "page_checked": "the passage on L2 sizes; a non-Intel secondary source; the Intel optimization manual was not opened"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "b",
+      "first_section": "model",
+      "definition": "line size in bytes (64 on this machine)"
+    },
+    {
+      "symbol": "a",
+      "first_section": "model",
+      "definition": "associativity: number of ways per set"
+    },
+    {
+      "symbol": "S",
+      "first_section": "model",
+      "definition": "number of sets of a cache"
+    },
+    {
+      "symbol": "C = aS",
+      "first_section": "model",
+      "definition": "capacity of a cache in lines"
+    },
+    {
+      "symbol": "M = abS",
+      "first_section": "model",
+      "definition": "capacity of a cache in bytes"
+    },
+    {
+      "symbol": "t_h, m_r, t_m, h",
+      "first_section": "model",
+      "definition": "hit time, miss rate, miss penalty, hit rate h = 1 - m_r"
+    },
+    {
+      "symbol": "AMAT",
+      "first_section": "model",
+      "definition": "average memory access time t_h + m_r t_m"
+    },
+    {
+      "symbol": "N",
+      "first_section": "model",
+      "definition": "side of the square matrix of the running case (n in the C listings)"
+    },
+    {
+      "symbol": "p",
+      "first_section": "model",
+      "definition": "number of processors, threads or nodes"
+    },
+    {
+      "symbol": "t(i,x)",
+      "first_section": "model",
+      "definition": "time for processor i to complete a read of address x that misses in all its caches"
+    },
+    {
+      "symbol": "alpha, beta",
+      "first_section": "model",
+      "definition": "message latency (s) and inverse bandwidth (s/byte), T_msg(m) = alpha + beta m"
+    },
+    {
+      "symbol": "lambda = X L",
+      "first_section": "model",
+      "definition": "Little's law: concurrency = throughput x latency"
+    },
+    {
+      "symbol": "n_b, kappa, tau, sigma",
+      "first_section": "technologies",
+      "definition": "number of memory banks, banks used by a stream, busy time of a bank in cycles, stride (words in the bank model; elements in stride.c; lines in the conflict lemma)"
+    },
+    {
+      "symbol": "d_t",
+      "first_section": "locality",
+      "definition": "reuse distance of access t: number of distinct lines used since the previous use of its line"
+    },
+    {
+      "symbol": "C_eff(sigma)",
+      "first_section": "cache",
+      "definition": "conflict capacity a S / gcd(S, sigma) in lines"
+    },
+    {
+      "symbol": "w_a",
+      "first_section": "cache",
+      "definition": "address width in bits (tag overhead example)"
+    },
+    {
+      "symbol": "t_1, t_2, t_3, t_mem, m_1, m_2, m_3",
+      "first_section": "amat",
+      "definition": "hit times of three cache levels and of memory (time each adds) and local miss rates"
+    },
+    {
+      "symbol": "mu, L, c, t_elt, t_add",
+      "first_section": "amat",
+      "definition": "line misses per element, miss latency, misses in flight, time per element, time of the dependent additions"
+    },
+    {
+      "symbol": "rho, r, t_loc, t_rem",
+      "first_section": "smp-numa",
+      "definition": "NUMA factor t_rem/t_loc, fraction of remote misses, local and remote miss times"
+    },
+    {
+      "symbol": "B_bus, g, p*",
+      "first_section": "smp-numa",
+      "definition": "bus bandwidth, demand of one processor in bytes per second, saturation count B_bus/g"
+    },
+    {
+      "symbol": "m_1/2",
+      "first_section": "cluster",
+      "definition": "half-bandwidth message size alpha/beta"
+    },
+    {
+      "symbol": "Theta",
+      "first_section": "cluster",
+      "definition": "mean time between failures of one node"
+    },
+    {
+      "symbol": "omega",
+      "first_section": "cluster",
+      "definition": "bisection width of a network in links"
+    },
+    {
+      "symbol": "q",
+      "first_section": "cache",
+      "definition": "period S/gcd(S, sigma) of the set index in the proof of Lemma 2"
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python code_lab.py --chapter 07",
+    "listings": 9,
+    "all_passed": true
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "REVISE",
+      "report": "ch07-r1.md",
+      "blocking": 3,
+      "major": 7,
+      "minor": 5,
+      "fixed": [
+        "B1",
+        "B2",
+        "B3",
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M5",
+        "M6",
+        "M7",
+        "m1",
+        "m2",
+        "m3",
+        "m4 (partly)",
+        "m5"
+      ],
+      "not_fixed": [
+        "m4: length not reduced to 6,000-9,000 words; the hard-disk arithmetic was removed and the availability paragraph shortened, the topology subsection was kept because the chapter plan asks for interconnect topologies and bisection width; the pilot chapters measure 13.9k to 15.5k words by the same count"
+      ],
+      "notes": "B1: the simulator is called exact for the L1d only (Cachegrind checked D1 only); L2 and L3 are directional (virtual indexing, physical L2, hashed L3) in #cache, #amat and #limits. B2: Exercise 5 charges a request and a reply in every option (300 ms for (i), about 3030 times (ii), 9.2 times for the dependent case). B3: L1 range 1.2 to 1.5 ns, ratio 6.5 to 8.4. M1: four candidate causes for the missing L3 plateau (jobs, two-level page walk, efficient core with 2 MB shared L2 per ServeTheHome, higher L3 latency); the huge-page trial does not exclude translation; the associativity explanation is stated as a candidate. M2: N = 4096 concurrency hedged for a hashed L3; Table 7.1 cell and wording changed. M3: core count agreed with the vendor text, only the NUMA label corrected; 'hybrid' mislabel replaced; Nehalem-EX generation named. M4: transcript wording removed from quotation marks; only slide text is quoted. M5: counter renamed 'transfers' in coherence.py; output refreshed. M6: sumcg.c added as a ninth exact listing before the Cachegrind session; the extra miss is stated as not traced. M7: banks n_b, stride sigma in stride.c prose, period q in Lemma 2; interleave.py header changed (kappa). m1: L3 mixture sentence reworded. m2: 'miss term'. m3: 'after the first pass'. m5: locality heading moved to 9:52 with 5:01 inline; NUMA picture link t = 1910. code_lab.py --chapter 7 rerun after the changes."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT WITH FIXES",
+      "report": "ch07-r2.md",
+      "blocking": 0,
+      "major": 0,
+      "minor": 3,
+      "fixed": [
+        "m1",
+        "m2"
+      ],
+      "not_fixed": [
+        "m3 (length: no change, as instructed)"
+      ],
+      "notes": "m1: 'a TLB miss needs a two-level page walk' changed to 'can need a walk of both the guest and the host page tables'. m2: the #cache paragraph now gives the reason that the L2 results are directional (physical indexing, set-index bits 12 to 16 from the page frame). Text only; the code lab was not rerun."
+    }
+  ]
+}
