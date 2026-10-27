@@ -1,0 +1,408 @@
+{
+  "chapter": 2,
+  "title": "Operating systems and the Linux kernel",
+  "status": "revised after review round 2",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "lmlLdGMrdGU",
+      "label": "W1L1",
+      "playlist_index": 3,
+      "duration_seconds": 1273
+    },
+    {
+      "video_id": "JYTA5BWHmb0",
+      "label": "W1L2",
+      "playlist_index": 4,
+      "duration_seconds": 1432
+    }
+  ],
+  "frames_viewed": {
+    "lmlLdGMrdGU": [
+      "f0003",
+      "f0010",
+      "f0011",
+      "f0015",
+      "f0019",
+      "f0022",
+      "f0026",
+      "f0029",
+      "f0032",
+      "f0036",
+      "f0038",
+      "f0039",
+      "f0040"
+    ],
+    "JYTA5BWHmb0": [
+      "f0006",
+      "f0010",
+      "f0014",
+      "f0020",
+      "f0024",
+      "f0028",
+      "f0031",
+      "f0036",
+      "f0040",
+      "f0044"
+    ]
+  },
+  "lecture_corrections": [
+    "W1L2 slide 'single large process in a privileged mode' (spoken 3:28): the kernel is one binary that runs in kernel mode (Tanenbaum's definition quoted from the 1992 exchange); it is not a process.",
+    "W1L2 slide 'Virtual Machine 1..3' (9:45) and speech at 5:08-8:01: the kernel gives each process a virtual processor and an address space; this is not a virtual machine in the hypervisor sense.",
+    "W1L2 spoken at 9:36 and 15:07: the virtual file system does not create a virtual machine per process; the slide and the kernel documentation describe it as the abstraction layer over file systems.",
+    "W1L2 'Memory Management Unit' as a kernel subcomponent: the MMU is processor hardware; the kernel subsystem is memory management, which builds the page tables.",
+    "W1L2 slide at about 14:15 (frame f0029): the TLB is described as 'a small, fast cache to store recent data'; the kernel documentation says it caches address translations.",
+    "W1L2 slide 'Scheduling Policy: RR, FCFS, SJN, CFS': the ordinary Linux policy is SCHED_OTHER (CFS, then EEVDF); round robin and first-in first-out exist only as real-time policies (sched(7)); shortest job next is not a Linux policy.",
+    "W1L1 types of OS: real-time is presented as a third type next to single-user/multi-user and single-task/multitasking; these are different properties (users, tasks, timing guarantee).",
+    "W1L2 slide 'Linux: Types of Files' and 19:04 speech: network interfaces are said to be files; there is no device node for eth0 in /dev (0 matches), only a sysfs entry under /sys/class/net.",
+    "W1L2 speech at 4:01: loadable kernel modules are said to give 'the variety of flavors' of Linux; the chapter finds that flavors differ in packages and configuration and that modules are a runtime mechanism for drivers and features."
+  ],
+  "source_uncertainties": [
+    "Ritchie and Thompson: the electronic edition read is the 1978 BSTJ revision (Nokia Bell Labs page of Ritchie), not the 1974 CACM text. The chapter cites it by section number (the web page has no page numbers). Sections I, 3.3, V, 5.1-5.3, 5.5, VI refer to that edition.",
+    "Torvalds, 'Linux's History' (1992), was read in a Carnegie Mellon University mirror. The posts name 25 August 1991 (announcement), 'sometimes around this time' for version 0.01 and 5 January 1992 for version 0.12; the exact day of the first release and the name of the licence adopted with 0.12 are not given in the passage read, so the lecture's 'September 1991' and 'GPL in 1992' are recorded as consistent but not confirmed in detail.",
+    "kernel.org v1.0 directory: the date 13 March 1994 is the date of the file in the archive listing, not a release announcement.",
+    "TOP500 operating-system statistics pages (statistics/details/osfam, statistics/overtime, lists/top500/2017/11/highs) could not be read: the pages are rendered by scripts, and the Highlights template returned an error. The chapter gives no TOP500 share for Linux and records the lecture's claim as not checked.",
+    "The dates of Ubuntu (2004), Android (2008) and the claim that Linux was the most popular system in 2020 were not checked against any source.",
+    "KernelNewbies (Linux 6.12 page) is a secondary source for the PREEMPT_RT merge and the completion of the EEVDF transition; the kernel.org release announcement was not opened.",
+    "The kernel documentation pages were version 7.3.0 of docs.kernel.org on 2026-10-26, which is newer than the guest kernel. The entry-code, PTI, VFS, mm, CFS and nice-design statements used are of general nature; the guest kernel's own documentation was not read.",
+    "Assumption, no source opened: a page-table entry takes 8 bytes and a 4096-byte table page holds 512 entries with a 9-bit index per level (architecture manuals not opened). The VmPTE measurement (4.0 kB per 2 MiB region) is consistent with it and rules out a table page that covers more than 2 MiB; it does not fix the entry size.",
+    "The WSL 2 statement (a virtual machine with its own Linux kernel under Hyper-V) comes from the authoring brief and from uname output; Microsoft's WSL documentation was not opened.",
+    "The explanation offered for the 11-14 times slower message exchange between two processors (inter-processor interrupts, idle target processor, hypervisor involvement) is a hypothesis that was not tested.",
+    "About 70-78 % of the process launch time (fork, exec, exit, scheduling) is not attributed by the decomposition; the increase of fork time per page above 256 MiB (38 to 64 ns per page) is not explained.",
+    "The cost of a page fault used in the launch decomposition is the first-touch cost of a zero-filled anonymous page; faults on file-backed pages during exec may cost differently.",
+    "strace is not installed in the WSL guest; version 6.8-0ubuntu2 was unpacked from the Ubuntu package into the demonstration directory (no installation, no root). The shell sessions show it as ./strace.",
+    "Timing values were measured while other agents shared the machine; one sample of the system-call cost (96.5 ns) was taken under load and is recorded as an outlier in the text. The sample output printed in the chapter is one run.",
+    "The listings launch_cost.c and chunks.c place their working files in /tmp (executables and a 64 MiB data file) because the code lab runs listings from a Windows directory mounted in WSL, where a first attempt took 4.6 to 11.3 ms per launch and a stalled file benchmark.",
+    "A directory /tmp/hpsc-demo shared by agents was removed and recreated once by the author's first session script before the author switched to the private names /tmp/hpsc-ch02-demo and /tmp/hpsc-launch-ch02.",
+    "W1L1 t=760-829: the machine transcript renders 'MINIX' as 'Linux' and 'GNU' as 'Geoni'; the slide (f0026) is followed. This is a speech-recognition error, not a statement of the lecture.",
+    "Nice weights: kernel/sched/core.c at tag v6.6.87 of the stable tree (git.kernel.org): the comment 'a multiplier of 1.25' and the table sched_prio_to_weight (1024, 335, 110, 15 for nice 0, 5, 10, 19), lines 11550-11571 (line numbers checked by the reviewer at git.kernel.org on 2026-10-26; the author read the same tag through a GitHub mirror). The documentation figures (55/45, 1.5 %) are roundings of the same factor. The measured shares (24.2-25.5 %, 9.0-10.0 %) cannot separate the table (24.7 %, 9.7 %) from r = 1.246 (25.0 %, 10.0 %); they exclude only r = 1.222.",
+    "Scheduler class of the guest: not read from the guest; inferred from the KernelNewbies release notes of Linux 6.6 (CFS replaced by EEVDF) and the guest kernel version 6.6.87.2. The CFS and EEVDF documentation pages are those of kernel 7.3.0.",
+    "Assumption, no source opened: on x86-64 a privileged instruction in user mode raises a general-protection exception (Intel and AMD manuals, Intel SDM vol. 3A not opened); the observed result is signal 11.",
+    "mm/memory.c (copy_present_pte, page_try_dup_anon_rmap, tag v6.6.87) was read through the same mirror for the candidate mechanism in Exercise 6; the mechanism itself was not tested.",
+    "The 4096-byte stdio buffer on the guest (glibc 2.39, file in /tmp) was checked with a probe program under strace (writes of 4096, 4096 and 1808 bytes) and with stat -c %o /tmp (4096); the probe is not part of the chapter's listings.",
+    "The shell sessions were run as one non-interactive script; the chapter says so. Tab characters in outputs are shown as spaces; the maps session omits the loader lines by a grep pattern (stated in the text).",
+    "W1L2 slide and speech on scheduling: the machine transcript renders 'preemptive' as 'primitive'; the slide ('Preemptive vs. Non-Preemptive Scheduling') is followed. This is a speech-recognition reading, not a lecture statement.",
+    "Speech of the lectures is quoted only through slides; where the chapter reports a spoken statement it paraphrases it, because the only record of speech is the machine transcript."
+  ],
+  "sections": [
+    {
+      "section": "The objects of the chapter and the running case",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None; the lectures name the layers but do not follow a command.",
+      "research_extension": "Ritchie and Thompson definitions of image and process; syscall(2) register convention; x86 entry code documentation.",
+      "teaching_construction": "Formal model P=(A,F,c,T), privilege modes, system call, running case ./hello with events E1-E6, machine description.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "What an operating system does: multiplexing, protection and abstraction",
+      "video_id": "lmlLdGMrdGU",
+      "start": 48.0,
+      "end": 544.0,
+      "lecture_material": "Definition, eight reasons, eight components.",
+      "research_extension": "None beyond the model sources.",
+      "teaching_construction": "Reduction to three mechanisms (Table 2.1), argument for two privilege modes, privileged.c.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Kinds of operating system, and why high performance computing uses Linux",
+      "video_id": "lmlLdGMrdGU",
+      "start": 544.0,
+      "end": 1025.0,
+      "lecture_material": "Four types, Unix-MINIX-Linux history, milestones, Linux in HPC, characteristics.",
+      "research_extension": "Ritchie and Thompson section I; Torvalds 1992 posts; kernel.org v1.0; Tanenbaum-Torvalds exchange; sched(7); KernelNewbies 6.12.",
+      "teaching_construction": "Three-property reading of the four types; dated check of the lecture's history claims.",
+      "evidence_class": "product specification"
+    },
+    {
+      "section": "The layers between a program and the hardware",
+      "video_id": "lmlLdGMrdGU",
+      "start": 1025.0,
+      "end": 1273.0,
+      "lecture_material": "User-application-OS-hardware layers; shell, system libraries, kernel.",
+      "research_extension": "Ritchie and Thompson section VI; vdso(7); kernel documentation of /proc (Pss).",
+      "teaching_construction": "readelf/ldd/strace sessions (35 vs 17 system calls), libc sharing measurement.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "From ./hello to the first instruction",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "Ritchie and Thompson 5.1-5.5; POSIX.1-2024 fork; fork(2); execve(2).",
+      "teaching_construction": "Events E1-E6, strace -f session, launch.c, launch_cost.c, launch-time decomposition, equation (2.1).",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "The kernel: privileged code, system calls and loadable modules",
+      "video_id": "JYTA5BWHmb0",
+      "start": 147.0,
+      "end": 678.0,
+      "lecture_material": "Kernel as bridge, monolithic, virtual machine per process, loadable modules.",
+      "research_extension": "Tanenbaum-Torvalds exchange; entry_64 and PTI kernel documentation; syscall(2); vdso(7).",
+      "teaching_construction": "syscall_cost.c, amortization model (2.2) and chunks.c, microkernel cost remark, kernel session.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "The scheduler: fair shares, preemption and the cost of switching",
+      "video_id": "JYTA5BWHmb0",
+      "start": 678.0,
+      "end": 807.0,
+      "lecture_material": "Policies, states, preemption, context switching, load balancing.",
+      "research_extension": "sched(7); CFS, EEVDF and nice-design kernel documentation; KernelNewbies 6.12.",
+      "teaching_construction": "Mean waiting time (2.3) with exchange proof, sched_sim.py, nice prediction (2.4) and fairshare.c, switch efficiency (2.5) and ctxswitch.c.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Memory management: virtual addresses, page tables and page faults",
+      "video_id": "JYTA5BWHmb0",
+      "start": 807.0,
+      "end": 907.0,
+      "lecture_material": "MMU, address translation, page tables, TLB, protection.",
+      "research_extension": "Kernel mm concepts and x86-64 memory-map documentation; /proc documentation (VmPTE); fork(2) copy-on-write.",
+      "teaching_construction": "Table-size formula (2.6), pagetable.py, ptes.c, translation-cost bound (2.7), pagefault.c.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "The virtual file system, inter-process communication and the claim that everything is a file",
+      "video_id": "JYTA5BWHmb0",
+      "start": 907.0,
+      "end": 1366.0,
+      "lecture_material": "VFS elements, network subsystem, IPC mechanisms, everything is a file, file types.",
+      "research_extension": "VFS kernel documentation; Ritchie and Thompson 3.3 and 5.2.",
+      "teaching_construction": "fdtypes.c, /proc and /sys sessions, test of the lecture's file claims.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "What the model establishes and what it does not",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None.",
+      "research_extension": "None.",
+      "teaching_construction": "Table 2.2 of lecture statements and their status; limits.",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "D. M. Ritchie and K. Thompson, The UNIX Time-Sharing System (BSTJ 57(6), 1978 revision of CACM 17(7), 1974)",
+      "url": "https://www.nokia.com/bell-labs/about/dennis-m-ritchie/cacm.html",
+      "supports": "Section I: earliest version circa 1969-70 on PDP-7/-9, second version on the unprotected PDP-11/20, third with multiprogramming; section 3.3 special files read and written like ordinary files; section V image and process definitions; 5.1 fork, 5.2 pipes, 5.3 execute, 5.5 exit/wait; section VI shell as command-line interpreter.",
+      "page_checked": "full text of the electronic edition, sections I, 3.3, V, VI"
+    },
+    {
+      "title": "L. Torvalds, Linux's History (31 July 1992, mirror at CMU)",
+      "url": "https://www.cs.cmu.edu/~awb/linux.history.html",
+      "supports": "Post of 25 August 1991 ('just a hobby'); version 0.01 'sometimes around this time'; GNU programs running under the kernel (5 October 1991); early licence stricter than the GNU copyleft, changed with 0.12, out 5 January 1992.",
+      "page_checked": "full page"
+    },
+    {
+      "title": "kernel.org, Linux kernel v1.0 archive",
+      "url": "https://www.kernel.org/pub/linux/kernel/v1.0/",
+      "supports": "linux-1.0.tar.gz listed with date 13 March 1994.",
+      "page_checked": "directory listing"
+    },
+    {
+      "title": "Tanenbaum-Torvalds debate, Open Sources appendix A",
+      "url": "https://www.oreilly.com/openbook/opensources/book/appa.html",
+      "supports": "Tanenbaum 29 Jan 1992: monolithic kernel is a single a.out running in kernel mode; microkernel runs most of the OS as separate processes with message passing; performance argument; Torvalds: 'True, linux is monolithic, and I agree that microkernels are nicer'.",
+      "page_checked": "full page"
+    },
+    {
+      "title": "Linux kernel documentation: Kernel Entry (x86 entry code)",
+      "url": "https://docs.kernel.org/arch/x86/entry_64.html",
+      "supports": "Entry points: syscall instruction, int 0x80, interrupts, architecturally defined exceptions.",
+      "page_checked": "section on entry points"
+    },
+    {
+      "title": "Linux kernel documentation: Page Table Isolation",
+      "url": "https://docs.kernel.org/arch/x86/pti.html",
+      "supports": "Section 23.3 Overhead: CR3 moves at interrupt, syscall and exception entry and exit, on the order of a hundred cycles each.",
+      "page_checked": "section 23.3"
+    },
+    {
+      "title": "Linux kernel documentation: x86-64 memory map",
+      "url": "https://docs.kernel.org/arch/x86/x86_64/mm.html",
+      "supports": "48- and 57-bit virtual addresses; 4-level and 5-level page tables.",
+      "page_checked": "sections 30.2.1-30.2.2 and notes"
+    },
+    {
+      "title": "Linux kernel documentation: Concepts overview (memory management)",
+      "url": "https://docs.kernel.org/admin-guide/mm/concepts.html",
+      "supports": "Virtual memory primer (demand paging, protection, hierarchical page tables, top-level register, offset bits); TLB as a cache of translations; huge pages reduce TLB pressure.",
+      "page_checked": "virtual memory primer and huge pages sections"
+    },
+    {
+      "title": "Linux kernel documentation: Overview of the Linux Virtual File System",
+      "url": "https://docs.kernel.org/filesystems/vfs.html",
+      "supports": "VFS is the software layer that provides the filesystem interface to user space and lets different filesystem implementations coexist; system calls open/stat/read/write are called from process context.",
+      "page_checked": "introduction and dentry/inode sections"
+    },
+    {
+      "title": "Linux kernel documentation: The /proc filesystem",
+      "url": "https://docs.kernel.org/filesystems/proc.html",
+      "supports": "VmPTE is the size of page table entries; Pss definition: pages divided by the number of processes sharing them.",
+      "page_checked": "status fields and smaps sections"
+    },
+    {
+      "title": "Linux kernel documentation: CFS Scheduler",
+      "url": "https://docs.kernel.org/scheduler/sched-design-CFS.html",
+      "supports": "Ideal precise multi-tasking CPU; virtual runtime per task.",
+      "page_checked": "design section"
+    },
+    {
+      "title": "Linux kernel documentation: EEVDF Scheduler",
+      "url": "https://docs.kernel.org/scheduler/sched-eevdf.html",
+      "supports": "Transition from CFS to EEVDF began in version 6.6; EEVDF aims to distribute CPU time equally among runnable tasks of the same priority.",
+      "page_checked": "full page"
+    },
+    {
+      "title": "Linux kernel documentation: Scheduler Nice Design",
+      "url": "https://docs.kernel.org/scheduler/sched-nice-design.html",
+      "supports": "Multiplicative nice levels: nice 10 vs 11 split like -5 vs -4, one gets 55 % and the other 45 %; nice +19 gets 1.5 %.",
+      "page_checked": "full page"
+    },
+    {
+      "title": "man-pages: syscall(2)",
+      "url": "https://man7.org/linux/man-pages/man2/syscall.2.html",
+      "supports": "x86-64: instruction syscall, number in rax, arguments rdi, rsi, rdx, r10, r8, r9, result in rax; errors stored in errno by the library.",
+      "page_checked": "tables of instruction, number and argument registers"
+    },
+    {
+      "title": "man-pages: fork(2)",
+      "url": "https://man7.org/linux/man-pages/man2/fork.2.html",
+      "supports": "Separate memory spaces with equal content at fork; child has own PID and parent PID equal to the caller; copy-on-write implementation with the page-table duplication penalty.",
+      "page_checked": "description and notes"
+    },
+    {
+      "title": "man-pages: execve(2)",
+      "url": "https://man7.org/linux/man-pages/man2/execve.2.html",
+      "supports": "Replaces the program with newly initialized stack, heap and data segments; PT_INTERP interpreter loads needed shared objects.",
+      "page_checked": "description"
+    },
+    {
+      "title": "man-pages: sched(7)",
+      "url": "https://man7.org/linux/man-pages/man7/sched.7.html",
+      "supports": "SCHED_OTHER standard time-sharing; SCHED_FIFO and SCHED_RR with static priorities 1-99 preempting SCHED_OTHER; all scheduling is preemptive; the scheduler schedules threads.",
+      "page_checked": "policy sections"
+    },
+    {
+      "title": "man-pages: vdso(7)",
+      "url": "https://man7.org/linux/man-pages/man7/vdso.7.html",
+      "supports": "Purpose of the vDSO (avoid the user/kernel switch overhead for frequently used calls); __vdso_clock_gettime exported.",
+      "page_checked": "introduction and symbol table"
+    },
+    {
+      "title": "POSIX.1-2024 (IEEE Std 1003.1-2024), fork",
+      "url": "https://pubs.opengroup.org/onlinepubs/9799919799/functions/fork.html",
+      "supports": "The child shall be an exact copy of the parent except for listed attributes including a unique process ID; created with a single thread.",
+      "page_checked": "description"
+    },
+    {
+      "title": "KernelNewbies: Linux 6.12",
+      "url": "https://kernelnewbies.org/Linux_6.12",
+      "supports": "Release 17 November 2024; PREEMPT_RT merged after 20 years; EEVDF transition completed (secondary source).",
+      "page_checked": "summary and scheduler section"
+    },
+    {
+      "title": "POSIX.1-2024 (IEEE Std 1003.1-2024), Shell and Utilities, chapter 2",
+      "url": "https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html",
+      "supports": "Section 2.9.1.4 Command Search and Execution: if the command name does not contain any slash, the search sequence applies (special built-ins, functions, utilities, PATH).",
+      "page_checked": "section 2.9.1.4"
+    },
+    {
+      "title": "Linux kernel source, kernel/sched/core.c, tag v6.6.87 (stable tree)",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/plain/kernel/sched/core.c?h=v6.6.87",
+      "supports": "Comment 'a multiplier of 1.25'; table sched_prio_to_weight: nice 0 = 1024, nice 5 = 335, nice 10 = 110, nice 19 = 15 (lines 11550-11571).",
+      "page_checked": "lines 11550-11571, tag v6.6.87 (checked at git.kernel.org by the reviewer, 2026-10-26)"
+    },
+    {
+      "title": "Linux kernel source, mm/memory.c, tag v6.6.87 (stable tree)",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/plain/mm/memory.c?h=v6.6.87",
+      "supports": "copy_present_pte calls page_try_dup_anon_rmap for anonymous pages (candidate per-page work of fork, Exercise 6).",
+      "page_checked": "copy_present_pte (read through a mirror of the same tag)"
+    },
+    {
+      "title": "KernelNewbies: Linux 6.6",
+      "url": "https://kernelnewbies.org/Linux_6.6",
+      "supports": "Release 29 October 2023; the CFS process scheduler is replaced by EEVDF (secondary source).",
+      "page_checked": "summary"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "P=(A,O,kappa,T)",
+      "first_section": "model",
+      "definition": "Process: address space, open-file table, credentials, set of threads."
+    },
+    {
+      "symbol": "t_sys",
+      "first_section": "model",
+      "definition": "Time of one minimal system call."
+    },
+    {
+      "symbol": "s, n_f, t_launch, t_run",
+      "first_section": "model",
+      "definition": "Number of system calls, number of page faults, launch time, run time."
+    },
+    {
+      "symbol": "phi",
+      "first_section": "launch",
+      "definition": "Fraction of time consumed by the launch, t_launch/(t_launch+t_run)."
+    },
+    {
+      "symbol": "S, b, a, B, b*",
+      "first_section": "kernel",
+      "definition": "Bytes moved, bytes per call, fixed time per call, copy rate, chunk size where call time equals copy time."
+    },
+    {
+      "symbol": "tau_j, w-bar, q, t_cs, eta",
+      "first_section": "scheduler",
+      "definition": "Burst of job j, mean waiting time, quantum, context-switch cost, usable processor fraction."
+    },
+    {
+      "symbol": "omega_i, r, share(k)",
+      "first_section": "scheduler",
+      "definition": "Scheduler weight, weight factor per nice step, share of a thread at nice k against nice 0."
+    },
+    {
+      "symbol": "n_p, N_l, M(S)",
+      "first_section": "memory",
+      "definition": "Number of pages, table pages at level l, page-table memory for S bytes."
+    },
+    {
+      "symbol": "t_TLB, m_T, t_ref, t_xlat",
+      "first_section": "memory",
+      "definition": "TLB hit time, TLB miss rate, memory access time, mean translation time."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python code_lab.py --chapter 02",
+    "listings": 13,
+    "all_passed": true
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "file": "ch02-r1.md",
+      "verdict": "REVISE",
+      "blocking": 4,
+      "major": 6,
+      "minor": 18,
+      "actions": "B1 exercise 1 algebra corrected; B2 lead and launch accounting rewritten (entry/exit cost vs work inside the kernel); B3 nice weights taken from the kernel table (multiplier 1.25; 24.7 % and 9.7 %); B4 mishearing paragraph and table text removed, no mention of the machine transcript in the public text; M1 symbols renamed; M2 definitions added; M3 stdio buffer claim corrected; M4 wording and citation status; M5 edited sessions declared; M6 POSIX 2.9.1.4 cited; minor items m1-m17 applied; m18 (length) not shortened; M4 fixed by wording (option 2), not by a second stride in ptes.c; no listing changed, so the code lab was not rerun."
+    },
+    {
+      "round": 2,
+      "file": "ch02-r2.md",
+      "verdict": "ACCEPT WITH FIXES",
+      "blocking": 0,
+      "major": 0,
+      "minor": 9,
+      "actions": "n1 core.c lines 11550-11571; n2 correction 5 cites slide f0029, the 'primitive' note moved to source_uncertainties; n3 EEVDF sentences merged; n4 st_blksize; n5 general-protection exception and 8-byte entry stated as assumptions; n6 'loaded run of the final check' replaced by 'the run under heavy load'; n7 limits close lists 1993 distributions and the 2020 claim; n8 length not shortened; n9 spoken statements paraphrased, only slide text quoted. Prose only; no listing changed, code lab not rerun."
+    }
+  ]
+}

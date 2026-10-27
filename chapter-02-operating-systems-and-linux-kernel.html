@@ -1,0 +1,1037 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="58f9b8f9eb94362d5d3743c2a4bf7a00eac1c2d4b312a1fb55a590be15c18cf8"><title>Operating systems and the Linux kernel · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>Operating systems and the Linux kernel</h1>
+<p class="lead">A parameter sweep starts 100 000 runs of a small serial program, each run as a new process. On the machine used for this chapter, creating and ending one process that prints one line takes 0.46 to 0.70 ms when the program is linked dynamically and 0.31 to 0.42 ms when it is linked statically (five runs of the program in the section on launching). The sweep therefore spends 46 to 70 s, or 31 to 42 s, in process creation before any solver computes. The dynamic program makes 35 system calls. Entering and leaving the kernel 35 times costs at least 2.9 µs (35 × 84 ns, the smallest measured call), under 1 % of the launch time. The rest is work done inside the kernel: inside the calls <code>fork</code>, <code>execve</code> and <code>mmap</code>, which copy page tables, build the new address space and map the program and its libraries; in about 70 page faults that the program never requests; and in process exit. This chapter defines the objects that an operating system manages (processes, address spaces, privilege modes, system calls), follows one command, <code>./hello</code>, from the shell to the first instruction of the program, and measures each step on a Linux kernel. Its structure follows the two lectures: the purpose of an operating system, the layers between a program and the hardware, and the subsystems of the Linux kernel.</p>
+<p class="source-note">Grounded in two recordings of the NPTEL course <em>High Performance Scientific Computing</em> (IIT Bombay): <a href="https://www.youtube.com/watch?v=lmlLdGMrdGU">W1L1, Introduction to Operating System</a>, and <a href="https://www.youtube.com/watch?v=JYTA5BWHmb0">W1L2, Linux Kernel Explained</a>. <strong>Lecture material:</strong> the definition of an operating system and the reasons for having one; eight components (kernel, process management, memory management, file-system management, device management, user interface, security and access control, networking); four types of operating system; the history of Unix, MINIX and Linux with milestones from 1991 to 2008; the role of Linux in high performance computing and its characteristics; the layers user, application, operating system and hardware, with the shell, the system libraries and the kernel inside the operating system; the kernel as a bridge between programs and hardware, its monolithic structure and its loadable modules; the kernel subcomponents (process scheduler, memory management, virtual file system, network subsystem, inter-process communication); the library files and the statement that in Linux most things are files. The slides carry the logos of NPTEL and C-DAC. <strong>Research extensions:</strong> Ritchie and Thompson on Unix (the definitions of image and process, <code>fork</code>, <code>execute</code>, pipes, special files, the shell as an ordinary program; the 1978 revision of the 1974 paper was read); Torvalds's 1992 account of the first posts and releases of Linux; the Tanenbaum–Torvalds exchange of January 1992 on monolithic kernels and microkernels; the Linux kernel documentation (virtual memory, virtual file system, the CFS and EEVDF schedulers, nice levels, the x86-64 entry code, page-table isolation, <code>/proc</code>); the Linux man-pages (<code>syscall</code>, <code>fork</code>, <code>execve</code>, <code>sched</code>, <code>vdso</code>); POSIX.1-2024 (<code>fork</code>); the KernelNewbies release notes of Linux 6.12. <strong>Original teaching constructions:</strong> the running case and the formal model of this chapter; the decomposition of the launch time; the amortization model of system calls; the fair-share prediction for nice levels; the scheduling example and its proof; the page-table arithmetic; the programs and measurements; the six exercises.</p>
+
+<h2 id="model">The objects of the chapter and the running case</h2>
+<p>The chapter studies one kind of system: a computer whose processors run programs in two privilege modes, under a kernel. The definitions below are used in every later section.</p>
+<p><strong>Processor and privilege mode.</strong> A processor executes the instructions of one thread at a time. At every instant it is in one of two <em>privilege modes</em>. In <em>user mode</em> it refuses privileged instructions (instructions that change the page tables, disable interrupts or halt the processor) and it reaches only the memory that the current page tables mark as accessible to user programs. In <em>kernel mode</em> it executes every instruction and reaches all memory. A privileged instruction in user mode does not execute: the processor raises an <em>exception</em>, which transfers control to the kernel. The program <code>privileged.c</code> in the next section observes this.</p>
+<p><strong>Kernel.</strong> The <em>kernel</em> is the code and the data that run in kernel mode. A program in user mode cannot read or write them. The section on the kernel shows that the kernel is not a process.</p>
+<p><strong>Entry to the kernel.</strong> Control passes from user mode to the kernel by one of three events. A <em>system call</em> is a request by the program: it executes a special instruction (<code>syscall</code> on x86-64) after placing a request number and arguments in registers. An <em>exception</em> is a fault caused by the instruction just executed, such as an access to an unmapped address or a privileged instruction in user mode. A <em>page fault</em> is the exception that an access to a virtual address raises when the page that holds it is not mapped, or is not mapped for the kind of access made; the kernel then maps a page or ends the process. An <em>interrupt</em> is a request from a device or a timer, unrelated to the instruction being executed. The kernel documentation of the x86-64 entry code lists these entry points: the <code>syscall</code> instruction, interrupts, and architecturally defined exceptions (<a href="https://docs.kernel.org/arch/x86/entry_64.html">Linux kernel documentation, x86 entry code</a>). A <em>signal</em> goes the other way: it is a notification that the kernel delivers to a process. Signal 11, <code>SIGSEGV</code>, reports an invalid memory access or an instruction that the processor refused. On x86-64 this chapter assumes, without a source that it opened, that a privileged instruction in user mode raises a general-protection exception, which Linux reports to the process as <code>SIGSEGV</code>; the observed signal 11 in the next section agrees.</p>
+<p><strong>Process and thread.</strong> Ritchie and Thompson define an <em>image</em> as "a computer execution environment" that "includes a memory image, general register values, status of open files, current directory and the like", and a <em>process</em> as "the execution of an image" (<a href="https://www.nokia.com/bell-labs/about/dennis-m-ritchie/cacm.html">Ritchie and Thompson</a>, §V). This chapter writes a process as \(P=(A,O,\kappa,\mathcal T)\). \(A\) is its <em>address space</em>, the set of mappings from virtual pages (fixed-size blocks of addresses, 4096 bytes here) to physical page frames (blocks of physical memory of the same size), each with permissions. \(O\) is its table of open files: a map from small integers, the <em>file descriptors</em>, to open files. \(\kappa\) is its credentials, the user and group identity that the kernel checks on file access (chapter 3). \(\mathcal T\) is its set of threads. As in chapter 11, a <em>thread</em> is a sequence of instructions with its own program counter and call stack; every thread has its own register state and its own scheduling state, and the threads of one process share \(A\) and \(O\). The kernel schedules threads: the Linux scheduling manual speaks throughout of the scheduling of a thread (<a href="https://man7.org/linux/man-pages/man7/sched.7.html">sched(7)</a>). A process with one thread is the case studied until chapter 11.</p>
+<p><strong>System call interface.</strong> A system call has a number \(n\) and up to six integer arguments. On x86-64 Linux the number goes into register <code>rax</code>, the arguments into <code>rdi</code>, <code>rsi</code>, <code>rdx</code>, <code>r10</code>, <code>r8</code> and <code>r9</code>, the instruction is <code>syscall</code>, and the result returns in <code>rax</code> (<a href="https://man7.org/linux/man-pages/man2/syscall.2.html">syscall(2)</a>, the tables of instruction, number register and argument registers). The C library wraps each call in a function that stores an error code in <code>errno</code>. The time that one call costs is \(t_{\mathrm{sys}}\); the section on the kernel measures it.</p>
+<p><strong>The running case.</strong> A user types <code>./hello</code> in a shell. <code>hello</code> is a program that prints one line and ends. Six events lead from the keystroke to the end: (E1) the shell creates a child process; (E2) the child replaces its program by <code>hello</code>; (E3) the kernel builds the new address space and returns to user mode at the first instruction of the new image; (E4) for a dynamically linked program, the dynamic loader maps the C library; (E5) <code>main</code> runs and calls the kernel to write the line; (E6) the process ends and the shell learns the exit status. Four quantities describe the case: the number \(s\) of system calls, the cost \(t_{\mathrm{sys}}\) of one call, the number \(n_f\) of page faults, and the time \(t_{\mathrm{launch}}\) from E1 to E6. The lectures do not follow a command through these events; the chapter does, and it places each lecture topic at the event where it acts.</p>
+<p><strong>The machine.</strong> All programs of the chapter were built and run on the Intel Core i5-12450H laptop of this book, in a WSL 2 Ubuntu 24.04 guest with gcc 13.3 (8 cores and 12 logical processors by Intel's specification; the guest shows 6 cores of 2 threads, a synthetic view). WSL 2 runs the guest as a virtual machine with its own Linux kernel; <code>uname -sr</code> reports <code>Linux 6.6.87.2-microsoft-standard-WSL2</code>. Three consequences follow. Absolute times in this chapter hold for this guest and not for bare metal. The page size is 4096 bytes, and the kernel is configured with a timer frequency of 250 Hz (a tick every 4 ms) and dynamic preemption; the section with the session below shows the commands. The file <code>/sys/devices/system/cpu/vulnerabilities/meltdown</code> reports <code>Not affected</code>, so the page-table isolation mechanism that adds cost to system calls on some processors is not in use. Every timing is the minimum over several repetitions of the same run, and a timing listing is checked only by its return code: the output printed under it is one sample run on this machine, and the text gives the range over several runs. Other programs shared the machine during some runs. In one run under heavy load from other programs, the first-touch cost of a page rose to 3.0 µs and the fitted time per read call to 416 ns; the ranges in the text come from runs at lower load, and where a loaded run is quoted the text says so.</p>
+
+<h2 id="os-role">What an operating system does: multiplexing, protection and abstraction <a class="timestamp" href="https://www.youtube.com/watch?v=lmlLdGMrdGU&amp;t=48s">W1L1 0:48</a></h2>
+<p>The lecture defines an operating system as software that manages the hardware and software resources of a computer, the first thing loaded on a computer; the slide says that without one a computer "cannot function effectively". It gives eight reasons for having one: complex hardware, security, many concurrent tasks, memory and file storage, interaction with users, peripheral devices, error handling and networking. <a class="timestamp" href="https://www.youtube.com/watch?v=lmlLdGMrdGU&amp;t=277s">W1L1 4:37</a> lists eight components that do this work. The two lists of eight overlap. This section reduces them to three mechanisms, and Table 2.1 assigns each lecture component to the mechanisms it implements.</p>
+<p><em>Multiplexing</em> divides one resource among several users, over time or in space: processor time among threads, physical memory among address spaces, a network link among connections. <em>Protection</em> prevents one process from reading, writing or disabling the resources of another process or of the kernel. <em>Abstraction</em> presents one uniform interface over differing hardware, such as the file, the process and the socket.</p>
+<div class="table-wrap"><table>
+<caption>Table 2.1. The components of the lecture and the mechanisms they implement.</caption>
+<thead><tr><th scope="col">Lecture component</th><th scope="col">Mechanisms</th><th scope="col">Where this chapter treats it</th></tr></thead>
+<tbody>
+<tr><td>Kernel</td><td>All three; it is the privileged part</td><td>Section on the kernel</td></tr>
+<tr><td>Process management</td><td>Multiplexing of processor time</td><td>Section on the scheduler</td></tr>
+<tr><td>Memory management</td><td>Multiplexing of memory, protection between address spaces, abstraction as virtual memory</td><td>Section on memory</td></tr>
+<tr><td>File-system management</td><td>Abstraction of storage as files, protection by permissions</td><td>Section on the virtual file system; chapter 3</td></tr>
+<tr><td>Device management</td><td>Abstraction of devices behind file descriptors</td><td>Section on the virtual file system</td></tr>
+<tr><td>User interface (shell, graphical)</td><td>Abstraction of the system as commands</td><td>Section on the layers</td></tr>
+<tr><td>Security and access control</td><td>Protection</td><td>This section; chapter 3</td></tr>
+<tr><td>Networking</td><td>Abstraction as sockets, multiplexing of the link</td><td>Section on the virtual file system; chapter 4</td></tr>
+</tbody></table></div>
+<p><strong>Why protection needs two privilege modes.</strong> Suppose every program could execute every instruction. A program could disable interrupts and then loop. No timer interrupt would return control to the scheduler, so the processor could not be multiplexed against the will of that program. A program could also change the page-table base register and read any memory. Multiplexing and isolation therefore need a set of instructions that only the kernel can execute, and two privilege modes provide that set. This argument follows from the definitions of the mechanisms. It shows that hardware needs a privilege mode for the isolation to be enforceable, and it does not show that two modes are the only possible design.</p>
+<p>The next program tests the argument on this machine. It creates three child processes with <code>fork</code> and reports how each ends; <code>fork</code> is defined in the section on launching, and here only its effect matters: the child runs the chosen function while the parent waits and reads the child's termination status. The first child makes an ordinary system call. The second executes <code>hlt</code>, a privileged instruction that halts the processor. The third stores to address 0, which no mapping covers. The program is specific to x86-64 because of <code>hlt</code>, and its output is the same on every run.</p>
+<pre><code class="language-c" data-file="privileged.c" data-build="gcc -O2 privileged.c -o privileged" data-run="./privileged">#include &lt;signal.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;sys/wait.h&gt;
+#include &lt;unistd.h&gt;
+
+static void halt_cpu(void)  { __asm__ volatile("hlt"); }              /* privileged instruction (x86-64) */
+static void write_null(void) { *(volatile int *)0 = 1; }              /* store to an unmapped address */
+static void harmless(void)  { (void)getpid(); }                       /* an ordinary system call */
+
+static void run(const char *name, void (*body)(void))
+{
+    pid_t pid = fork();
+    if (pid == 0) { body(); _exit(0); }
+    int status = 0;
+    waitpid(pid, &amp;status, 0);
+    if (WIFSIGNALED(status))
+        printf("%-14s killed by signal %d (%s)\n", name, WTERMSIG(status), strsignal(WTERMSIG(status)));
+    else
+        printf("%-14s exited with status %d\n", name, WEXITSTATUS(status));
+}
+
+int main(void)
+{
+    run("getpid():", harmless);
+    run("hlt:", halt_cpu);
+    run("store to 0:", write_null);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">getpid():      exited with status 0
+hlt:           killed by signal 11 (Segmentation fault)
+store to 0:    killed by signal 11 (Segmentation fault)</code></pre>
+<p>The system call succeeds. The privileged instruction and the store each end the child with signal 11, <code>Segmentation fault</code>. The processor does not execute <code>hlt</code> in user mode, and the kernel, which receives the exception, ends the child. The store to address 0 faults for a different reason: the page tables of the child have no mapping for that address, the kernel's page-fault handler finds no region that contains it, and the kernel delivers the same signal. In both cases the parent continues. A fault in one process does not stop the kernel or the other processes, which is the protection property the argument above requires.</p>
+
+<h2 id="types-history">Kinds of operating system, and why high performance computing uses Linux <a class="timestamp" href="https://www.youtube.com/watch?v=lmlLdGMrdGU&amp;t=544s">W1L1 9:04</a></h2>
+<p>The lecture names four types of operating system, "based on the type of computer they control and the sort of applications they support": single-user single-task (a first-generation mobile phone), real-time (industrial machinery, medical equipment), single-user multitasking (Windows, macOS, Android) and multi-user multitasking (Linux). <a class="timestamp" href="https://www.youtube.com/watch?v=lmlLdGMrdGU&amp;t=718s">W1L1 11:58</a> adds that on an HPC system many users are logged in at once and each has several jobs.</p>
+<p>The four boxes do not lie on one axis. Three independent properties are mixed. The first is the number of users that the system serves at the same time. The second is the number of tasks that run concurrently. The third is whether the system guarantees a bound on the time to respond to an event. A real-time system differs from the others on the third property only: a real-time system can serve one task or many. The type "real-time" is therefore not a third value of the property that separates the other three. Linux is multi-user and multitasking by default. It also offers real-time scheduling policies, <code>SCHED_FIFO</code> and <code>SCHED_RR</code>, with static priorities from 1 to 99, which always preempt ordinary threads (<a href="https://man7.org/linux/man-pages/man7/sched.7.html">sched(7)</a>), and the KernelNewbies summary of Linux 6.12, released on 17 November 2024, reports that the real-time preemption patch set (PREEMPT_RT), developed for about 20 years, was merged into the mainline kernel in that release (<a href="https://kernelnewbies.org/Linux_6.12">KernelNewbies, Linux 6.12</a>; a secondary source).</p>
+<p>A <em>multi-user</em> system gives every process credentials \(\kappa\), checks every access to a file or device against them, and keeps the processes of different users apart by the protection mechanism of the previous section. A cluster needs this property because many people share the same nodes. Chapter 3 treats the permission rules.</p>
+<p><strong>History.</strong> The slide at <a class="timestamp" href="https://www.youtube.com/watch?v=lmlLdGMrdGU&amp;t=760s">W1L1 12:40</a> states that Linux has its roots in Unix, developed in 1969 at Bell Labs by Ken Thompson and Dennis Ritchie, and that Andrew Tanenbaum developed MINIX in the late 1980s, whose limitations led to Linux. Ritchie and Thompson date the earliest of four Unix versions to "circa 1969-70" and say that it ran on the PDP-7 and PDP-9 computers (§I). They add that the second version ran on "the unprotected PDP-11/20 computer" and that the third "incorporated multiprogramming" and ran on the PDP-11/34, /40, /45, /60 and /70. The paper does not link the two facts, but they agree with the argument of the previous section: multiprogramming appeared on the machines that offered memory protection. The same paper describes a system that runs on the PDP-11/70 and the Interdata 8/32, so by 1978 Unix had been ported to a second processor architecture.</p>
+<p>Torvalds's own account of the start of Linux consists of newsgroup posts that he collected in 1992 (<a href="https://www.cs.cmu.edu/~awb/linux.history.html">Torvalds, 1992</a>). On 25 August 1991 he wrote to <code>comp.os.minix</code> that he was "doing a (free) operating system (just a hobby, won't be big and professional like gnu) for 386(486) AT clones". The same collection says that version 0.01 of the sources was made available "sometimes around this time", and that it contained no binaries. The lecture gives September 1991 for the first release. That is consistent with the posts; the exact day is not established by the sources that were opened. Torvalds also writes that the early licence was "much more restrictive than the GNU copyleft" because it allowed no money to change hands, and that this "changed with 0.12", which "was out January 5th" 1992. The lecture states that Linux adopted the GNU General Public License in 1992. The year agrees with Torvalds's account of version 0.12. The passage does not name the licence, so the identity of the licence rests on the lecture. The lecture dates kernel 1.0 to 1994, and the kernel.org archive lists <code>linux-1.0.tar.gz</code> with the date 13 March 1994 (<a href="https://www.kernel.org/pub/linux/kernel/v1.0/">kernel.org, v1.0</a>).</p>
+<p>The lecture says that Linus Torvalds joined hands with the GNU project to build a complete free system. Torvalds's post of 5 October 1991 reports that bash, gcc, GNU make and other GNU programs run under the new kernel. This supports the statement: the kernel came from one project, and the compilers, the shell and the utilities from another.</p>
+<p>Four statements of the lecture were not checked against a source: the release of the first major distributions, Slackware and Debian, in 1993; the release years of Ubuntu (2004) and Android (2008); and the statement that in 2020 Linux had become the most popular operating system among its users. The chapter does not rely on them.</p>
+<p><strong>The Tanenbaum–Torvalds exchange.</strong> Twenty-four days after version 0.12, on 29 January 1992, Tanenbaum posted "LINUX is obsolete". He defined the two kernel designs that the next sections use. In a monolithic system "the whole operating system is a single a.out file that runs in 'kernel mode'" and "contains the process management, memory management, file system and the rest". In a microkernel-based system "most of the OS runs as separate processes, mostly outside the kernel", communicating "by message passing". Torvalds replied the same day: "True, linux is monolithic, and I agree that microkernels are nicer" (<a href="https://www.oreilly.com/openbook/opensources/book/appa.html">Open Sources, appendix A</a>). The section on the kernel returns to this exchange with measurements.</p>
+<p><strong>Linux in high performance computing.</strong> The lecture states at <a class="timestamp" href="https://www.youtube.com/watch?v=lmlLdGMrdGU&amp;t=928s">W1L1 15:28</a> that Linux is "the heart of HPC systems" because many users run many jobs on the same machine. The first half of the reason is the multi-user, multitasking property described above. The TOP500 statistics page for the operating system family could not be read (the page loads its numbers with scripts that were not executed), so this chapter states no share of the TOP500 list for Linux. The lecture also lists the properties of Linux: open source, community support, a kernel base, multi-user multitasking, regular updates, many variants from mobile to server, customization, performance and stability, and several package managers (apt, yum, dnf). Chapter 1 and chapter 6 describe the systems themselves.</p>
+
+<h2 id="layers">The layers between a program and the hardware <a class="timestamp" href="https://www.youtube.com/watch?v=lmlLdGMrdGU&amp;t=1025s">W1L1 17:05</a></h2>
+<p>The lecture's diagram has four layers: the user, the application, the operating system, and the hardware. Inside the operating system it places three parts: the shell, the system libraries, and the kernel. It describes the shell as an interface to the kernel, the system libraries as "a bridge connecting applications and the kernel, offering a standardized and efficient method for applications to engage with the underlying system", and the kernel as the part that talks to the hardware. This section turns each part into an interface that a program can observe.</p>
+<p>The <em>shell</em> is a program in user mode. Ritchie and Thompson describe it as a command-line interpreter that "reads lines typed by the user and interprets them as requests to execute other programs" (§VI). The <em>system library</em>, here the C library <code>libc</code>, is a collection of functions that run in user mode. A function such as <code>puts</code> formats data in user mode and, when it needs the kernel, executes a system call. The <em>kernel</em> offers the system call interface defined in the section on the model. The code of the shell, of the library and of the program all runs in user mode. Only the kernel runs in kernel mode.</p>
+<p>The sessions of this chapter were run as one script in a fresh directory on the guest; the lines that start with a dollar sign show its commands, and tab characters in the outputs are shown as spaces. The session below builds the one-line program <code>hello</code> twice, once linked dynamically and once linked statically (with the C library copied into the executable). It prints the program interpreter that the dynamic executable requests, and the libraries that each executable needs.</p>
+<pre><code class="language-bash">$ cat hello.c
+#include &lt;stdio.h&gt;
+int main(void) { puts("hello"); return 0; }
+$ gcc -O2 hello.c -o hello_dyn
+$ gcc -O2 -static hello.c -o hello_static
+$ ./hello_dyn
+hello
+$ readelf -l hello_dyn | grep Requesting
+      [Requesting program interpreter: /lib64/ld-linux-x86-64.so.2]
+$ ldd hello_dyn
+    linux-vdso.so.1 (0x00007ffcc55d2000)
+    libc.so.6 =&gt; /lib/x86_64-linux-gnu/libc.so.6 (0x000075818de00000)
+    /lib64/ld-linux-x86-64.so.2 (0x000075818e0b1000)
+$ ldd hello_static
+    not a dynamic executable
+</code></pre>
+<p>The dynamic executable carries the name of a program interpreter, <code>/lib64/ld-linux-x86-64.so.2</code>, which is the dynamic loader. The loader finds and maps the shared libraries when the program starts. <code>ldd</code> lists three objects for the dynamic executable: <code>linux-vdso.so.1</code>, which is not a file but a small object that the kernel maps into every process (<a href="https://man7.org/linux/man-pages/man7/vdso.7.html">vdso(7)</a>); <code>libc.so.6</code>; and the loader itself. The static executable needs none of them. The tool <code>strace</code> records the system calls of a program. <code>strace</code> was unpacked from the Ubuntu package <code>strace 6.8-0ubuntu2</code> (<code>apt-get download strace</code>, <code>dpkg -x</code>) without installation, and the sessions run it as <code>./strace</code>. The first session counts the calls; the second records them in files and shows the ones that matter.</p>
+<pre><code class="language-bash">$ ./strace -c ./hello_dyn
+hello
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- ----------------
+  0.00    0.000000           0         1           read
+  0.00    0.000000           0         1           write
+  0.00    0.000000           0         2           close
+  0.00    0.000000           0         3           fstat
+  0.00    0.000000           0         8           mmap
+  0.00    0.000000           0         3           mprotect
+  0.00    0.000000           0         1           munmap
+  0.00    0.000000           0         3           brk
+  0.00    0.000000           0         2           pread64
+  0.00    0.000000           0         1         1 access
+  0.00    0.000000           0         1           execve
+  0.00    0.000000           0         1           arch_prctl
+  0.00    0.000000           0         1           set_tid_address
+  0.00    0.000000           0         2           openat
+  0.00    0.000000           0         1           set_robust_list
+  0.00    0.000000           0         1           prlimit64
+  0.00    0.000000           0         1           getrandom
+  0.00    0.000000           0         1           rseq
+------ ----------- ----------- --------- --------- ----------------
+100.00    0.000000           0        34         1 total
+$ ./strace -c ./hello_static 2&gt;&amp;1 | tail -3
+  0.71    0.000005           5         1           set_robust_list
+------ ----------- ----------- --------- --------- ----------------
+100.00    0.000704          44        16           total
+</code></pre>
+<pre><code class="language-bash">$ ./strace -o dyn.txt ./hello_dyn
+hello
+$ ./strace -o sta.txt ./hello_static
+hello
+$ grep -c '^[a-z_0-9]*(' dyn.txt sta.txt
+dyn.txt:35
+sta.txt:17
+$ grep -E '^(execve|openat|write|exit_group)' dyn.txt | cut -c1-100
+execve("./hello_dyn", ["./hello_dyn"], 0x7ffda73adac0 /* 22 vars */) = 0
+openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+write(1, "hello\n", 6)                  = 6
+exit_group(0)                           = ?
+</code></pre>
+<p>The dynamic program makes 35 system calls, including the final <code>exit_group</code>, which never returns; <code>strace -c</code> counts 34 completed calls. The static program makes 17, and <code>strace -c</code> counts 16. The 18 calls in the difference belong to the dynamic loader: it opens <code>/etc/ld.so.cache</code> and <code>libc.so.6</code>, reads the header of the library, and maps its segments with <code>mmap</code> (8 calls of <code>mmap</code> in the dynamic program). Exactly one call fails, <code>access("/etc/ld.so.preload")</code>, which returns <code>ENOENT</code> because the file does not exist. The single line that the program prints reaches the kernel as one call, <code>write(1, "hello\n", 6)</code>. This is the boundary between the library and the kernel made visible: <code>puts</code> ran in user mode, and the kernel did the output.</p>
+<p>The lecture says at <a class="timestamp" href="https://www.youtube.com/watch?v=JYTA5BWHmb0&amp;t=1208s">W1L2 20:08</a> that shared libraries are shared by multiple applications and make memory use efficient. The next session tests this on a <code>sleep</code> process. It prints the mappings of the process, and the accounting of the executable part of the C library from <code>/proc/PID/smaps</code>.</p>
+<pre><code class="language-bash">$ sleep 5 &amp;
+$ awk '{print $1, $2, $6}' /proc/$!/maps | grep -E 'sleep|heap|libc.so|stack|vvar|vdso'
+63fb35b82000-63fb35b84000 r--p /usr/bin/sleep
+63fb35b84000-63fb35b88000 r-xp /usr/bin/sleep
+63fb35b88000-63fb35b89000 r--p /usr/bin/sleep
+63fb35b89000-63fb35b8a000 r--p /usr/bin/sleep
+63fb35b8a000-63fb35b8b000 rw-p /usr/bin/sleep
+63fb5b932000-63fb5b953000 rw-p [heap]
+717bcf800000-717bcf828000 r--p /usr/lib/x86_64-linux-gnu/libc.so.6
+717bcf828000-717bcf9b1000 r-xp /usr/lib/x86_64-linux-gnu/libc.so.6
+717bcf9b1000-717bcfa00000 r--p /usr/lib/x86_64-linux-gnu/libc.so.6
+717bcfa00000-717bcfa04000 r--p /usr/lib/x86_64-linux-gnu/libc.so.6
+717bcfa04000-717bcfa06000 rw-p /usr/lib/x86_64-linux-gnu/libc.so.6
+7ffe16778000-7ffe1679a000 rw-p [stack]
+7ffe167c9000-7ffe167cd000 r--p [vvar]
+7ffe167cd000-7ffe167cf000 r-xp [vdso]
+$ awk '/ r-xp .*libc.so.6/ {f=1} f &amp;&amp; /^(Size|Rss|Pss|Shared_Clean|Private_Clean):/ {print} f &amp;&amp; /^VmFlags/ {exit}' /proc/$!/smaps
+Size:               1572 kB
+Rss:                 976 kB
+Pss:                  36 kB
+Shared_Clean:        976 kB
+Private_Clean:         0 kB
+</code></pre>
+<p>The process maps its own program text <code>/usr/bin/sleep</code>, a heap, the C library in five mappings (the dynamic loader is also mapped, and the <code>grep</code> pattern leaves its lines out), a stack, and two kernel-provided regions, <code>[vvar]</code> and <code>[vdso]</code>. In the executable part of the C library (permissions <code>r-xp</code>), 976 kB are resident, and all 976 kB are shared clean pages. The proportional set size is the count of pages a process has in memory, "where each page is divided by the number of processes sharing it" (<a href="https://docs.kernel.org/filesystems/proc.html">Linux kernel documentation, <code>/proc</code></a>). In four observations it was 16, 36, 43 and 45 kB, so on average (the harmonic mean over the pages) 22 to 61 processes shared each page at those moments (976 divided by 45, and 976 divided by 16). The lecture's statement holds: the code of the C library is stored once in physical memory and mapped into every process that uses it. The chapter returns to the <code>[vdso]</code> region in the section on the kernel.</p>
+<p>The layering of the lecture is not strict. A program can call the kernel directly without the library, as the later measurement of <code>syscall(SYS_getpid)</code> does. The lecture says that an application goes to the shell first. This is true only at the moment of launching: after the shell has started the program, the shell waits, and the program's own system calls do not pass through it (Ritchie and Thompson §VI: "When the command is finished, the shell resumes its own execution").</p>
+
+<h2 id="launch">From <code>./hello</code> to the first instruction</h2>
+<p>The six events of the running case can now be named with the objects of the model. <strong>E1.</strong> The shell reads the line <code>./hello</code>. The name contains a slash, so the shell takes it as a path and does not search for it (POSIX.1-2024, Shell and Utilities, <a href="https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html">§2.9.1.4, Command Search and Execution</a>: the search applies only to a command name that contains no slash; Ritchie and Thompson §VI already allow a command that "may be a path name including the '/' character"). The shell calls <code>fork</code>. Ritchie and Thompson state that after <code>fork</code> "the process splits into two independently executing processes" that "have independent copies of the original memory image, and share all open files" (§5.1). POSIX.1-2024 states that the child "shall be an exact copy of the calling process" except for details such as a unique process identifier (<a href="https://pubs.opengroup.org/onlinepubs/9799919799/functions/fork.html">POSIX.1-2024, <code>fork</code></a>). The Linux manual adds that the two processes "run in separate memory spaces", that at the time of <code>fork</code> both spaces have the same content, and that <code>fork</code> is implemented with copy-on-write pages (the two processes share the pages, read-only, until one of them writes to a page, and then the kernel gives the writer a private copy), so that its only penalty is "the time and memory required to duplicate the parent's page tables, and to create a unique task structure for the child" (<a href="https://man7.org/linux/man-pages/man2/fork.2.html">fork(2)</a>, description and notes). The C library implements <code>fork</code> with the <code>clone</code> system call, as the trace below shows.</p>
+<p><strong>E2.</strong> The child calls <code>execve</code>. This call "causes the program that is currently being executed by the calling process to be replaced with a new program, with newly initialized stack, heap, and (initialized and uninitialized) data segments" (<a href="https://man7.org/linux/man-pages/man2/execve.2.html">execve(2)</a>). Ritchie and Thompson describe the same primitive: "All the code and data in the process invoking <code>execute</code> is replaced from the file" (§5.3). <strong>E3.</strong> ELF (Executable and Linkable Format) is the file format of Linux executables; its program headers list the segments to map, and the header of type <code>PT_INTERP</code> names the program interpreter. For an ELF executable, the kernel opens the file through the virtual file system, reads its headers, and creates the mappings for its loadable segments. For a dynamically linked ELF executable, "the interpreter named in the PT_INTERP segment is used to load the needed shared objects" (execve(2)). The kernel then returns to user mode at the entry point of the new image. In the full trace (<code>dyn.txt</code>, of which the previous section shows the filtered lines), the first calls after <code>execve</code> are <code>brk</code>, <code>mmap</code>, <code>access("/etc/ld.so.preload")</code> and the opening of <code>/etc/ld.so.cache</code>. The dynamic loader makes these calls, so the first user-mode instruction of the new image belongs to the loader. <strong>E4.</strong> The loader opens <code>libc.so.6</code> and maps it. <strong>E5.</strong> The program's <code>main</code> calls <code>puts</code>, which calls <code>write</code>. <strong>E6.</strong> The program ends with <code>exit_group</code>, and the parent's <code>wait4</code> returns the child's process number and status. Ritchie and Thompson describe the end: <code>exit</code> "terminates a process, destroys its image, closes its open files", and "the parent is notified through the <code>wait</code> primitive" (§5.5).</p>
+<p>The next session traces the shell itself. The shell is started with two commands in sequence, <code>./hello_dyn; echo done</code>, and <code>strace -f</code> follows the child. It shows only the calls that create, replace, wait for and end processes. The leading number in each line is the process number.</p>
+<pre><code class="language-bash">$ ./strace -f -o fork.txt -e trace=execve,clone,wait4,exit_group bash -c './hello_dyn; echo done'
+hello
+done
+$ grep -v -E -e '--- SIG' -e ECHILD fork.txt | cut -c1-120
+600   execve("/usr/bin/bash", ["bash", "-c", "./hello_dyn; echo done"], 0x7fffbc2aa428 /* 22 vars */) = 0
+600   clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x70821c038a10) = 601
+600   wait4(-1,  &lt;unfinished ...&gt;
+601   execve("./hello_dyn", ["./hello_dyn"], 0x636c1c1ec680 /* 22 vars */) = 0
+601   exit_group(0)                     = ?
+601   +++ exited with 0 +++
+600   &lt;... wait4 resumed&gt;[{WIFEXITED(s) &amp;&amp; WEXITSTATUS(s) == 0}], 0, NULL) = 601
+600   exit_group(0)                     = ?
+600   +++ exited with 0 +++
+</code></pre>
+<p>Process 600 is the shell. It calls <code>clone</code> with the flag <code>SIGCHLD</code>, which is how the C library implements <code>fork</code>, and the call returns 601 in the parent. The parent then blocks in <code>wait4</code>. Process 601 calls <code>execve</code> on <code>./hello_dyn</code>, runs, and ends with <code>exit_group</code>. The <code>wait4</code> of 600 resumes and returns 601. Process numbers differ from run to run, but the order of the events does not.</p>
+<p>The next program performs E1, E2 and E6 itself. It takes no input and prints five lines. The parent calls <code>fork</code>. The child checks that its parent is the process that forked it, flushes its output buffer, and replaces its image by <code>/bin/echo</code>. The parent waits for the child with <code>waitpid</code> and checks three relations. The program prints relations between process numbers and not the numbers, so its output is the same on every run. The child's lines come first because the parent prints only after <code>waitpid</code> returns. The program assumes that <code>/bin/echo</code> exists.</p>
+<pre><code class="language-c" data-file="launch.c" data-build="gcc -O2 launch.c -o launch" data-run="./launch">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;sys/wait.h&gt;
+#include &lt;unistd.h&gt;
+
+int main(void)
+{
+    pid_t parent = getpid();
+    pid_t child = fork();                    /* one call, two returns */
+    if (child &lt; 0) { perror("fork"); return 1; }
+    if (child == 0) {                        /* child: a copy of the parent's image */
+        printf("child:  its parent is the process that forked it: %s\n",
+               getppid() == parent ? "yes" : "no");
+        fflush(stdout);                      /* empty the stdio buffer before the image is replaced */
+        execl("/bin/echo", "echo", "child:  image replaced by /bin/echo", (char *)NULL);
+        perror("execl");                     /* reached only if execl failed */
+        _exit(127);
+    }
+    int status = 0;
+    pid_t done = waitpid(child, &amp;status, 0);
+    printf("parent: wait returned the child's pid: %s\n", done == child ? "yes" : "no");
+    printf("parent: child exited normally: %s, status %d\n",
+           WIFEXITED(status) ? "yes" : "no", WEXITSTATUS(status));
+    printf("parent: child pid differs from parent pid: %s\n", child != parent ? "yes" : "no");
+    return 0;
+}
+</code></pre>
+<pre><code class="output">child:  its parent is the process that forked it: yes
+child:  image replaced by /bin/echo
+parent: wait returned the child's pid: yes
+parent: child exited normally: yes, status 0
+parent: child pid differs from parent pid: yes</code></pre>
+<p>The first line is printed by the child's own code after <code>fork</code>. The second line is printed by <code>/bin/echo</code>: the child's code no longer exists after <code>execl</code>, which is the replacement of the whole image that the section above describes. The parent's lines confirm that <code>waitpid</code> returned the child's process number, that the child exited normally with status 0, and that the two processes have different numbers, so there are two processes where there was one.</p>
+<p><strong>The cost of a launch.</strong> Let \(t_{\mathrm{launch}}\) be the wall-clock time from the <code>fork</code> in the parent to the return of <code>waitpid</code>, and \(t_{\mathrm{run}}\) the time that the program then needs for its own work. The fraction of the time that the launch consumes is</p>
+\[
+\varphi=\frac{t_{\mathrm{launch}}}{t_{\mathrm{launch}}+t_{\mathrm{run}}}. \tag{2.1}
+\]
+<p>The next program measures \(t_{\mathrm{launch}}\) for the one-line program in its two forms, built by the command in the listing. Its inputs are the two executables <code>tiny_dyn</code> and <code>tiny_static</code>. For each form it starts the program 1000 times with <code>fork</code>, <code>execl</code> and <code>waitpid</code>, with the output redirected to <code>/dev/null</code>, and it keeps the smallest time of 7 rounds in which the two forms alternate. It also reads the number of minor page faults of the children with <code>getrusage(RUSAGE_CHILDREN)</code> (a <em>minor fault</em> is a page fault that the kernel resolves without reading from a disk, for example by mapping a zero-filled page or a page already in memory), and it measures the cost of one minor fault as the time to write the first byte of each page of a fresh 64 MiB mapping. The product of the faults per launch and the cost of one fault estimates the time that faults take, under the assumption that a fault during a launch costs as much as a first write to a zero-filled page. That assumption is approximate: a fault on a page of an executable file does other work. The run is checked by its return code, and the output is one sample run.</p>
+<pre><code class="language-c" data-file="launch_cost.c" data-build="mkdir -p /tmp/hpsc-launch-ch02 &amp;&amp; printf &#x27;#include &lt;stdio.h&gt;\nint main(void) { puts(&quot;hello&quot;); return 0; }\n&#x27; &gt; tiny.c &amp;&amp; gcc -O2 tiny.c -o /tmp/hpsc-launch-ch02/tiny_dyn &amp;&amp; gcc -O2 -static tiny.c -o /tmp/hpsc-launch-ch02/tiny_static &amp;&amp; gcc -O2 launch_cost.c -o launch_cost" data-run="./launch_cost" data-check="returncode">#define _GNU_SOURCE
+#include &lt;fcntl.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;sys/mman.h&gt;
+#include &lt;sys/resource.h&gt;
+#include &lt;sys/wait.h&gt;
+#include &lt;time.h&gt;
+#include &lt;unistd.h&gt;
+
+#define LAUNCHES 1000
+
+static double now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &amp;ts);
+    return ts.tv_sec + ts.tv_nsec * 1e-9;
+}
+
+/* Seconds per minor fault: first write to each page of a fresh 64 MiB mapping. */
+static double fault_cost(void)
+{
+    long page = sysconf(_SC_PAGESIZE), bytes = 64L &lt;&lt; 20;
+    char *p = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    madvise(p, bytes, MADV_NOHUGEPAGE);
+    double t0 = now();
+    for (long off = 0; off &lt; bytes; off += page) p[off] = 1;
+    double t = now() - t0;
+    munmap(p, bytes);
+    return t / (bytes / page);
+}
+
+/* Run `path` LAUNCHES times with fork, exec and wait; report time and minor faults per launch. */
+static double launch(const char *path, double *faults)
+{
+    struct rusage before, after;
+    getrusage(RUSAGE_CHILDREN, &amp;before);
+    double t0 = now();
+    for (int i = 0; i &lt; LAUNCHES; i++) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            int null = open("/dev/null", O_WRONLY);
+            dup2(null, 1);
+            execl(path, path, (char *)NULL);
+            _exit(127);
+        }
+        waitpid(pid, NULL, 0);
+    }
+    double t = (now() - t0) / LAUNCHES;
+    getrusage(RUSAGE_CHILDREN, &amp;after);
+    *faults = (double)(after.ru_minflt - before.ru_minflt) / LAUNCHES;
+    return t;
+}
+
+int main(void)
+{
+    double fc = fault_cost();
+    printf("one minor fault (first touch of a page): %.2f us\n", fc * 1e6);
+    const char *prog[] = {"/tmp/hpsc-launch-ch02/tiny_dyn", "/tmp/hpsc-launch-ch02/tiny_static"};
+    double best[2] = {1e30, 1e30}, faults[2] = {0, 0};
+    for (int r = 0; r &lt; 7; r++)                      /* alternate the two programs in every round */
+        for (int k = 0; k &lt; 2; k++) {
+            double t = launch(prog[k], &amp;faults[k]);
+            if (t &lt; best[k]) best[k] = t;
+        }
+    for (int k = 0; k &lt; 2; k++)
+        printf("%-14s %6.1f us per launch, %5.1f minor faults per launch, faults alone: %4.1f us\n",
+               prog[k], best[k] * 1e6, faults[k], faults[k] * fc * 1e6);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">one minor fault (first touch of a page): 1.72 us
+/tmp/hpsc-launch-ch02/tiny_dyn  510.7 us per launch,  69.9 minor faults per launch, faults alone: 120.0 us
+/tmp/hpsc-launch-ch02/tiny_static  337.2 us per launch,  43.1 minor faults per launch, faults alone: 74.0 us</code></pre>
+<p>In five runs of this program, the dynamic form took 0.46 to 0.70 ms per launch and the static form 0.31 to 0.42 ms; in each run the static form was faster, by a factor of 1.4 to 1.7. The dynamic form took 69.8 to 70.9 minor faults per launch and the static form 43.0 to 44.0. One minor fault cost 1.7 to 2.5 µs in these five runs. The faults therefore account for 118 to 171 µs of a dynamic launch (23 to 30 %) and for 73 to 105 µs of a static launch (22 to 26 %). The share rises with the cost of a fault: in the run under heavy load, the fault cost 3.0 µs and the faults accounted for 211 µs of a 574 µs dynamic launch (37 %) and 130 µs of a 384 µs static launch (34 %). The entry and exit of the system calls account for less: 35 calls of at least 84 ns each (the smallest measured <code>getpid</code>) give at least 2.9 µs, 0.4 to 0.6 % of a dynamic launch, and 17 calls give at least 1.4 µs, 0.3 to 0.5 % of a static launch. These are lower bounds on the cost of entering and leaving the kernel only, because <code>fork</code>, <code>execve</code>, <code>mmap</code> and <code>exit_group</code> also do work inside the kernel. About 70 to 78 % of a launch remains unexplained by the two items, and most of it is time spent inside those calls: the duplication of the page tables in <code>fork</code>, the construction of the new address space and the mappings in <code>execve</code> and <code>mmap</code>, the teardown at exit, and the scheduling of the child and the parent. This measurement does not separate them. Exercise 6 measures the first one. The dynamic launch is 146 to 278 µs slower than the static launch. The 27 extra faults explain about 45 to 70 µs of that difference, and the 18 extra system calls at least 1.5 µs. The rest of the difference is not explained here.</p>
+<p>Equation (2.1) turns these numbers into a rule. The launch consumes at most 1 % of the time when \(t_{\mathrm{run}}\ge 99\,t_{\mathrm{launch}}\), which is 45 to 69 ms for the dynamic program and 31 to 42 ms for the static one. For \(t_{\mathrm{run}}=10\) ms the fraction is \(\varphi=4.4\) to \(6.5\ \%\) (dynamic) and 3.0 to 4.0 % (static). For \(t_{\mathrm{run}}=1\) s it is 0.05 to 0.07 %. A sweep of runs that last seconds can start one process per run. A sweep of runs that last milliseconds should let one process compute several parameter sets; chapter 5 builds the sweep script.</p>
+
+<h2 id="kernel">The kernel: privileged code, system calls and loadable modules <a class="timestamp" href="https://www.youtube.com/watch?v=JYTA5BWHmb0&amp;t=147s">W1L2 2:27</a></h2>
+<p>The lecture defines the kernel as the platform on which programs and services run, a bridge between the software and the hardware that manages resources, handles hardware communication and keeps processes executing. At <a class="timestamp" href="https://www.youtube.com/watch?v=JYTA5BWHmb0&amp;t=208s">W1L2 3:28</a> it states that the Linux kernel is monolithic, which it explains as running "as a single large process in a privileged mode" (the slide at <a class="timestamp" href="https://www.youtube.com/watch?v=JYTA5BWHmb0&amp;t=285s">W1L2 4:45</a>). It adds that the kernel supports loadable kernel modules, and that it creates for every process a "virtual machine" through which the process reaches the hardware.</p>
+<p><strong>What monolithic means.</strong> Tanenbaum's definition, quoted in the section on history, is that the whole operating system is one binary that runs in kernel mode and contains process management, memory management, the file system "and the rest". This definition does not call the kernel a process. A process, as defined in the model, is an execution of an image with its own address space and with state that the kernel keeps. The kernel is the code that keeps that state. When a process makes a system call, the kernel code runs on behalf of the calling thread, and <code>strace</code> attributes the call to the process that made it. The lecture's phrase "single large process" is therefore a description of one binary in one privileged mode and not of a process in the sense of the model.</p>
+<p><strong>What the "virtual machine" is.</strong> The slide at <a class="timestamp" href="https://www.youtube.com/watch?v=JYTA5BWHmb0&amp;t=585s">W1L2 9:45</a> draws a box labelled "Virtual Machine" between each process and the kernel. What the kernel gives each process is two things. The first is a virtual processor: the thread sees its own registers, and the kernel saves and restores them when it switches between threads. The second is virtual memory: the process sees its own address space \(A\), whatever the other processes do. Together they make each process behave as if it had a dedicated computer, which is what the lecture means. They are not a virtual machine in the sense of a hypervisor, where a guest runs its own kernel. The machine of this chapter contains both layers: the WSL 2 virtual machine runs the Linux kernel 6.6.87.2, and every process of the guest runs under that single kernel. The lecture also assigns the creation of these machines to the virtual file system. That assignment is not supported by the kernel documentation, which describes the virtual file system as an abstraction layer over file systems; the section on the virtual file system returns to it.</p>
+<p><strong>The cost of one system call.</strong> A request to the kernel costs more than a call to a function in the same program, because the processor changes mode, the kernel entry code runs, and the return restores the user state. The kernel documentation lists the entry point for the <code>syscall</code> instruction among the entry points of the x86-64 entry code (<a href="https://docs.kernel.org/arch/x86/entry_64.html">entry code</a>). It also states that on processors that need page-table isolation, the kernel changes the page-table base register at every entry and exit, a move that costs "on the order of a hundred cycles" each (<a href="https://docs.kernel.org/arch/x86/pti.html">page-table isolation</a>, section on overhead). The guest here reports <code>Not affected</code>, so that cost is absent from the numbers below. The next program measures three costs per call: an ordinary function call that the compiler cannot remove, the system call <code>getpid</code> through <code>syscall(SYS_getpid)</code>, and <code>clock_gettime</code>, which the C library serves from the vDSO, a small shared object that the kernel maps into every process. The Linux manual states that the vDSO exists because some calls are used so often that "the context-switch overhead that results from exiting user space and entering the kernel" can dominate performance (<a href="https://man7.org/linux/man-pages/man7/vdso.7.html">vdso(7)</a>), and it lists <code>__vdso_clock_gettime</code> among the exported symbols. The listing keeps the smallest time of 5 repetitions of 5 000 000 calls. It is checked by its return code.</p>
+<pre><code class="language-c" data-file="syscall_cost.c" data-build="gcc -O2 syscall_cost.c -o syscall_cost" data-run="./syscall_cost" data-check="returncode">#define _GNU_SOURCE
+#include &lt;stdio.h&gt;
+#include &lt;sys/syscall.h&gt;
+#include &lt;time.h&gt;
+#include &lt;unistd.h&gt;
+
+#define N 5000000L
+#define REPS 5
+
+static double now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &amp;ts);
+    return ts.tv_sec + ts.tv_nsec * 1e-9;
+}
+
+static long sink;
+__attribute__((noinline)) static long plain_call(long x) { __asm__ volatile("" : "+r"(x)); return x + 1; }
+
+int main(void)
+{
+    double best_plain = 1e30, best_sys = 1e30, best_vdso = 1e30;
+    struct timespec ts;
+    for (int r = 0; r &lt; REPS; r++) {
+        double t0 = now();
+        for (long i = 0; i &lt; N; i++) sink += plain_call(i);
+        double t1 = now();
+        for (long i = 0; i &lt; N; i++) sink += syscall(SYS_getpid);
+        double t2 = now();
+        for (long i = 0; i &lt; N; i++) { clock_gettime(CLOCK_MONOTONIC, &amp;ts); sink += ts.tv_nsec; }
+        double t3 = now();
+        if (t1 - t0 &lt; best_plain) best_plain = t1 - t0;
+        if (t2 - t1 &lt; best_sys)   best_sys = t2 - t1;
+        if (t3 - t2 &lt; best_vdso)  best_vdso = t3 - t2;
+    }
+    printf("ordinary function call      %7.2f ns\n", best_plain / N * 1e9);
+    printf("syscall(SYS_getpid)         %7.2f ns\n", best_sys / N * 1e9);
+    printf("clock_gettime (vDSO)        %7.2f ns\n", best_vdso / N * 1e9);
+    printf("system call / function call %7.1f\n", best_sys / best_plain);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">ordinary function call         0.49 ns
+syscall(SYS_getpid)           87.28 ns
+clock_gettime (vDSO)          16.57 ns
+system call / function call   177.2</code></pre>
+<p>Over eight runs, the ordinary function call took 0.46 to 0.51 ns, <code>syscall(SYS_getpid)</code> took 83.6 to 96.5 ns, and <code>clock_gettime</code> through the vDSO took 15.6 to 17.8 ns. The run at 96.5 ns was made while other programs loaded the machine; the other seven runs lie between 83.6 and 91.4 ns. A minimal system call costs 176 to 194 times as much as the function call, and 5.0 to 5.5 times as much as the call that the vDSO serves. The vDSO call still reads the clock, so its cost is not the cost of a function call. The frequency of the processor was not measured, so the chapter does not convert the times into cycles.</p>
+<p><strong>Amortizing the cost.</strong> A program that moves \(S\) bytes with calls that each move \(b\) bytes makes \(S/b\) calls. Let \(a\) be the fixed time of one call, independent of \(b\), and \(B\) the rate at which the kernel copies data. The total time and the fraction of it that is fixed per-call cost are</p>
+\[
+T(b)=\frac{S}{b}\,a+\frac{S}{B},\qquad \frac{T_{\text{calls}}}{T}=\frac{aB}{aB+b}. \tag{2.2}
+\]
+<p>The fixed cost equals the copy time when \(b^{*}=aB\). The model assumes that \(a\) and \(B\) are constant, which holds while the data stay in a cache that the copy can use. The next program tests it on a file read. It writes a 64 MiB file in <code>/tmp</code>, so that the data sit in the page cache (the memory in which the kernel keeps recently used file data), and it reads the file with <code>read</code> calls of 1 byte to 64 KiB. For each size it keeps the smallest time of three passes, with at most 2 000 000 calls per pass. It fits the line \(t=a+b/B\) through the seven points by least squares. The run is checked by its return code.</p>
+<pre><code class="language-c" data-file="chunks.c" data-build="gcc -O2 chunks.c -o chunks" data-run="./chunks" data-check="returncode">#define _GNU_SOURCE
+#include &lt;fcntl.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;time.h&gt;
+#include &lt;unistd.h&gt;
+
+#define MAXCHUNK (64 * 1024)
+#define FILE_BYTES (64L &lt;&lt; 20)                   /* the file that every chunk size reads from the start */
+#define CALLS 2000000L                           /* at most this many calls per measurement */
+
+static double now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &amp;ts);
+    return ts.tv_sec + ts.tv_nsec * 1e-9;
+}
+
+int main(void)
+{
+    static char buf[MAXCHUNK];
+    int fd = open("/tmp/chunks.dat", O_RDWR | O_CREAT | O_TRUNC, 0600);
+    unlink("/tmp/chunks.dat");                        /* the open descriptor keeps the file alive */
+    for (long done = 0; done &lt; FILE_BYTES; done += MAXCHUNK)
+        if (write(fd, buf, MAXCHUNK) != MAXCHUNK) return 1;      /* the data now sit in the page cache */
+    long size[] = {1, 8, 64, 512, 4096, 32768, 65536};
+    int n = sizeof size / sizeof size[0];
+    double x[8], y[8];
+    printf("%8s %14s %14s\n", "bytes", "ns per call", "GB/s");
+    for (int i = 0; i &lt; n; i++) {
+        long calls = FILE_BYTES / size[i];
+        if (calls &gt; CALLS) calls = CALLS;
+        double best = 1e30;
+        for (int r = 0; r &lt; 3; r++) {
+            lseek(fd, 0, SEEK_SET);
+            double t0 = now();
+            for (long k = 0; k &lt; calls; k++)
+                if (read(fd, buf, size[i]) != size[i]) return 1;
+            double t = (now() - t0) / calls;
+            if (t &lt; best) best = t;
+        }
+        x[i] = size[i];
+        y[i] = best * 1e9;
+        printf("%8ld %14.1f %14.2f\n", size[i], y[i], size[i] / best / 1e9);
+    }
+    /* least-squares line  t = a + s / B  through the points (s, t) */
+    double sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (int i = 0; i &lt; n; i++) { sx += x[i]; sy += y[i]; sxx += x[i] * x[i]; sxy += x[i] * y[i]; }
+    double slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+    double a = (sy - slope * sx) / n;
+    printf("fit: a = %.1f ns per call, 1/B = %.4f ns per byte (B = %.1f GB/s)\n", a, slope, 1.0 / slope);
+    printf("chunk size at which call overhead equals copy time: %.0f bytes\n", a / slope);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">   bytes    ns per call           GB/s
+       1          182.7           0.01
+       8          187.8           0.04
+      64          185.4           0.35
+     512          227.8           2.25
+    4096          568.6           7.20
+   32768         3764.8           8.70
+   65536         6839.9           9.58
+fit: a = 194.7 ns per call, 1/B = 0.1029 ns per byte (B = 9.7 GB/s)
+chunk size at which call overhead equals copy time: 1893 bytes</code></pre>
+<p>In three runs at lower load, a read of 1 byte took 173 to 183 ns, a read of 4 KiB took 532 to 579 ns, and a read of 64 KiB took 6.4 to 6.8 µs, which is 9.6 to 10.3 GB/s. (In the run under heavy load, the read of 4 KiB took 845 ns and the fit gave \(a=416\) ns, so on a busy machine the fixed cost per call is larger and the crossover \(b^{*}\) moves up to 3.7 kB.) The fit gave \(a=180\) to 195 ns per call and \(B=9.7\) to 10.5 GB/s, and the crossover \(b^{*}=aB\) was 1.8 to 1.9 kB. The line agrees with every measured time to within 10 % in the sample run (the largest difference is 8.6 %). The 180 ns per call is about twice the 87 ns of <code>getpid</code>: a read also finds the open file from the descriptor and finds the data in the page cache, and the measurement does not separate these two parts. With \(a=180\) ns, reading 1 GiB takes \(2^{30}\times180\) ns \(=193\) s with 1-byte reads and \(0.003+0.107=0.11\) s with 64 KiB reads, by equation (2.2). The ratio is about 1700. A program that reads or writes in small pieces, one number or one line at a time, spends nearly all its time in the kernel. The remedy is to move more bytes per call. The stdio buffer of the C library helps: it turns many small <code>fread</code> or <code>fprintf</code> calls into one <code>read</code> or <code>write</code> of the buffer size, 4096 bytes for a file in <code>/tmp</code> on this guest (glibc 2.39; equal to the preferred I/O size of the file, <code>st_blksize</code>, which <code>stat -c %o</code> reports as 4096; a probe program that wrote 10 000 bytes with <code>fputc</code> made writes of 4096, 4096 and 1808 bytes). At 4096 bytes equation (2.2) puts the fixed cost at \(1800/(1800+4096)=31\) % of the call time. Reaching 5 % needs calls of about 34 kB (Exercise 2), which a program gets by reading into its own larger buffer or by setting the stdio buffer with <code>setvbuf</code>.</p>
+<p><strong>Monolithic or microkernel.</strong> In the exchange of January 1992, Tanenbaum argued that "the only real argument for monolithic systems was performance", and that microkernel systems "can be just as fast", citing published comparisons of Mach 3.0 with monolithic systems. Torvalds replied that Linux "wins heavily on points of being available now". Equation (2.2) shows where the performance question sits: in a microkernel, an operation that is one system call in a monolithic kernel becomes at least one message exchange with a server process. The program in the section on the scheduler measures a round trip of a one-byte message between two processes through a pipe: 2.8 to 3.3 µs on one processor, which is 29 to 40 times the cost of the minimal system call. That figure belongs to the generic pipe mechanism and not to the optimized message path of a microkernel, so it does not decide the question. It shows that the cost of the message path decides it.</p>
+<p><strong>Loadable modules.</strong> The kernel of this guest is built with module support (<code>CONFIG_MODULES=y</code>), and <code>lsmod</code> lists loaded modules such as <code>intel_rapl_msr</code> and <code>kvm_intel</code> (the session at the end of this section). A module is object code that is linked into the running kernel. It runs in kernel mode with the full privileges of the kernel, so a module is as trusted as the kernel, and a fault in a module is a fault in the kernel. The lecture says that this feature gives Linux its variety of flavors. The flavors of Linux that the lecture lists differ in their package managers, default software and kernel configuration. Modules are a mechanism for adding drivers and other kernel features to a running kernel without a restart, and the chapter does not find that they define a flavor.</p>
+<pre><code class="language-bash">$ uname -sr
+Linux 6.6.87.2-microsoft-standard-WSL2
+$ getconf PAGESIZE
+4096
+$ zcat /proc/config.gz | grep -E '^CONFIG_(MODULES|HZ|PREEMPT_DYNAMIC)='
+CONFIG_PREEMPT_DYNAMIC=y
+CONFIG_HZ=250
+CONFIG_MODULES=y
+$ lsmod | head -3
+Module                  Size  Used by
+intel_rapl_msr         16384  0
+intel_rapl_common      32768  1 intel_rapl_msr
+$ cat /sys/devices/system/cpu/vulnerabilities/meltdown
+Not affected
+$ cat /proc/sys/kernel/randomize_va_space
+2
+</code></pre>
+<p>The session reports the page size, the timer frequency and the dynamic-preemption option of the kernel, the first loaded modules, the state of the Meltdown mitigation, and the setting of address-space layout randomization (<code>randomize_va_space</code> is 2, which means that the kernel places the stack, the heap and the libraries of each new process at random addresses, so the addresses in the <code>maps</code> session differ from run to run).</p>
+
+<h2 id="scheduler">The scheduler: fair shares, preemption and the cost of switching <a class="timestamp" href="https://www.youtube.com/watch?v=JYTA5BWHmb0&amp;t=678s">W1L2 11:18</a></h2>
+<p>The lecture states that the process scheduler decides how processes are allocated to the processor, with the goal of maximizing processor utilization and sharing the time equally. Its slide lists the key elements: scheduling policies (round robin, first come first served, shortest job next, completely fair scheduler), process states (running, waiting, ready, blocked), preemptive and non-preemptive scheduling, context switching and load balancing. The lecture explains preemptive scheduling as taking the processor from a running process when a higher-priority process arrives.</p>
+<p><strong>Definitions.</strong> A thread is <em>runnable</em> when it needs a processor, and <em>blocked</em> when it waits for an event such as the completion of input. A <em>burst</em> \(\tau_j\) is the processor time that job \(j\) needs. The <em>waiting time</em> of a job is the time during which it is runnable and does not run. A scheduler is <em>preemptive</em> when it can remove a running thread from the processor before that thread blocks or ends. A <em>quantum</em> \(q\) is the longest time that a thread runs before the scheduler may switch. A <em>context switch</em> saves the state of one thread, restores the state of another and costs a time \(t_{\mathrm{cs}}\).</p>
+<p><strong>Policies on four jobs.</strong> Take four jobs that arrive together at time 0, with bursts \(\tau_A=8\), \(\tau_B=4\), \(\tau_C=9\), \(\tau_D=5\) ms, one processor, no switching cost, and jobs that run to completion in the chosen order. If the order is \(\sigma\) and \(\tau_{(i)}\) is the burst of the job in position \(i\), the job in position \(k\) waits \(\sum_{i\lt k}\tau_{(i)}\), so the sum of the waiting times and the mean waiting time are</p>
+\[
+\sum_{k=1}^{n}\sum_{i\lt k}\tau_{(i)}=\sum_{i=1}^{n}(n-i)\,\tau_{(i)},\qquad \bar w=\frac1n\sum_{i=1}^{n}(n-i)\,\tau_{(i)}. \tag{2.3}
+\]
+<p>The weights \(n-i\) fall as the position \(i\) rises. Suppose two neighbouring positions \(i\) and \(i+1\) hold bursts with \(\tau_{(i)}\gt \tau_{(i+1)}\). Swapping them changes the sum by \((n-i)\tau_{(i+1)}+(n-i-1)\tau_{(i)}-(n-i)\tau_{(i)}-(n-i-1)\tau_{(i+1)}=\tau_{(i+1)}-\tau_{(i)}\lt 0\). Every swap that removes an inversion lowers the sum, and an order with no inversion is the order of non-decreasing bursts. That order, shortest job first (SJF), therefore has the smallest mean waiting time. The proof assumes bursts that are known in advance, simultaneous arrival and no switching cost. With arrivals spread in time it does not hold as stated, and a long job can wait without bound while short jobs keep arriving. The program computes first come first served (FCFS), SJF and round robin (RR), in which each job in turn runs for at most \(q\) and then joins the end of the queue, for three quanta. It also checks the claim for all 24 orders. It is deterministic.</p>
+<pre><code class="language-python" data-file="sched_sim.py" data-run="python3 sched_sim.py">"""Mean waiting time of four jobs under first-come-first-served, shortest-job-first
+and round-robin scheduling on one CPU; all jobs arrive at time 0."""
+from itertools import permutations
+
+bursts = {"A": 8, "B": 4, "C": 9, "D": 5}      # CPU time each job needs, in ms
+
+
+def fcfs_waits(order):
+    """Waiting time of each job when the jobs run to completion in the given order."""
+    clock, waits = 0, {}
+    for job in order:
+        waits[job] = clock
+        clock += bursts[job]
+    return waits
+
+
+def round_robin_waits(quantum):
+    """Waiting time = completion time - burst, for a cyclic queue with the given quantum."""
+    remaining = dict(bursts)
+    queue, clock, done = list(bursts), 0, {}
+    while queue:
+        job = queue.pop(0)
+        run = min(quantum, remaining[job])
+        clock += run
+        remaining[job] -= run
+        if remaining[job]:
+            queue.append(job)
+        else:
+            done[job] = clock
+    return {job: done[job] - bursts[job] for job in bursts}
+
+
+def mean(waits):
+    return sum(waits.values()) / len(waits)
+
+
+sjf = sorted(bursts, key=bursts.get)
+print("FCFS  order A B C D :", fcfs_waits("ABCD"), f"mean {mean(fcfs_waits('ABCD')):.2f} ms")
+print("SJF   order", " ".join(sjf), ":", fcfs_waits(sjf), f"mean {mean(fcfs_waits(sjf)):.2f} ms")
+for q in (1, 4, 16):
+    w = round_robin_waits(q)
+    print(f"RR    quantum {q:2d} ms :", w, f"mean {mean(w):.2f} ms")
+
+orders = list(permutations(bursts))
+best = min(mean(fcfs_waits(o)) for o in orders)
+print(f"minimum mean over all {len(orders)} orders: {best:.2f} ms;",
+      "SJF reaches it:", mean(fcfs_waits(sjf)) == best)
+</code></pre>
+<pre><code class="output">FCFS  order A B C D : {'A': 0, 'B': 8, 'C': 12, 'D': 21} mean 10.25 ms
+SJF   order B D A C : {'B': 0, 'D': 4, 'A': 9, 'C': 17} mean 7.50 ms
+RR    quantum  1 ms : {'A': 16, 'B': 10, 'C': 17, 'D': 14} mean 14.25 ms
+RR    quantum  4 ms : {'A': 12, 'B': 4, 'C': 17, 'D': 20} mean 13.25 ms
+RR    quantum 16 ms : {'A': 0, 'B': 8, 'C': 12, 'D': 21} mean 10.25 ms
+minimum mean over all 24 orders: 7.50 ms; SJF reaches it: True</code></pre>
+<p>FCFS in the order A, B, C, D gives a mean waiting time of 10.25 ms. SJF, in the order B, D, A, C, gives 7.50 ms, which equals the minimum over all 24 orders, as (2.3) predicts: \((3\cdot4+2\cdot5+1\cdot8+0\cdot9)/4=7.5\). Round robin gives 14.25, 13.25 and 10.25 ms for \(q=1,4,16\) ms. With \(q=16\) ms, which is longer than every burst, RR is FCFS. RR has the larger mean waiting time here, and its purpose is a different property: with \(n\) jobs in the queue, every job gets the processor within \((n-1)q\) of the moment it is ready. For \(n=4\) and \(q=1\) ms this is 3 ms, against 21 ms before job D first runs under FCFS. Shortest job next needs the burst length before the job runs, which a general-purpose kernel does not know, so Linux has no such policy.</p>
+<p><strong>What Linux does.</strong> The Linux manual names <code>SCHED_OTHER</code> as "the standard Linux time-sharing scheduler that is intended for all threads that do not require the special real-time mechanisms". The policies <code>SCHED_FIFO</code> and <code>SCHED_RR</code> are real-time policies with static priorities 1 to 99, and a runnable thread of a real-time policy always preempts a <code>SCHED_OTHER</code> thread. The manual states that "all scheduling is preemptive" (<a href="https://man7.org/linux/man-pages/man7/sched.7.html">sched(7)</a>). The lecture's round robin and first-come-first-served therefore exist in Linux as real-time policies, and the ordinary policy is the fair-share scheduler. The kernel documentation of the Completely Fair Scheduler (CFS) describes its model as an "ideal, precise multi-tasking CPU" on which \(n\) runnable tasks each run at \(1/n\) of the speed, and states that CFS tracks a virtual runtime per task (<a href="https://docs.kernel.org/scheduler/sched-design-CFS.html">CFS scheduler</a>). The documentation of the EEVDF scheduler states that the kernel began the transition to it in version 6.6 and that it also "aims to distribute CPU time equally among all runnable tasks with the same priority" (<a href="https://docs.kernel.org/scheduler/sched-eevdf.html">EEVDF scheduler</a>). Linux 6.6 replaced the CFS selection rule by EEVDF (<a href="https://kernelnewbies.org/Linux_6.6">KernelNewbies, Linux 6.6</a>), and Linux 6.12 completed the transition (<a href="https://kernelnewbies.org/Linux_6.12">KernelNewbies, Linux 6.12</a>). The guest kernel, 6.6.87.2, therefore schedules <code>SCHED_OTHER</code> threads with EEVDF.</p>
+<p><strong>Fair share and nice levels.</strong> The <em>nice value</em> of a thread biases its share of the processor. In the fair-share model a thread \(i\) with weight \(\omega_i\) gets the share \(\omega_i/\sum_j \omega_j\) of a processor that runnable threads share. The kernel documentation on nice levels states that nice levels are multiplicative, so that two tasks whose nice levels differ by 1 split the processor 55 % to 45 % wherever the pair starts, and that a task at nice \(+19\) receives 1.5 % of the processor (<a href="https://docs.kernel.org/scheduler/sched-nice-design.html">nice-level design</a>). If each step multiplies the weight by a constant factor \(r\), the share of the thread at nice \(k\) against a thread at nice 0 is</p>
+\[
+\text{share}(k)=\frac{1}{1+r^{k}}. \tag{2.4}
+\]
+<p>The two figures of the documentation give two values of \(r\): the 55/45 split gives \(r=0.55/0.45=1.222\), and the 1.5 % at \(k=19\) gives \(r=(1/0.015-1)^{1/19}=1.246\). Both figures are rounded. The kernel source settles the factor: the table <code>sched_prio_to_weight</code> in <code>kernel/sched/core.c</code> (Linux 6.6.87) is built with "a multiplier of 1.25" and gives the weights 1024, 335, 110 and 15 for nice 0, 5, 10 and 19 (<a href="https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/plain/kernel/sched/core.c?h=v6.6.87">kernel.org, stable tree, tag v6.6.87</a>, lines 11550 to 11571). The table predicts shares of 24.7 % and 9.7 % for nice 5 and nice 10 against nice 0; the rounded 55/45 figure (\(r=1.222\)) predicts 26.8 % and 11.9 %. At nice \(+19\) the table gives \(15/1039=1.44\) %, which the documentation rounds to 1.5 %. The next program tests this. Two children are pinned to processor 0 with <code>sched_setaffinity</code>, so they must share it. Each child adds its nice value with <code>nice</code>, and counts blocks of 100 000 empty loop iterations until a common deadline 2 s away, and reports the count through a pipe. The share of a child is its count over the total. The loop makes no system call except the read of the clock, which the vDSO serves without entering the kernel. Any change of the running child therefore comes from the timer interrupt and not from a request of the child. The run takes 6 s and is checked by its return code.</p>
+<pre><code class="language-c" data-file="fairshare.c" data-build="gcc -O2 fairshare.c -o fairshare" data-run="./fairshare" data-check="returncode">#define _GNU_SOURCE
+#include &lt;errno.h&gt;
+#include &lt;sched.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;sys/wait.h&gt;
+#include &lt;time.h&gt;
+#include &lt;unistd.h&gt;
+
+#define RUN_SECONDS 2.0
+
+static double now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &amp;ts);
+    return ts.tv_sec + ts.tv_nsec * 1e-9;
+}
+
+/* Fork a child that is pinned to CPU 0, adds `nice_value` to its nice value, and counts
+   blocks of 100000 empty loop iterations until the wall-clock time `deadline`.
+   The child reports its count through the pipe end `fd`. */
+static pid_t spawn(int nice_value, double deadline, int fd)
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        cpu_set_t set;
+        CPU_ZERO(&amp;set);
+        CPU_SET(0, &amp;set);
+        sched_setaffinity(0, sizeof set, &amp;set);
+        errno = 0;
+        if (nice(nice_value) == -1 &amp;&amp; errno) _exit(1);
+        unsigned long count = 0;
+        do {
+            for (int k = 0; k &lt; 100000; k++) __asm__ volatile("" ::: "memory");
+            count++;
+        } while (now() &lt; deadline);
+        (void)!write(fd, &amp;count, sizeof count);
+        _exit(0);
+    }
+    return pid;
+}
+
+static void experiment(int nice_a, int nice_b)
+{
+    int pa[2], pb[2];
+    if (pipe(pa) || pipe(pb)) return;
+    double deadline = now() + RUN_SECONDS;
+    pid_t a = spawn(nice_a, deadline, pa[1]);
+    pid_t b = spawn(nice_b, deadline, pb[1]);
+    unsigned long ca = 0, cb = 0;
+    (void)!read(pa[0], &amp;ca, sizeof ca);
+    (void)!read(pb[0], &amp;cb, sizeof cb);
+    waitpid(a, NULL, 0);
+    waitpid(b, NULL, 0);
+    printf("nice %2d against nice %2d: shares %.1f %% and %.1f %%\n", nice_a, nice_b,
+           100.0 * ca / (ca + cb), 100.0 * cb / (ca + cb));
+}
+
+int main(void)
+{
+    experiment(0, 0);
+    experiment(0, 5);
+    experiment(0, 10);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">nice  0 against nice  0: shares 49.8 % and 50.2 %
+nice  0 against nice  5: shares 75.2 % and 24.8 %
+nice  0 against nice 10: shares 90.4 % and 9.6 %</code></pre>
+<p>Two children of equal nice value got 49.7 to 50.3 % each. With nice 5 the niced child got 24.2 to 25.5 % across the runs of this section, and with nice 10 it got 9.0 to 10.0 %. These values agree with the shares of the kernel table (24.7 % and 9.7 %) and disagree with \(r=1.222\) (26.8 % and 11.9 %). The measurement cannot separate the table from \(r=1.246\) (25.0 % and 10.0 %): the two differ by 0.3 points, less than the spread of the runs. It also confirms preemption. Neither child ever blocks or yields, and the processor still divides in a fixed ratio between them, so the kernel removes the running thread from the processor by interrupt. The kernel is configured with a periodic timer tick of 250 Hz, which is 4 ms. The interval between the preemptions of this kernel was not measured.</p>
+<p><strong>The cost of a switch.</strong> Let \(t_{\mathrm{cs}}\) be the cost of one context switch. With a quantum \(q\), the fraction of the processor time that threads can use is</p>
+\[
+\eta=\frac{q}{q+t_{\mathrm{cs}}}. \tag{2.5}
+\]
+<p>The next program estimates \(t_{\mathrm{cs}}\) from a ping-pong. Two processes are connected by two pipes. The parent writes one byte, the child reads it and writes one back, and the parent reads that byte; 50 000 rounds. When both processes are pinned to processor 0, each message wakes a process that cannot run until the other blocks, so a round trip contains two process switches, four pipe system calls and two wake-ups. The measured time of a round trip is therefore an upper bound on \(2t_{\mathrm{cs}}\), and half of it an upper bound on \(t_{\mathrm{cs}}\). The listing also runs the pair on processors 0 and 2, where no switch is needed. It keeps the smallest of three runs and is checked by its return code.</p>
+<pre><code class="language-c" data-file="ctxswitch.c" data-build="gcc -O2 ctxswitch.c -o ctxswitch" data-run="./ctxswitch" data-check="returncode">#define _GNU_SOURCE
+#include &lt;sched.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;sys/wait.h&gt;
+#include &lt;time.h&gt;
+#include &lt;unistd.h&gt;
+
+#define ROUNDS 50000
+#define REPS 3
+
+static double now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &amp;ts);
+    return ts.tv_sec + ts.tv_nsec * 1e-9;
+}
+
+static void pin(int cpu)
+{
+    cpu_set_t set;
+    CPU_ZERO(&amp;set);
+    CPU_SET(cpu, &amp;set);
+    sched_setaffinity(0, sizeof set, &amp;set);
+}
+
+/* Two processes pass one byte back and forth through two pipes, ROUNDS times.
+   One round trip is 2 writes and 2 reads. With both processes on one CPU each
+   round trip also needs 2 process switches. Returns seconds per round trip. */
+static double pingpong(int cpu_parent, int cpu_child)
+{
+    int up[2], down[2];
+    char c = 'x';
+    if (pipe(up) || pipe(down)) return -1.0;
+    pid_t pid = fork();
+    if (pid == 0) {
+        pin(cpu_child);
+        for (int i = 0; i &lt; ROUNDS; i++) {
+            (void)!read(up[0], &amp;c, 1);
+            (void)!write(down[1], &amp;c, 1);
+        }
+        _exit(0);
+    }
+    pin(cpu_parent);
+    double t0 = now();
+    for (int i = 0; i &lt; ROUNDS; i++) {
+        (void)!write(up[1], &amp;c, 1);
+        (void)!read(down[0], &amp;c, 1);
+    }
+    double t = now() - t0;
+    waitpid(pid, NULL, 0);
+    return t / ROUNDS;
+}
+
+int main(void)
+{
+    double same = 1e30, diff = 1e30;
+    for (int r = 0; r &lt; REPS; r++) {
+        double a = pingpong(0, 0), b = pingpong(0, 2);
+        if (a &lt; same) same = a;
+        if (b &lt; diff) diff = b;
+    }
+    printf("both processes on CPU 0:       %.2f us per round trip\n", same * 1e6);
+    printf("processes on CPU 0 and CPU 2:  %.2f us per round trip\n", diff * 1e6);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">both processes on CPU 0:       3.12 us per round trip
+processes on CPU 0 and CPU 2:  34.02 us per round trip</code></pre>
+<p>On one processor, a round trip took 2.8 to 3.3 µs in 11 runs, so \(t_{\mathrm{cs}}\lt1.7\) µs. For an assumed quantum of \(q=4\) ms, one timer tick, this gives, by (2.5), \(\eta\gt0.9995\). That is the direct cost of a switch. The cost of reloading caches and address translations after a switch is not in \(t_{\mathrm{cs}}\) and was not measured. On two processors a round trip took 31.7 to 40.2 µs, which is 10 to 14 times as long as the round trip on one processor (10.9 in the sample run), although no switch is involved. Waking a process on another processor requires an interrupt between processors, and the target processor may be idle. In a virtual machine, such interrupts and the halting of an idle processor involve the hypervisor. That is a hypothesis that this chapter did not test. The measured fact is that two processes on different processors of this guest take about 11 times as long to exchange a message as two processes that share one. Chapter 11 returns to this result for teams of threads that are larger than the number of processors, and chapter 14 for the placement of message-passing ranks.</p>
+
+<h2 id="memory">Memory management: virtual addresses, page tables and page faults <a class="timestamp" href="https://www.youtube.com/watch?v=JYTA5BWHmb0&amp;t=807s">W1L2 13:27</a></h2>
+<p>The lecture assigns to the "memory management unit" the management of physical and virtual memory, the mapping between the two, the page tables, the translation lookaside buffer (TLB), memory protection and cache control, so that every process gets a fair share of memory. Two statements need a correction before the model is stated. The memory management unit (MMU) is a part of the processor, not a component of the kernel; the kernel builds the tables that the MMU reads. The lecture describes the TLB as a small memory that stores recent data. It stores recent address translations. The kernel documentation states that "CPUs maintain a cache of such translations called Translation Lookaside Buffer" because address translation "requires several memory accesses" (<a href="https://docs.kernel.org/admin-guide/mm/concepts.html">Linux kernel documentation, concepts overview</a>, section on huge pages).</p>
+<p><strong>The model.</strong> The kernel documentation states that virtual memory "abstracts the details of physical memory from the application software, allows to keep only needed information in the physical memory (demand paging) and provides a mechanism for the protection and controlled sharing of data between processes". Every access uses a virtual address, and the processor translates it to a physical address. Physical memory is divided into page frames. Page tables describe the mappings, are organized hierarchically, and the pointer to the top-level table sits in a register; "the high bits of the virtual address are used to index an entry in the top level page table" and the lowest bits are the offset inside the page (concepts overview, section on the virtual memory primer). On x86-64, Linux supports 48-bit and 57-bit virtual addresses, with four-level and five-level page tables (<a href="https://docs.kernel.org/arch/x86/x86_64/mm.html">Linux kernel documentation, x86-64 memory map</a>). This chapter uses the 48-bit, four-level case with pages of 4096 bytes. An address then has 12 offset bits and four indices of 9 bits each. A table page of 4096 bytes holds 512 entries of 8 bytes, which is consistent with the 9-bit index. This chapter assumes, without a source that it opened, that an entry takes 8 bytes and that a table page holds 512 of them; the measurement below is consistent with that assumption and does not fix it.</p>
+<p><strong>The size of the tables.</strong> To map a contiguous region of \(S\) bytes, the kernel needs \(n_p=\lceil S/4096\rceil\) entries at the lowest level, which fill \(N_1=\lceil n_p/512\rceil\) table pages. The next level needs one entry per table page of the level below, so \(N_\ell=\lceil n_p/512^{\ell}\rceil\) for \(\ell=1,\dots,4\). The tables occupy</p>
+\[
+M(S)=4096\sum_{\ell=1}^{4}\left\lceil\frac{n_p}{512^{\ell}}\right\rceil\ \text{bytes},\qquad \frac{M(S)}{S}\approx\frac{1}{512}\left(1+\frac1{512}+\frac1{512^2}+\frac1{512^3}\right)=0.196\ \%\ \text{for large dense }S. \tag{2.6}
+\]
+<p>The next program splits one virtual address into its four indices and its offset, rebuilds the address from them, and evaluates (2.6) for three sizes. It assumes a start aligned to the span of one top-level entry, and its output is deterministic.</p>
+<pre><code class="language-python" data-file="pagetable.py" data-run="python3 pagetable.py">"""Split an x86-64 virtual address into page-table indices and count the table pages
+needed to map a contiguous region. 4 KiB pages, 4 levels, 9 index bits per level."""
+
+PAGE = 4096
+ENTRY = 8                                       # bytes per page-table entry
+PER_TABLE = PAGE // ENTRY                       # 512 entries per table page
+SHIFTS = (39, 30, 21, 12)                       # top level first
+
+
+def split(addr):
+    offset = addr &amp; (PAGE - 1)
+    return [(addr &gt;&gt; s) &amp; 0x1FF for s in SHIFTS], offset
+
+
+def tables_for(size):
+    """Pages used by the leaf tables and each higher level to map `size` contiguous bytes
+    from a start aligned to the span of one top-level entry."""
+    n = -(-size // PAGE)                        # number of data pages
+    counts = []
+    for _ in range(4):
+        n = -(-n // PER_TABLE)
+        counts.append(n)
+    return counts                               # leaf level first, top level last
+
+
+addr = 0x00007FFD12345678
+idx, off = split(addr)
+print(f"address {addr:#018x}: indices {idx} (top level first), offset {off:#x}")
+rebuilt = sum(i &lt;&lt; s for i, s in zip(idx, SHIFTS)) + off
+print("indices and offset rebuild the address:", rebuilt == addr)
+
+for label, size in (("1 MiB", 1 &lt;&lt; 20), ("1 GiB", 1 &lt;&lt; 30), ("16 GiB", 16 &lt;&lt; 30)):
+    counts = tables_for(size)
+    total = sum(counts) * PAGE
+    print(f"{label:&gt;6}: {size // PAGE:&gt;8} data pages; table pages, leaf level first: {counts}; "
+          f"{total // 1024} KiB of tables = {100 * total / size:.2f} % of the region")
+</code></pre>
+<pre><code class="output">address 0x00007ffd12345678: indices [255, 500, 145, 325] (top level first), offset 0x678
+indices and offset rebuild the address: True
+ 1 MiB:      256 data pages; table pages, leaf level first: [1, 1, 1, 1]; 16 KiB of tables = 1.56 % of the region
+ 1 GiB:   262144 data pages; table pages, leaf level first: [512, 1, 1, 1]; 2060 KiB of tables = 0.20 % of the region
+16 GiB:  4194304 data pages; table pages, leaf level first: [8192, 16, 1, 1]; 32840 KiB of tables = 0.20 % of the region</code></pre>
+<p>The indices of the address <code>0x00007ffd12345678</code> are 255, 500, 145 and 325, and its offset is <code>0x678</code>; the pieces rebuild the address. For 1 GiB the tables take 512 leaf pages and one page at each higher level, 515 pages or 2060 KiB, which is 0.20 % of the region. For 16 GiB the share is also 0.20 %. For 1 MiB it is 1.56 %, because the three upper levels cost three pages for a small region. The model assumes that the mapped region is dense. A sparse region needs more table memory per byte of data, and the next program measures how much. It reserves 512 MiB of address space and writes one byte in every 2 MiB region, 256 writes, so that each write needs its own table page at the lowest level. It reads the fields <code>VmRSS</code> (resident memory) and <code>VmPTE</code> (the size of the page-table memory; the <code>/proc</code> documentation defines it as the "size of page table entries") from <code>/proc/self/status</code> before and after.</p>
+<pre><code class="language-c" data-file="ptes.c" data-build="gcc -O2 ptes.c -o ptes" data-run="./ptes">#define _GNU_SOURCE
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;sys/mman.h&gt;
+
+#define SPAN (512L &lt;&lt; 20)                    /* 512 MiB of address space */
+#define REGION (2L &lt;&lt; 20)                    /* one page-table page maps 2 MiB */
+
+static long status_kb(const char *key)
+{
+    FILE *f = fopen("/proc/self/status", "r");
+    char line[256];
+    long kb = -1;
+    size_t n = strlen(key);
+    while (f &amp;&amp; fgets(line, sizeof line, f))
+        if (strncmp(line, key, n) == 0) kb = atol(line + n);
+    if (f) fclose(f);
+    return kb;
+}
+
+int main(void)
+{
+    char *p = mmap(NULL, SPAN, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (p == MAP_FAILED) { perror("mmap"); return 1; }
+    madvise(p, SPAN, MADV_NOHUGEPAGE);
+    long rss0 = status_kb("VmRSS:"), pte0 = status_kb("VmPTE:");
+    long touches = 0;
+    for (long off = 0; off &lt; SPAN; off += REGION) { p[off] = 1; touches++; }
+    long rss1 = status_kb("VmRSS:"), pte1 = status_kb("VmPTE:");
+    printf("touched one byte in each of %ld regions of 2 MiB\n", touches);
+    printf("resident data grew by at least one 4 kB page per touch: %s\n",
+           rss1 - rss0 &gt;= 4 * touches ? "yes" : "no");
+    printf("page-table memory grew by %.1f kB per touched region\n", (double)(pte1 - pte0) / touches);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">touched one byte in each of 256 regions of 2 MiB
+resident data grew by at least one 4 kB page per touch: yes
+page-table memory grew by 4.0 kB per touched region</code></pre>
+<p>Each write adds 4.0 kB of page-table memory, and the resident data grow by at least one page per write. The growth of 4.0 kB per touched 2 MiB region is what one 4096-byte table page per 2 MiB predicts. It rules out a table page that covers more than 2 MiB, and it does not by itself fix the size of an entry. A sparse access pattern at a stride of 2 MiB therefore pays 4 kB of tables for each 4 kB page of data, a ratio of 1, against the ratio of 0.002 of the dense case in (2.6). The two cases differ by a factor of 512.</p>
+<p><strong>Translation cost.</strong> Reading the four entries of a walk takes up to four memory accesses. With a TLB hit time \(t_{\mathrm{TLB}}\), a TLB miss rate \(m_T\) and a memory access time \(t_{\mathrm{ref}}\), the mean time to translate one address is at most</p>
+\[
+t_{\text{xlat}}\le t_{\mathrm{TLB}}+m_T\cdot4\,t_{\mathrm{ref}}. \tag{2.7}
+\]
+<p>The bound has the form of the average memory access time of chapter 7 with the miss penalty \(4t_{\mathrm{ref}}\). It is an upper bound because the entries of upper levels are often found in the processor's caches. This chapter did not measure the TLB. It uses (2.7) only to show why the lecture lists the TLB among the memory-management elements: a program with a large working set raises \(m_T\). The kernel documentation states that a huge page of 2 MiB or 1 GiB, mapped by an entry at a higher level, "significantly reduces pressure on TLB" (concepts overview, huge pages). The guest uses transparent huge pages only on request (<code>/sys/kernel/mm/transparent_hugepage/enabled</code> reads <code>[madvise]</code>), and every program of this chapter that counts page faults calls <code>madvise</code> with <code>MADV_NOHUGEPAGE</code> so that each fault maps one page of 4 KiB.</p>
+<p><strong>Demand paging and copy-on-write.</strong> The program below creates an anonymous 64 MiB mapping (memory that no file backs) with <code>mmap</code> and writes the first byte of each page twice, and counts the minor faults of the process with <code>getrusage</code>. A <em>minor fault</em> is a fault that the kernel resolves without disk input. The program then calls <code>fork</code>, and the child writes every page once more. The parent checks that its own pages are unchanged. Inputs: none. Outputs: faults per page and one check. The output is deterministic because the counts are the page counts.</p>
+<pre><code class="language-c" data-file="pagefault.c" data-build="gcc -O2 pagefault.c -o pagefault" data-run="./pagefault">#define _GNU_SOURCE
+#include &lt;stdio.h&gt;
+#include &lt;sys/mman.h&gt;
+#include &lt;sys/resource.h&gt;
+#include &lt;sys/wait.h&gt;
+#include &lt;unistd.h&gt;
+
+#define BYTES (64L &lt;&lt; 20)                    /* 64 MiB */
+
+static long minor_faults(void)
+{
+    struct rusage ru;
+    getrusage(RUSAGE_SELF, &amp;ru);
+    return ru.ru_minflt;
+}
+
+static void touch(char *p, long bytes, long page, char value)
+{
+    for (long off = 0; off &lt; bytes; off += page) p[off] = value;
+}
+
+int main(void)
+{
+    long page = sysconf(_SC_PAGESIZE);
+    long pages = BYTES / page;
+    char *p = mmap(NULL, BYTES, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p == MAP_FAILED) { perror("mmap"); return 1; }
+    madvise(p, BYTES, MADV_NOHUGEPAGE);      /* one fault per ordinary page, whatever the system setting */
+
+    long f0 = minor_faults();
+    touch(p, BYTES, page, 1);                /* first write to each page */
+    long f1 = minor_faults();
+    touch(p, BYTES, page, 1);                /* second write: the pages are mapped now */
+    long f2 = minor_faults();
+    printf("page size %ld bytes, %ld pages\n", page, pages);
+    printf("parent first pass : %.2f minor faults per page\n", (double)(f1 - f0) / pages);
+    printf("parent second pass: %ld minor faults\n", f2 - f1);
+
+    fflush(stdout);
+    pid_t pid = fork();
+    if (pid == 0) {                          /* the child shares every page with the parent until it writes */
+        long g0 = minor_faults();
+        touch(p, BYTES, page, 2);
+        long g1 = minor_faults();
+        printf("child write pass  : %.2f minor faults per page\n", (double)(g1 - g0) / pages);
+        fflush(stdout);
+        _exit(0);
+    }
+    waitpid(pid, NULL, 0);
+    int unchanged = 1;
+    for (long off = 0; off &lt; BYTES; off += page) if (p[off] != 1) unchanged = 0;
+    printf("parent: every page still holds the parent's own value: %s\n", unchanged ? "yes" : "no");
+    return 0;
+}
+</code></pre>
+<pre><code class="output">page size 4096 bytes, 16384 pages
+parent first pass : 1.00 minor faults per page
+parent second pass: 0 minor faults
+child write pass  : 1.00 minor faults per page
+parent: every page still holds the parent's own value: yes</code></pre>
+<p>The mapping has 16384 pages. The first write to each page costs one minor fault, 1.00 per page, and the second pass costs none: <code>mmap</code> reserved the addresses, and the kernel allocated a frame, filled it with zeros and mapped it when the page was first touched. The child's write pass again costs 1.00 fault per page. After <code>fork</code> the child shares every frame with the parent, and the first write by the child to a page makes the kernel copy that page into a new frame: this is copy-on-write, as the manual of <code>fork</code> states. The parent's pages still hold the parent's value, so the child's writes did not reach the parent. This is the isolation property of \(A\) that the model requires.</p>
+<p>The cost of a minor fault is 1.7 to 2.5 µs in the launch measurement. A fault serves 4096 bytes, so the rate at which a fresh array is first written is 1.6 to 2.4 GB/s, against about 10 GB/s for copying data that are already in memory (the fit of the previous section). Initializing a large array that was just allocated is therefore slower than any later pass over it, a fact that chapter 7 meets again in the discussion of non-uniform memory and of first touch.</p>
+
+<h2 id="vfs-ipc">The virtual file system, inter-process communication and the claim that everything is a file <a class="timestamp" href="https://www.youtube.com/watch?v=JYTA5BWHmb0&amp;t=875s">W1L2 14:35</a></h2>
+<p>The lecture states that the virtual file system (VFS) is an abstraction layer that lets the kernel interface with different file systems in a uniform way. Its slide lists the key elements: the superblock (an entire mounted file system), the inode (metadata about a file or directory), the dentry (a directory entry), mount points, file-system operations and types, and the file descriptor table. The kernel documentation describes the VFS as "the software layer in the kernel that provides the filesystem interface to userspace programs" and as "an abstraction within the kernel which allows different filesystem implementations to coexist" (<a href="https://docs.kernel.org/filesystems/vfs.html">Linux kernel documentation, VFS</a>, introduction). It adds that the system calls <code>open</code>, <code>stat</code>, <code>read</code>, <code>write</code> and <code>chmod</code> are called from a process context. The lecture says at <a class="timestamp" href="https://www.youtube.com/watch?v=JYTA5BWHmb0&amp;t=576s">W1L2 9:36</a> that the VFS is responsible for creating a virtual machine for each new process. The documentation does not assign to the VFS the creation of anything per process. The chapter takes the per-process objects to be the address space and the table of open files of the model, and the VFS to be the code that serves the calls on the open files. Chapter 3 treats the inode, the directory entry and the permission bits.</p>
+<p><strong>One interface, several kinds of object.</strong> The table \(O\) of the model maps a file descriptor to an open file. A call such as <code>read(fd, buffer, n)</code> names only the descriptor. The kernel finds the open file and runs the read operation of whatever the descriptor refers to: a file of a file system, a device driver, a pipe or a socket. The next program opens one object of each kind, writes 5 bytes with <code>write</code>, and reads them back with <code>read</code> when the object has a read end. It also reads from a directory. The output is deterministic.</p>
+<pre><code class="language-c" data-file="fdtypes.c" data-build="gcc -O2 fdtypes.c -o fdtypes" data-run="./fdtypes">#define _GNU_SOURCE
+#include &lt;errno.h&gt;
+#include &lt;fcntl.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;sys/socket.h&gt;
+#include &lt;sys/stat.h&gt;
+#include &lt;unistd.h&gt;
+
+static const char *kind(int fd)
+{
+    struct stat st;
+    fstat(fd, &amp;st);
+    if (S_ISREG(st.st_mode)) return "regular file";
+    if (S_ISDIR(st.st_mode)) return "directory";
+    if (S_ISCHR(st.st_mode)) return "character device";
+    if (S_ISFIFO(st.st_mode)) return "pipe (FIFO)";
+    if (S_ISSOCK(st.st_mode)) return "socket";
+    return "other";
+}
+
+int main(void)
+{
+    int file = open("fdtypes.tmp", O_RDWR | O_CREAT | O_TRUNC, 0600);
+    unlink("fdtypes.tmp");                   /* the open descriptor keeps the file alive */
+    int dir = open(".", O_RDONLY);
+    int dev = open("/dev/null", O_WRONLY);
+    int pp[2], sp[2];
+    if (pipe(pp) || socketpair(AF_UNIX, SOCK_STREAM, 0, sp)) return 1;
+
+    struct { const char *name; int wfd, rfd; } t[] = {
+        {"file",      file,  file},
+        {"/dev/null", dev,   -1},
+        {"pipe",      pp[1], pp[0]},
+        {"socket",    sp[0], sp[1]},
+    };
+    char buf[16];
+    for (int i = 0; i &lt; 4; i++) {
+        ssize_t w = write(t[i].wfd, "hello", 5);
+        ssize_t r = -2;                      /* -2: this entry has no read end */
+        if (t[i].rfd &gt;= 0) {
+            if (t[i].rfd == file) lseek(file, 0, SEEK_SET);
+            r = read(t[i].rfd, buf, sizeof buf);
+        }
+        printf("%-10s %-17s write returned %zd, read returned %zd\n", t[i].name, kind(t[i].wfd), w, r);
+    }
+    ssize_t r = read(dir, buf, sizeof buf);
+    printf("%-10s %-17s read returned %zd (%s)\n", "directory", kind(dir), r, strerror(errno));
+    return 0;
+}
+</code></pre>
+<pre><code class="output">file       regular file      write returned 5, read returned 5
+/dev/null  character device  write returned 5, read returned -2
+pipe       pipe (FIFO)       write returned 5, read returned 5
+socket     socket            write returned 5, read returned 5
+directory  directory         read returned -1 (Is a directory)</code></pre>
+<p>Four kinds of object accept the same <code>write</code> call and report 5 bytes written. The file, the pipe and the socket return the same 5 bytes through the same <code>read</code> call. <code>/dev/null</code> is a character device that accepts and discards the data, and it has no read end in this program. The directory is a file in the sense that it has a descriptor, but <code>read</code> fails with <code>Is a directory</code>: a uniform interface does not make every operation valid for every kind of object. Ritchie and Thompson describe the first version of the idea: "Special files are read and written just like ordinary disk files, but requests to read or write result in activation of the associated device" (§3.3), and the abstract of their paper lists "compatible file, device, and inter-process I/O" as a feature.</p>
+<p><strong>What "everything is a file" covers.</strong> The lecture states at <a class="timestamp" href="https://www.youtube.com/watch?v=JYTA5BWHmb0&amp;t=1144s">W1L2 19:04</a> that most system resources and devices are represented as files, lists regular files, directories, devices in <code>/dev</code>, symbolic links and network interfaces, and says that processes, threads and memory are the exceptions. The slide says "mostly everything", which is the more careful statement. The next session tests three parts of the claim: the descriptors of a process, the information that the kernel gives about a process, and the network interface.</p>
+<pre><code class="language-bash">$ ls -l /proc/self/fd 3&lt; hello.c &gt; fd.txt 2&gt;&amp;1 &lt; /dev/null; grep -v ptmx fd.txt | sed 's/ az9713 az9713//' | cut -c1-100
+total 0
+lr-x------ 1 64 Oct 26 18:46 0 -&gt; /dev/null
+l-wx------ 1 64 Oct 26 18:46 1 -&gt; /tmp/hpsc-ch02-demo/fd.txt
+l-wx------ 1 64 Oct 26 18:46 2 -&gt; /tmp/hpsc-ch02-demo/fd.txt
+lr-x------ 1 64 Oct 26 18:46 3 -&gt; /tmp/hpsc-ch02-demo/hello.c
+lr-x------ 1 64 Oct 26 18:46 4 -&gt; /proc/609/fd
+$ grep -E '^(Name|State|Pid|PPid|Threads|VmPTE)' /proc/self/status
+Name:   grep
+State:  R (running)
+Pid:    613
+PPid:   334
+VmPTE:        48 kB
+Threads:    1
+$ ls /dev | grep -c -E '^(eth|wlan|en)'
+0
+$ ls /sys/class/net
+eth0
+lo
+</code></pre>
+<p>A process holds its open objects as descriptors: in the listing, descriptors 0, 1 and 2 refer to <code>/dev/null</code> and to the output file, as the redirections of the command line set them, descriptor 3 refers to the file <code>hello.c</code>, and descriptor 4 is the directory handle that <code>ls</code> itself opened. The kernel also exposes information about the process as files under <code>/proc</code>: the lines of <code>/proc/self/status</code> give the name, state, process number, parent number, thread count and page-table memory of the reading process. A process is therefore not a file, as the lecture says, but the kernel offers a file-shaped view of it. The lecture's claim about network interfaces does not hold in the sense of <code>/dev</code>: no node whose name starts with <code>eth</code>, <code>wlan</code> or <code>en</code> exists in <code>/dev</code>, and the interface <code>eth0</code> appears under <code>/sys/class/net</code> as an entry of the <code>sysfs</code> file system. The kernel offers a socket, which is a descriptor, as the way to use the network, and the earlier program created one with <code>socketpair</code>.</p>
+<p><strong>The network subsystem and inter-process communication.</strong> At <a class="timestamp" href="https://www.youtube.com/watch?v=JYTA5BWHmb0&amp;t=969s">W1L2 16:09</a> the lecture describes the network subsystem as the code that processes, routes and manages network packets, with a socket interface between programs and the kernel and with layers from the link layer to the application layer. The socket in the program above is its simplest form, a pair of connected endpoints on one machine. Chapter 4 uses the network commands, and chapter 14 uses sockets and shared memory inside the message-passing library. At <a class="timestamp" href="https://www.youtube.com/watch?v=JYTA5BWHmb0&amp;t=1036s">W1L2 17:16</a> the lecture lists the mechanisms for communication and synchronization between processes: message queues, shared memory, semaphores and signals. Ritchie and Thompson describe the earliest of them, the pipe, which processes use "with the same system <code>read</code> and <code>write</code> calls that are used for file-system I/O", and which must be set up by a common ancestor of the processes involved (§5.2). The ping-pong of the previous section measures a message through a pipe: 2.8 to 3.3 µs per round trip on one processor. Threads of one process need no such mechanism for data, because they share \(A\), and chapter 11 starts from this fact. Processes of different programs share data only through one of the mechanisms above, and the lecture states that these mechanisms are what the higher-level parallel programming models build on.</p>
+
+<h2 id="limits">What the model establishes and what it does not</h2>
+<p>Table 2.2 lists the statements of the lectures that this chapter tested, with the status that the tests gave them.</p>
+<div class="table-wrap"><table>
+<caption>Table 2.2. Statements of the lectures and their status in this chapter.</caption>
+<thead><tr><th scope="col">Statement of the lecture</th><th scope="col">Status</th><th scope="col">Evidence in this chapter</th></tr></thead>
+<tbody>
+<tr><td>The kernel runs as a single large process in a privileged mode.</td><td>Refined</td><td>The kernel is one binary in kernel mode that serves processes; it is not a process (Tanenbaum's definition; system calls run on behalf of the calling thread).</td></tr>
+<tr><td>The kernel creates a virtual machine for each process.</td><td>Refined</td><td>It gives each process a virtual processor and an address space; the WSL 2 guest is a different layer, a virtual machine with its own kernel.</td></tr>
+<tr><td>The virtual file system creates the machine of each process.</td><td>Not supported</td><td>The kernel documentation describes the VFS as an abstraction over file systems.</td></tr>
+<tr><td>The memory management unit is a kernel subcomponent.</td><td>Refined</td><td>The MMU is processor hardware that reads the page tables; the kernel builds them.</td></tr>
+<tr><td>The TLB stores recent data.</td><td>Refined</td><td>It caches recent address translations (kernel documentation, concepts overview).</td></tr>
+<tr><td>The scheduling policies are round robin, first come first served, shortest job next and CFS.</td><td>Partly true</td><td>The ordinary Linux policy is <code>SCHED_OTHER</code> (CFS, then EEVDF); round robin and first-in first-out are real-time policies; shortest job next is not a Linux policy. Equation (2.3) proves that it minimizes the mean waiting time, when bursts are known.</td></tr>
+<tr><td>A preemptive scheduler can take the processor from a running process.</td><td>Confirmed</td><td>Two children that never block shared one processor 50 % to 50 % (and 25 % to 75 % at nice 5).</td></tr>
+<tr><td>Linux is a multi-user, multitasking system.</td><td>Confirmed</td><td>Credentials and protection; real-time is a separate property that Linux also offers.</td></tr>
+<tr><td>Real-time is a type of operating system next to the other three.</td><td>Refined</td><td>The four types mix three properties (users, tasks, timing guarantees).</td></tr>
+<tr><td>Linux has its roots in Unix of 1969 and in MINIX.</td><td>Confirmed</td><td>Ritchie and Thompson date the first version "circa 1969-70"; MINIX is dated by the slide only.</td></tr>
+<tr><td>The first Linux release was in September 1991, the licence changed in 1992, kernel 1.0 appeared in 1994.</td><td>Consistent, exact days not established</td><td>Torvalds's posts (25 August 1991; version 0.12 on 5 January 1992 changed the licence terms, the licence is not named there); kernel.org lists 1.0 with the date 13 March 1994.</td></tr>
+<tr><td>Libraries are shared by many applications, which saves memory.</td><td>Confirmed</td><td>Resident 976 kB of C library code with a proportional size of 16 to 45 kB.</td></tr>
+<tr><td>Linux is the heart of HPC systems.</td><td>Not checked</td><td>The TOP500 statistics page could not be read.</td></tr>
+<tr><td>Loadable modules give the variety of Linux flavors.</td><td>Refined</td><td>Modules add drivers and features to a running kernel; flavors differ in packages and configuration.</td></tr>
+<tr><td>In Linux everything is a file; network interfaces are files; processes and memory are the exceptions.</td><td>Refined</td><td>Files, devices, pipes and sockets share one descriptor interface; there is no device node for <code>eth0</code>; <code>/proc</code> gives a file-shaped view of each process.</td></tr>
+<tr><td>Slackware and Debian were released in 1993, Ubuntu in 2004, Android in 2008, and Linux was the most popular system in 2020.</td><td>Not checked</td><td>No source was opened.</td></tr>
+</tbody></table></div>
+<p>The model of privilege modes, processes and system calls establishes four things. Multiplexing and isolation need instructions that only the kernel can execute, and an attempt to execute one in user mode ends the process, not the kernel. A process is an address space, a table of open files, credentials and threads, and the kernel runs on behalf of its threads. A system call costs 87 ns on this guest, 176 to 194 times an ordinary call, and a program must amortize it over at least a few kilobytes of data per call. The ordinary Linux scheduler divides a processor among runnable threads in the ratio of their weights, and a nice step multiplies the weight by 1.25 (the kernel table uses a multiplier of 1.25; the measured shares at nice 5 and 10 match it to within the 1-point spread of the runs).</p>
+<p>The model leaves out most of what an operating system does. It treats the scheduler on one processor, and it omits the migration of threads between processors, the placement of memory on non-uniform machines, swapping, and the scheduling of disk and network input. It covers threads only as members of one process; the creation of threads with <code>clone</code> belongs to chapter 11. It does not describe containers, control groups or virtual machines beyond the one remark about the WSL 2 guest. Security appears only as the isolation between processes; permissions are in chapter 3.</p>
+<p>The quantitative results have their own limits. All times belong to one WSL 2 guest on one hybrid processor, and a bare-metal Linux, or a guest that needs page-table isolation, would show other costs. The launch decomposition explains 22 to 30 % of the launch time at a fault cost of 1.7 to 2.5 µs (34 to 37 % in a loaded run), and the remaining 70 to 78 % (63 % in the loaded run) is not attributed. The estimate that faults account for a quarter of the launch assumes that a fault during a launch costs as much as the first write to a zero-filled page. The explanation offered for the slow exchange of messages between processors is a hypothesis that was not tested. The scheduler of the guest kernel is EEVDF according to the release notes of Linux 6.6; the scheduler's own source was not read. The share of Linux in the TOP500 list, the dates for Slackware and Debian, Ubuntu and Android, the 2020 popularity claim, and the exact day of the first Linux release were not established.</p>
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> \(n\) jobs arrive together at time 0, and each needs the same burst \(\tau=mq\), where \(q\) is the quantum of a round-robin scheduler and \(m\) is a whole number. Switching is free. Derive the mean waiting time under round robin and under FCFS, and evaluate both for \(n=4\), \(\tau=8\) ms and \(q=1\) ms.</p>
+<details><summary>Solution</summary>
+<p>Under FCFS the job in position \(i\) (counting from 0) waits \(i\tau\), so the mean is \((n-1)\tau/2\), which is 12 ms for \(n=4\) and \(\tau=8\) ms. Under round robin all jobs have the same remaining time at every round, so no job ends before the last round. In each of the first \(m-1\) rounds, every job runs one quantum, which takes \(nq\) in total. In the last round the job in position \(i\) runs from \((m-1)nq+iq\) to \((m-1)nq+(i+1)q\), so it completes at \((m-1)nq+(i+1)q\). Its waiting time is its completion time minus its burst: \((m-1)nq+(i+1)q-mq\). The mean over \(i=0,\dots,n-1\) is \((m-1)nq+\tfrac{n+1}{2}q-mq=(n-1)\left(\tau-\tfrac q2\right)\). For \(n=4\), \(q=1\) ms and \(\tau=8\) ms this is \(3\times7.5=22.5\) ms, against 12 ms for FCFS. The ratio of the two means is \(2(\tau-q/2)/\tau=2-q/\tau\), which is 1.875 here and tends to 2 as \(\tau/q\) grows. With equal bursts round robin delays every completion to the last round; its benefit is the bound \((n-1)q\) on the delay of the first service, which FCFS does not give.</p>
+</details>
+<p><strong>Exercise 2 (compute).</strong> A program reads a 4 GiB file that is in the page cache. Use \(a=180\) ns and \(B=10\) GB/s, round values from the fits of the chapter (180 to 195 ns, 9.7 to 10.5 GB/s). Compute the time for reads of \(b=1\), 512, 4096 and 65 536 bytes. Find the smallest \(b\) for which the per-call cost is at most 5 % of the total time. Compare the first and the last time.</p>
+<details><summary>Solution</summary>
+<p>\(S=4\,\mathrm{GiB}=4.295\times10^{9}\) B, so \(S/B=0.4295\) s, and \(Sa=4.295\times10^{9}\times180\times10^{-9}\ \mathrm{s}=773.1\) s. By (2.2), \(T(b)=773.1/b+0.4295\) s. For \(b=1\): 773.5 s. For \(b=512\): \(1.510+0.430=1.94\) s. For \(b=4096\): \(0.189+0.430=0.618\) s. For \(b=65\,536\): \(0.0118+0.4295=0.441\) s. The per-call share is \(aB/(aB+b)\), with \(aB=180\times10^{-9}\times10^{10}=1800\) B. It is at most 0.05 when \(1800\le0.05(1800+b)\), that is \(b\ge19\times1800=34\,200\) B. The ratio of the first and last time is \(773.5/0.441=1750\). The model agrees with the measured per-call times to within 10 % in the sample run, but it is a fit to a file in the page cache; a file that must come from a disk adds the time of the device, which this model does not contain.</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> A student says: "A program that makes no system call never enters the kernel." Give a program from this chapter that disproves the claim, and count how many times it enters the kernel.</p>
+<details><summary>Solution</summary>
+<p>The loops that touch memory in <code>pagefault.c</code> contain only stores, and no system call. The first pass over the 64 MiB mapping nevertheless enters the kernel 16 384 times, once per page, through the page-fault exception (the output line "1.00 minor faults per page"). At 1.7 to 2.5 µs per fault, that is 28 to 41 ms for a loop that makes no request. The children of <code>fairshare.c</code> give a second counterexample: their loops make no system call, and the kernel still removes them from the processor by timer interrupts, because they share one processor and each gets half of it. The claim is true for one of the three events that enter the kernel, the system call, and false for exceptions and interrupts. The statement "the kernel runs only when a program asks for it" would make the isolation and the multiplexing of the model impossible.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> A student reads the one-processor ping-pong, 2.8 to 3.3 µs per round trip, and concludes: "moving a thread to another processor costs at most one context switch, about 1.5 µs." Find the assumption that fails, and give a corrected bound for the cost of a switch.</p>
+<details><summary>Solution</summary>
+<p>The one-processor round trip contains two switches and also four pipe system calls and two wake-ups. Each pipe call costs at least a minimal system call, 84 ns or more, so the four calls take at least 0.34 µs. The cost of one switch is at most \((\text{round trip}-0.34\ \mu\mathrm{s})/2\), which is 1.22 to 1.50 µs for round trips of 2.78 to 3.34 µs. This bound is slightly tighter than the half round trip. The failing assumption is that the cost of moving a thread equals the cost of switching between two threads on one processor. The two-processor measurement contradicts it: a round trip between processors 0 and 2 took 31.7 to 40.2 µs, 10 to 14 times as long, although no switch occurs on either processor. The extra time belongs to waking a thread on another processor, which the switch cost does not contain. A model of the cost of moving threads between processors must include that wake-up, and the cost of the cold caches after a move, which this chapter did not measure.</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> A sweep must run \(10^{5}\) cases of a solver that needs 20 ms each, on a node with 12 logical processors. Option A starts one process per case, linked dynamically. Option B is option A with static linking. Option C starts 12 worker processes that each loop over their share of the cases. Use the launch times of this chapter and choose an option, with numbers.</p>
+<details><summary>Solution</summary>
+<p>The compute time is \(10^{5}\times20\) ms \(=2000\) s of processor time, or about 167 s on 12 processors. Option A adds \(10^{5}\times0.46\) to \(0.70\) ms \(=46\) to 70 s of processor time. By (2.1) the fraction is \(\varphi=0.46/20.46=2.2\ \%\) to \(0.70/20.70=3.4\ \%\), so the sweep takes about 4 to 6 s longer in wall-clock time on 12 processors (\(46/12\) to \(70/12\)). Option B costs 31 to 42 s, \(\varphi=1.5\) to \(2.1\ \%\), which saves about 15 to 28 s of processor time. Option C starts 12 processes, so the launch cost is 12 launches, below 10 ms in total. These estimates assume that the launches are spread over the 12 processors. A solver that links more shared libraries than the C library (for example the math library or an MPI library) has more <code>mmap</code> calls and more faults per launch, so 0.46 to 0.70 ms is a lower estimate for it. Option C wins by 2 % to 3 % of the run time. It gives up isolation: a case that corrupts memory or fails in the middle takes down the worker and all the cases queued behind it, and state that a case leaves in global variables reaches the next case. For a solver that is known to be clean, choose C. For a solver that is not, choose A or B: the 2 % to 3 % is the price of a fresh address space for each case, and B recovers part of it if the solver has no need for dynamic libraries. The estimate counts only the launch of the process; it does not count the time that a shell script spends on its own work for each case, which chapter 5 discusses.</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement).</strong> The manual says that <code>fork</code> costs "the time and memory required to duplicate the parent's page tables". Predict how the time of <code>fork</code> followed by <code>waitpid</code> depends on the amount of memory the parent has touched. Then measure it for parents that have touched 0, 16, 64, 256 and 512 MiB.</p>
+<details><summary>Solution</summary>
+<p>The page-table memory of the parent grows in proportion to the touched memory, by (2.6) about 0.2 % of it, and <code>fork</code> copies the entries of every touched page, so the prediction is a time that is the sum of a constant (the cost of the process with no touched memory) and a term proportional to the number of touched pages. The program below touches the memory in a parent with <code>mmap</code>, then repeats <code>fork</code> with an immediately ending child 200 times, and keeps the smallest time. The last column is the added time per 1000 touched pages.</p>
+<pre><code class="language-c" data-file="forkcost.c" data-build="gcc -O2 forkcost.c -o forkcost" data-run="./forkcost" data-check="returncode">#define _GNU_SOURCE
+#include &lt;stdio.h&gt;
+#include &lt;sys/mman.h&gt;
+#include &lt;sys/wait.h&gt;
+#include &lt;time.h&gt;
+#include &lt;unistd.h&gt;
+
+#define REPS 200
+
+static double now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &amp;ts);
+    return ts.tv_sec + ts.tv_nsec * 1e-9;
+}
+
+int main(void)
+{
+    long page = sysconf(_SC_PAGESIZE);
+    long mib[] = {0, 16, 64, 256, 512};
+    printf("%10s %12s %14s %18s\n", "touched", "pages", "fork+wait us", "us per 1000 pages");
+    double base = 0;
+    for (int i = 0; i &lt; 5; i++) {
+        long bytes = mib[i] &lt;&lt; 20;
+        char *p = NULL;
+        if (bytes) {
+            p = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            madvise(p, bytes, MADV_NOHUGEPAGE);
+            for (long off = 0; off &lt; bytes; off += page) p[off] = 1;
+        }
+        double best = 1e30;
+        for (int r = 0; r &lt; REPS; r++) {
+            double t0 = now();
+            pid_t pid = fork();
+            if (pid == 0) _exit(0);
+            waitpid(pid, NULL, 0);
+            double t = now() - t0;
+            if (t &lt; best) best = t;
+        }
+        if (i == 0) base = best;
+        printf("%7ld MiB %12ld %14.1f %18.1f\n", mib[i], bytes / page, best * 1e6,
+               bytes ? (best - base) * 1e6 / (bytes / page / 1000.0) : 0.0);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">   touched        pages   fork+wait us  us per 1000 pages
+      0 MiB            0           97.8                0.0
+     16 MiB         4096          252.1               37.7
+     64 MiB        16384          836.9               45.1
+    256 MiB        65536         3299.2               48.9
+    512 MiB       131072         8469.5               63.9</code></pre>
+<p>The sample run gives 98 µs for a parent with no touched memory, 252 µs for 16 MiB, 0.84 ms for 64 MiB, 3.3 ms for 256 MiB and 8.5 ms for 512 MiB. Over six runs the ranges are 98 to 105 µs, 252 to 285 µs, 0.84 to 1.00 ms, 3.2 to 3.9 ms and 8.5 to 9.4 ms. The prediction holds in form: the time rises with the number of touched pages, from 98 µs to 8.5 ms, a factor of 87. A line through the points at 16 MiB and 256 MiB of the sample has a slope of 49.6 ns per page, and predicts 0.86 ms at 64 MiB (3 % above the sample) and 6.6 ms at 512 MiB (23 % below the sample). The time per page is therefore not constant: the added time per 1000 pages rises from 38 µs at 16 MiB to 64 µs at 512 MiB in the sample, and from 37 to 71 µs over all runs (the 16 MiB point ranges from 37 to 45 µs, the 512 MiB point from 64 to 71 µs). The cause of the rise was not found; a larger table that no longer fits in a cache is a candidate that this exercise did not test. The cost per page, 38 to 64 ns, is 48 to 80 times the 0.8 ns that moving the 8 bytes of an entry takes at 10 GB/s. The timed interval contains both the copy of the entries in <code>fork</code> and their removal when the child exits. The kernel therefore does work for each page beyond copying its entry. A candidate mechanism, not tested here: for each present anonymous page, <code>fork</code> duplicates the reverse-mapping reference of the page (<code>copy_present_pte</code> calls <code>page_try_dup_anon_rmap</code> in <code>mm/memory.c</code>, Linux 6.6.87), and the child's exit drops it, so the work touches the metadata of the page and not only its 8-byte entry. The consequence for a launcher is direct: a parent that holds 512 MiB of touched data pays about 8.5 ms for each <code>fork</code>, 87 times the cost of a small parent, so a sweep driver should start its children from a small process.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li>Recordings: <a href="https://www.youtube.com/watch?v=lmlLdGMrdGU">W1L1, Introduction to Operating System</a> (slides: what an operating system is, its components, types, the history and milestones of Linux, the role of Linux in HPC, the layer structure); <a href="https://www.youtube.com/watch?v=JYTA5BWHmb0">W1L2, Linux Kernel Explained</a> (slides: the kernel, its subcomponents, library files, types of files), NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay, 2025.</li>
+<li>D. M. Ritchie and K. Thompson, <a href="https://www.nokia.com/bell-labs/about/dennis-m-ritchie/cacm.html">"The UNIX Time-Sharing System"</a>, electronic edition of the revision in <em>The Bell System Technical Journal</em> 57(6), 1978, which revises <em>Communications of the ACM</em> 17(7), 1974, pp. 365–375. The text of 1974 was not read. §I: versions of Unix, "circa 1969-70", the unprotected PDP-11/20 and multiprogramming on later models; §3.3: special files; §V: image and process; §5.1 to §5.3 and §5.5: <code>fork</code>, pipes, <code>execute</code> and <code>exit</code>; §VI: the shell as a command-line interpreter.</li>
+<li>L. Torvalds, <a href="https://www.cs.cmu.edu/~awb/linux.history.html">"Linux's History"</a>, written 31 July 1992 (a mirror at Carnegie Mellon University). The posts of 3 July, 25 and 26 August, 5 October and 19 December 1991: the first announcement, version 0.01 "sometimes around this time", GNU programs running under the kernel, the early licence, and version 0.12 of 5 January 1992.</li>
+<li>kernel.org, <a href="https://www.kernel.org/pub/linux/kernel/v1.0/">archive of kernel version 1.0</a>: <code>linux-1.0.tar.gz</code> with the date 13 March 1994 (the date of the file in the listing).</li>
+<li>A. S. Tanenbaum and L. Torvalds, <a href="https://www.oreilly.com/openbook/opensources/book/appa.html">"The Tanenbaum-Torvalds Debate"</a>, appendix A of <em>Open Sources</em> (O'Reilly, 1999). The posts of 29 January 1992: the definitions of the monolithic kernel and the microkernel, and Torvalds's reply.</li>
+<li>The Linux kernel community, <a href="https://docs.kernel.org/arch/x86/entry_64.html">Kernel Entry</a> (x86 entry code: the entry points for <code>syscall</code>, interrupts and exceptions), <a href="https://docs.kernel.org/arch/x86/pti.html">Page Table Isolation</a> (§23.3, overhead: control-register moves of about a hundred cycles at entry and exit), <a href="https://docs.kernel.org/arch/x86/x86_64/mm.html">x86-64 memory map</a> (48-bit and 57-bit virtual addresses, four-level and five-level tables), <a href="https://docs.kernel.org/admin-guide/mm/concepts.html">Concepts overview</a> (virtual memory primer, huge pages, TLB), <a href="https://docs.kernel.org/filesystems/vfs.html">Overview of the Linux Virtual File System</a> (introduction), <a href="https://docs.kernel.org/filesystems/proc.html">The /proc filesystem</a> (<code>VmPTE</code>, the definition of the proportional set size), <a href="https://docs.kernel.org/scheduler/sched-design-CFS.html">CFS Scheduler</a> (the ideal multi-tasking CPU, virtual runtime), <a href="https://docs.kernel.org/scheduler/sched-eevdf.html">EEVDF Scheduler</a> (transition from version 6.6), <a href="https://docs.kernel.org/scheduler/sched-nice-design.html">Scheduler Nice Design</a> (55 % to 45 % for a difference of one nice level, 1.5 % at nice +19). The pages are those of the documentation version 7.3.0 at the time of reading; they were read on 2026-10-26.</li>
+<li>The Linux man-pages project, <a href="https://man7.org/linux/man-pages/man2/syscall.2.html">syscall(2)</a> (instruction, number register and argument registers for x86-64), <a href="https://man7.org/linux/man-pages/man2/fork.2.html">fork(2)</a> (separate memory spaces, copy-on-write, the penalty of duplicating page tables), <a href="https://man7.org/linux/man-pages/man2/execve.2.html">execve(2)</a> (replacement of the program, the <code>PT_INTERP</code> interpreter), <a href="https://man7.org/linux/man-pages/man7/sched.7.html">sched(7)</a> (policies, static priorities 1 to 99, preemption), <a href="https://man7.org/linux/man-pages/man7/vdso.7.html">vdso(7)</a> (purpose of the vDSO, exported <code>__vdso_clock_gettime</code>).</li>
+<li>The Open Group, <a href="https://pubs.opengroup.org/onlinepubs/9799919799/functions/fork.html">POSIX.1-2024 (IEEE Std 1003.1-2024), <code>fork</code></a>: the child is an exact copy of the parent except for a list of attributes, including a unique process identifier.</li>
+<li>The Open Group, <a href="https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html">POSIX.1-2024, Shell and Utilities, chapter 2</a>, §2.9.1.4 Command Search and Execution: the search sequence applies only if the command name contains no slash.</li>
+<li>The Linux kernel source, tag v6.6.87 of the stable tree (<a href="https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/plain/kernel/sched/core.c?h=v6.6.87"><code>kernel/sched/core.c</code></a>, read through a mirror of the same tag): the comment "a multiplier of 1.25" and the table <code>sched_prio_to_weight</code> (weights 1024, 335, 110, 15 for nice 0, 5, 10, 19); <code>mm/memory.c</code>, <code>copy_present_pte</code> and <code>page_try_dup_anon_rmap</code> (the candidate mechanism of Exercise 6).</li>
+<li>KernelNewbies, <a href="https://kernelnewbies.org/Linux_6.6">Linux 6.6</a> (released 29 October 2023: the CFS process scheduler is replaced by EEVDF) and <a href="https://kernelnewbies.org/Linux_6.12">Linux 6.12</a> (release on 17 November 2024, merge of the real-time preemption patch set PREEMPT_RT, completion of the EEVDF transition); both are secondary sources.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-01-what-hpsc-is-for.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-03-linux-file-system-permissions-ownership.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>
