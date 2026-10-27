@@ -1,5 +1,5 @@
 {
-  "checked_at_utc": "2026-10-27T18:07:15.310619+00:00",
+  "checked_at_utc": "2026-10-27T18:38:25.639672+00:00",
   "status": "partial edition: chapters 1-11 written; chapters 12-31 not written; every written chapter has an independent zero-blocking verdict",
   "chapter_count": 31,
   "written_chapters": 11,
@@ -28,13 +28,13 @@
   "final_independent_signoff_pending_chapters": [],
   "chapter_body_sha256": {
     "chapter-01-what-hpsc-is-for.html": "20fed3dd02c0eeda5d6b6f0e701dea5f35e694395df359864c0bcdf4ded80223",
-    "chapter-02-operating-systems-and-linux-kernel.html": "58f9b8f9eb94362d5d3743c2a4bf7a00eac1c2d4b312a1fb55a590be15c18cf8",
-    "chapter-03-linux-file-system-permissions-ownership.html": "b36ba22ee877b25c82f86033ce3114d1a064e1a085562724f8be6f420311f0ad",
+    "chapter-02-operating-systems-and-linux-kernel.html": "f153751936e71e3957d0c71eb81aebbb9b4183113eb556effa547fef6b028a1e",
+    "chapter-03-linux-file-system-permissions-ownership.html": "603c430254316553de1f3f37b36dd4abb834660df58de183dccc6f191b60bca3",
     "chapter-04-processes-text-memory-and-networking.html": "a7a808bfd37b6cae9deb3616cb50f51fe9754ab4f601a66a6a32727b77793419",
     "chapter-05-shell-scripting-processes-and-control-flow.html": "7fb0dfc447337fbe798805900efde00ae052c119dcd5c6c1d2a4871f4428f07f",
     "chapter-06-hpc-components-and-node-architecture.html": "25df0acdbdc801ac0b727fe2da9ae10425bc089ff468948ce29fc5d0b905eeeb",
     "chapter-07-hierarchical-memory-and-scalable-architectures.html": "711ac9ae0e32b42ea467222a6ad703ec5fd47076fef55cf0ebfc265c7f3b4060",
-    "chapter-08-concurrency-and-synchronization.html": "cc41306bff32514a87e931c4627b8d8291aea035c2468107701a4c764e382ec9",
+    "chapter-08-concurrency-and-synchronization.html": "ef6b4bc0cab879e78bbcdccbabf25b2a8fcefef9294246f8596a694e0ffcb055",
     "chapter-09-parallel-computing-numerical-models-and-cost.html": "c14817b6c35bb3f14d6d57881dba34590e46413ee8376dbf9ba9934364dfb746",
     "chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.html": "32fb15f302a95f837a8c23c1042d658461743966876f0e9d3aad3654197e6e88",
     "chapter-11-openmp-threads-and-work-distribution.html": "d2eec49972640afcc355d00dc1060262cc552ee9971eeebb6e6992191b9978f8"

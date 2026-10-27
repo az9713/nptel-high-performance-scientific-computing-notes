@@ -1,5 +1,5 @@
 {
-  "checked_at_utc": "2026-10-27T18:07:15.310619+00:00",
+  "checked_at_utc": "2026-10-27T18:38:25.639672+00:00",
   "scope": "Curated review records, not a new scientific review or retrospective acceptance",
   "review_process": "Each written chapter: author draft; independent review round 1 against the authoring contract (correctness, lecture fidelity, rigor, sources, code, contract, prose); author repairs; independent review round 2; author repairs; lead spot-check. Chapters whose latest round still recorded a blocking finding received further independent rounds until one recorded zero blocking findings; the author repaired the remaining findings of that round. Review reports are private editorial records.",
   "all_chapters_written": false,
@@ -48,7 +48,7 @@
     {
       "chapter": 2,
       "file": "chapter-02-operating-systems-and-linux-kernel.html",
-      "current_body_sha256": "58f9b8f9eb94362d5d3743c2a4bf7a00eac1c2d4b312a1fb55a590be15c18cf8",
+      "current_body_sha256": "f153751936e71e3957d0c71eb81aebbb9b4183113eb556effa547fef6b028a1e",
       "review_rounds": 2,
       "latest_recorded_review": "ch02-r2.md",
       "latest_recorded_verdict": "ACCEPT WITH FIXES",
@@ -63,7 +63,7 @@
     {
       "chapter": 3,
       "file": "chapter-03-linux-file-system-permissions-ownership.html",
-      "current_body_sha256": "b36ba22ee877b25c82f86033ce3114d1a064e1a085562724f8be6f420311f0ad",
+      "current_body_sha256": "603c430254316553de1f3f37b36dd4abb834660df58de183dccc6f191b60bca3",
       "review_rounds": 3,
       "latest_recorded_review": "ch03-r3.md",
       "latest_recorded_verdict": "ACCEPT WITH FIXES",
@@ -138,7 +138,7 @@
     {
       "chapter": 8,
       "file": "chapter-08-concurrency-and-synchronization.html",
-      "current_body_sha256": "cc41306bff32514a87e931c4627b8d8291aea035c2468107701a4c764e382ec9",
+      "current_body_sha256": "ef6b4bc0cab879e78bbcdccbabf25b2a8fcefef9294246f8596a694e0ffcb055",
       "review_rounds": 2,
       "latest_recorded_review": "ch08-r2.md",
       "latest_recorded_verdict": "ACCEPT",

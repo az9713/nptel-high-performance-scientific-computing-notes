@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="58f9b8f9eb94362d5d3743c2a4bf7a00eac1c2d4b312a1fb55a590be15c18cf8"><title>Operating systems and the Linux kernel · High Performance Scientific Computing</title>
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="f153751936e71e3957d0c71eb81aebbb9b4183113eb556effa547fef6b028a1e"><title>Operating systems and the Linux kernel · High Performance Scientific Computing</title>
 <link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
 <script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
 <body><a class="skip" href="#main">Skip to content</a>
@@ -890,7 +890,7 @@ socket     socket            write returned 5, read returned 5
 directory  directory         read returned -1 (Is a directory)</code></pre>
 <p>Four kinds of object accept the same <code>write</code> call and report 5 bytes written. The file, the pipe and the socket return the same 5 bytes through the same <code>read</code> call. <code>/dev/null</code> is a character device that accepts and discards the data, and it has no read end in this program. The directory is a file in the sense that it has a descriptor, but <code>read</code> fails with <code>Is a directory</code>: a uniform interface does not make every operation valid for every kind of object. Ritchie and Thompson describe the first version of the idea: "Special files are read and written just like ordinary disk files, but requests to read or write result in activation of the associated device" (§3.3), and the abstract of their paper lists "compatible file, device, and inter-process I/O" as a feature.</p>
 <p><strong>What "everything is a file" covers.</strong> The lecture states at <a class="timestamp" href="https://www.youtube.com/watch?v=JYTA5BWHmb0&amp;t=1144s">W1L2 19:04</a> that most system resources and devices are represented as files, lists regular files, directories, devices in <code>/dev</code>, symbolic links and network interfaces, and says that processes, threads and memory are the exceptions. The slide says "mostly everything", which is the more careful statement. The next session tests three parts of the claim: the descriptors of a process, the information that the kernel gives about a process, and the network interface.</p>
-<pre><code class="language-bash">$ ls -l /proc/self/fd 3&lt; hello.c &gt; fd.txt 2&gt;&amp;1 &lt; /dev/null; grep -v ptmx fd.txt | sed 's/ az9713 az9713//' | cut -c1-100
+<pre><code class="language-bash">$ ls -l /proc/self/fd 3&lt; hello.c &gt; fd.txt 2&gt;&amp;1 &lt; /dev/null; grep -v ptmx fd.txt | sed &quot;s/ $(id -un) $(id -gn)//&quot; | cut -c1-100
 total 0
 lr-x------ 1 64 Oct 26 18:46 0 -&gt; /dev/null
 l-wx------ 1 64 Oct 26 18:46 1 -&gt; /tmp/hpsc-ch02-demo/fd.txt
