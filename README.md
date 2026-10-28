@@ -16,9 +16,9 @@ maps distinguish lecture material, research extensions, and original teaching
 constructions. Chapter citations and sidecars record source uncertainties and
 claims that could not be checked.
 
-**This is a partial edition.** Chapters **1–16** are written and independently reviewed; chapters **17–31** remain pending.
+**This is a partial edition.** Chapters **1–20** are written and independently reviewed; chapters **21–31** remain pending.
 
-The plan groups **75 source recordings** (playlist items 2–76) into **31 topic chapters**; the separate course trailer is excluded. The written chapters cover **33 recordings** and contain **96 expandable worked solutions** and **176 runnable listings** (26 Bash, 102 C, 48 Python). The lecture index records each recording assignment and any remaining work.
+The plan groups **75 source recordings** (playlist items 2–76) into **31 topic chapters**; the separate course trailer is excluded. The written chapters cover **44 recordings** and contain **120 expandable worked solutions** and **196 runnable listings** (26 Bash, 103 C, 14 CUDA C++, 53 Python). The lecture index records each recording assignment and any remaining work.
 
 Transcripts were produced locally with faster-whisper small.en; they are machine transcriptions, not publisher captions. The NPTEL caption tracks are attached to the wrong videos and were not used.
 

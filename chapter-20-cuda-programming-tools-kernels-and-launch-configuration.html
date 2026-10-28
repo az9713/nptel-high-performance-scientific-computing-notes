@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="fd2d6ef8a69902a8fc48e7ca80e682d7dd3eb44812f70f85de99fa4b81bd3731"><title>CUDA programming: tools, kernels, and launch configuration · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>CUDA programming: tools, kernels, and launch configuration</h1>
+<p class="lead">Adding 1003 pairs of numbers with four blocks of 256 CUDA threads launches 1024 threads. Exactly 21 must avoid the array, and the host must wait for the result before inspecting or freeing its storage. A program can get the sum formula right while violating either condition. The running case turns this short addition into an explicit protocol: allocate valid objects, copy the required data, launch a bounded set of threads, detect errors, establish completion, validate every output and release the allocations.</p>
+<p class="source-note">Grounded in NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay: <a href="https://www.youtube.com/watch?v=vKUl3M0e9pU">W8L1, An Introduction to GPU Programming: Tools, Techniques, and CUDA, Part 1</a>, and <a href="https://www.youtube.com/watch?v=OmkTAFlVllg">W8L2, Part 2</a>. <strong>Lecture material:</strong> programming approaches, CUDA execution flow, function and variable qualifiers, vector types, launch dimensions and built-in variables, memory functions, atomics, synchronization, device queries, errors and compiler options. <strong>Research extensions:</strong> CUDA language and runtime documentation establish API semantics; installed CUDA 13.3 headers check names and types; NVIDIA's compiler manual separates host and device flags; AMD's HIP guide, Kokkos documentation and the SYCL specification qualify portability claims; tool documentation identifies suitable correctness and profiling checks. <strong>Original teaching constructions:</strong> the checked vector-add protocol, layout and storage-lifetime example, bounded midpoint-integration reduction, safe launch-error diagnostic, timing boundaries, ownership proofs and six worked exercises.</p>
+
+<h2 id="model">Objects, owners, and completion form the CUDA program</h2>
+<p>The <em>host</em> is the CPU side of the application; the <em>device</em> is the selected graphics processing unit, or GPU. CUDA is NVIDIA's parallel computing platform and programming model. A <em>kernel</em> is a device entry function launched over many logical threads. A <em>block</em> groups threads that can cooperate through block-local shared memory and synchronization, and a <em>grid</em> contains the blocks of one launch. These are software execution units; their indices do not permanently identify physical arithmetic processors.</p>
+<p>Let \(n\) be the number of pairs to add. Host arrays \(a^{(H)},b^{(H)},c^{(H)}\) and device arrays \(a^{(G)},b^{(G)},c^{(G)}\) represent separate objects in the explicit-copy model. Superscripts identify their memory role. The desired output is \(c_i^{(H)}=a_i^{(H)}+b_i^{(H)}\) for indices \(0\le i\lt n\). An address stored in a host variable is not the array itself and is not evidence that a GPU can dereference the corresponding CPU allocation.</p>
+<p>For a one-dimensional launch, let \(u\) be threads per block, \(g\) the block count, \(b\in\{0,\ldots,g-1\}\) a block index and \(r\in\{0,\ldots,u-1\}\) a thread's local index. The candidate array index is \(i=bu+r\). The launch creates \(p=gu\) logical threads, while useful work consists of \(n\) additions. These counts can differ. We choose \(g=\lceil n/u\rceil\) for positive \(n\), then guard accesses with \(i\lt n\). An empty problem skips the launch.</p>
+<p>Each 32-bit single-precision floating-point (FP32) value occupies \(s=4\) bytes in the examples. An input allocation requires \(ns\) bytes. The verification version adds two sentinel values around the output, so its output allocation requires \((n+2)s\). A <em>sentinel</em> is a known value placed beside useful storage to detect some accidental writes outside that storage. It supplements the index proof and full payload check; two unchanged sentinels cannot prove that every possible invalid access was absent.</p>
+<p>A <em>stream</em> is an ordered sequence of submitted CUDA work. These examples use one default stream, with no attempt to overlap separate streams. Required copies precede their consumers in that ordering. A kernel launch is asynchronous with respect to the host: submission can return before the kernel finishes. Completion must be established before the host consumes a device-produced result or considers the operation finished. A host wait is distinct from threads meeting at a device barrier. <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html">CUDA Runtime API, synchronization behavior</a>.</p>
+<p>Three timing intervals will be kept separate. A host interval around submission measures how long the CPU spends submitting work; it need not include completed device computation. CUDA events surrounding a kernel measure a device-timeline interval, denoted \(T_{\mathrm{dev}}\). A host steady-clock interval from before allocation to after copying results and freeing device storage is \(T_{\mathrm{alloc-free}}\). It includes a larger workflow. Neither can be called whole-application runtime if initialization, input generation or validation lies outside it.</p>
+<p>The local execution target is an NVIDIA GeForce RTX 3050 Laptop GPU with 4 GB nominal memory, compute capability 8.6, under WSL 2. <em>Compute capability</em> identifies a CUDA hardware feature generation; it is different from toolkit version. The installed toolkit is CUDA 13.3. The programs compile for the visible device with <code>-arch=native</code>, bound allocations well below 500 MB and check all runtime calls and launch status. Every successful performance observation is conditional on the accompanying numerical validation.</p>
+
+<h2 id="approaches">Choose an expression of parallel work, then check its implementation <a class="timestamp" href="https://www.youtube.com/watch?v=vKUl3M0e9pU&amp;t=6s">W8L1 0:06</a></h2>
+<p>GPU programming approaches divide responsibility differently. Standard-language parallel algorithms can expose work through ordinary C++ interfaces and a suitable implementation. Directive-based models such as OpenACC and OpenMP annotate regions and data movement. Explicit kernel models express device functions and launches directly. Portable abstraction libraries and heterogeneous-language systems provide a common interface with multiple backends. Higher-level languages call GPU libraries or compile selected functions. These categories overlap: a Python library can ultimately launch CUDA kernels, and a C++ abstraction can select a CUDA backend.</p>
+<p>The lecture's inventory names NVIDIA's compiler support for C++ and Fortran, OpenACC, OpenMP, CUDA, HIP, Alpaka, Kokkos, OpenCL, RAJA, SYCL, Python packages such as CuPy, cuDF, PyCUDA and Numba, and Julia's device packages. This is a map of interfaces, not a promise that every combination supports every GPU, language feature or numerical library. A standard syntax alone does not ensure that a particular compiler offloads it to the selected device.</p>
+<p>Portability has several meanings. <em>Source portability</em> concerns whether source code can be built for another target. <em>Binary portability</em> concerns whether the same compiled artifact executes there. <em>Performance portability</em> concerns whether performance remains acceptable after changing targets. Supporting the first does not establish the other two. A mathematical algorithm can be portable while its explicit runtime calls and launch syntax require a backend or translation layer.</p>
+<p>HIP belongs in this discussion rather than in an absolute AMD-only box. AMD's HIP porting guide describes testing converted code on an NVIDIA machine before building it for AMD. That is a concrete counterexample to interpreting the lecture's non-portable-kernel category as a universal restriction on HIP source. It does not imply that an arbitrary CUDA executable runs unchanged on AMD hardware. <a href="https://rocm.docs.amd.com/projects/HIP/en/docs-6.4.1/how-to/hip_porting_guide.html">HIP porting guide, ROCm 6.4.1, Porting a CUDA Project</a>.</p>
+<p>Kokkos documents CUDA, HIP and SYCL execution spaces. SYCL 2020 defines a heterogeneous C++ model with implementation-dependent backends. These sources support checking a specific implementation and enabled backend rather than inferring device support from a label. They do not establish that every feature or vendor library has a portable equivalent. <a href="https://kokkos.org/kokkos-core-wiki/API/core/execution_spaces.html">Kokkos execution spaces</a>; <a href="https://registry.khronos.org/SYCL/specs/sycl-2020/html/sycl-2020.html">SYCL 2020 revision 12, §§2–3</a>.</p>
+<p>For the running case, explicit CUDA makes ownership and completion visible: the host creates inputs, the runtime allocates device storage, the kernel owns disjoint outputs, and the host validates the completed result. An abstraction could automate portions of this protocol, but its underlying dependencies would remain. Learning the explicit form therefore helps diagnose a high-level application's transfers or synchronization without requiring every scientific application to be rewritten in low-level CUDA.</p>
+
+<h2 id="flow">The explicit-copy protocol has a dependency at every transition <a class="timestamp" href="https://www.youtube.com/watch?v=vKUl3M0e9pU&amp;t=424s">W8L1 7:04</a></h2>
+<p>The execution flow starts with host allocation and input initialization. A C++ vector owns a host allocation and releases it when destroyed. Its <code>data()</code> member yields an address suitable for a copy operation while the vector remains valid. Creating a host vector named <code>a</code> does not allocate a device array. Likewise, copying a pointer variable copies only an address value; it does not transfer the array to which it points.</p>
+<p><code>cudaMalloc</code> obtains device storage and writes its address into a host pointer variable. The size argument counts bytes, so allocating <code>n</code> FP32 elements requires <code>n * sizeof(float)</code>, not merely <code>n</code>. Newly allocated storage does not supply the scientific input values. The application initializes it by a host-to-device copy, a device kernel or another specified mechanism. <code>cudaMemcpy</code> takes destination first, then source, byte count and direction; <code>cudaFree</code> releases the device allocation. These names come from the runtime memory API. <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY.html">CUDA Runtime API, Memory Management</a>.</p>
+<p>For vector addition, the required chain is input initialization, input copies, kernel reads and writes, result copy, host validation. Each step depends on the previous producer of the data it consumes. An output need not normally be copied to the device first if the kernel overwrites every useful element. Our diagnostic version intentionally initializes the output and both guards before launching so it can detect missing writes and guard corruption. That extra transfer is part of its measured allocation-to-free workflow.</p>
+<p>The host arrays must remain valid while a transfer uses them; device arrays must remain valid while kernels or transfers use them. Releasing an allocation and retaining its pointer leaves a stale address, not a valid object. Lifetime reasoning should establish completion explicitly rather than depend on an incidental wait that a particular allocation or deallocation routine may perform. The examples synchronize before reading results and before freeing storage used by their kernels.</p>
+<p>Copy completion also needs an exact description. With pageable host memory, a host-to-device <code>cudaMemcpy</code> may return after staging data while the final device transfer is still pending. A device-to-host copy returns after its copy is complete. Stream ordering places our subsequent kernel after the required input copies. Thus the protocol is valid without the stronger, incorrect rule that every routine whose name lacks <code>Async</code> always blocks until every device activity is complete. <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html">Runtime API, synchronous memcpy cases</a>.</p>
+<p>The <code>CUDA</code> macro in the listings evaluates one API call, checks its <code>cudaError_t</code> return value against <code>cudaSuccess</code>, and prints the failing expression and diagnostic before terminating on an unexpected error. It does not turn asynchronous work into synchronous work. After a kernel launch, <code>cudaGetLastError</code> checks launch status, and a later checked completion operation detects failures reported while device work executes. The complete error model is developed after the synchronization example.</p>
+<p>This structure resembles a resource protocol more than a translated scalar loop. Its correctness argument has three parts: valid storage, unique and in-bounds work ownership, and producer-before-consumer ordering. A numerical checksum alone tests none of these exhaustively. Conversely, passing API checks alone does not establish that the kernel computed the intended function. The examples combine API checks, explicit dependency reasoning and payload comparisons.</p>
+
+<h2 id="qualifiers">Function placement and storage lifetime are separate declarations <a class="timestamp" href="https://www.youtube.com/watch?v=vKUl3M0e9pU&amp;t=633s">W8L1 10:33</a></h2>
+<p>A CUDA execution qualifier describes where a function can execute. A function marked <code>__global__</code> is a kernel entry point; the ordinary launches here originate on the host and execute on the selected device. It returns <code>void</code>, while results are written to storage supplied through parameters. A <code>__device__</code> function is callable from device code and executes there. A <code>__host__</code> function executes on the host; an ordinary unqualified C++ function has this host role. Combining <code>__host__ __device__</code> permits compiling corresponding host and device implementations of the same source function. This does not make every library called inside it available in both environments.</p>
+<p>A device function call is not a remote call from one GPU to another. The qualifier itself provides no cross-device execution protocol. Similarly, placing a host pointer in a kernel argument does not change the allocation it identifies. The function's execution space and each pointed-to object's accessibility must both be correct. NVIDIA's language-extension reference defines these execution-space annotations independently of the memory annotations. <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html">CUDA Programming Guide §5.4.1</a>.</p>
+<p>The same spelling <code>__device__</code> also appears on variables, with a different role. A file-scope device variable resides in device global memory and persists across kernel invocations within the CUDA context's lifetime. A context holds device execution and resource state; it is more precise here than simply calling every device variable's lifetime the host application's lifetime. Separate devices have their own relevant instances. Host code accesses the symbol through the appropriate runtime operations rather than directly dereferencing an ordinary host variable with the same name.</p>
+<p>A <code>__constant__</code> variable supplies device-readable constant storage. The host can initialize it through a symbol copy when no concurrent kernel accesses that object. “Constant” therefore describes device-side access, not a claim that its value can never be changed by the host. A <code>__shared__</code> array supplies separate block-local storage, visible to that block's threads and valid for that block's execution. It does not retain a previous block's scientific values for the next invocation, and sharing its address does not make it a grid-wide array.</p>
+<p>A <code>__managed__</code> variable can be accessed by host and device under Unified Memory's rules. Address accessibility does not remove ordering requirements: the host must not inspect a value while the kernel is updating it without an appropriate supported protocol. Our example writes the managed counter on the host before launching, increments it on the device, and reads it only after a checked device synchronization. It does not rely on concurrent CPU/GPU atomic access or claim that managed storage has no migration cost.</p>
+<p><code>__restrict__</code> addresses a different issue: pointer aliasing. Aliasing means that pointers designate overlapping storage. A restricted pointer communicates an access promise that can permit the compiler to reuse loaded values or reorder operations. It neither allocates a new region nor checks that the promise is true. The vector-add program satisfies a simple sufficient condition by allocating independent input and output regions. A caller must not then replace an output pointer with an overlapping input merely because a particular test seemed to work. Read-only input relationships and the full language rules are subtler than “no other pointer may ever contain the same address.”</p>
+<p>Scope, placement, lifetime and synchronization answer different questions. A block-local shared array can have several writers and still require a barrier before one thread reads their contributions. A long-lived global counter can race despite remaining allocated. A managed object can be accessible from both processors yet require a host wait. The declaration table supplies objects for the protocol; it does not supply the protocol itself.</p>
+
+<h2 id="vectors">Vector types group components; launch dimensions count threads <a class="timestamp" href="https://www.youtube.com/watch?v=vKUl3M0e9pU&amp;t=1256s">W8L1 20:56</a></h2>
+<p>CUDA's built-in vector types group one through four scalar components. A <code>float2</code> can represent a planar point's two coordinates, a <code>float3</code> a three-dimensional position, and a <code>float4</code> four color components such as red, green, blue and alpha. Components are named <code>x</code>, <code>y</code>, <code>z</code> and <code>w</code> where present. The helper <code>make_float2</code> constructs a two-component value. These are C++ structures, not an assertion that each arithmetic expression automatically becomes a packed single-instruction, multiple-data (SIMD) instruction, which applies one instruction to multiple data lanes.</p>
+<p>Layout has two relevant quantities. <em>Size</em> is the number of bytes occupied by an object, including any padding. <em>Alignment</em> constrains the addresses at which objects may begin. The installed CUDA types give <code>float2</code> size/alignment 8/8 bytes, <code>float3</code> 12/4 and <code>float4</code> 16/16. In particular, three components do not imply a sixteen-byte object. The next program checks these properties instead of assuming that all vector types share one alignment rule.</p>
+<p>Grouping coordinates improves representation when they belong together, but does not guarantee efficient memory transactions. If successive threads access successive <code>float3</code> records but only their <code>x</code> members, requested addresses are twelve bytes apart. Three separate coordinate arrays instead give adjacent four-byte requests for the same field. If every operation needs every coordinate, a different tradeoff can apply. Coalescing concerns the addresses requested by a group of threads, not merely whether one thread's object has consecutive fields. Deeper layout optimization follows in the memory chapters.</p>
+<p><code>dim3</code> serves another purpose. It stores three unsigned components used for launch dimensions. Missing constructor arguments default to one: <code>dim3(5)</code> is <code>(5,1,1)</code>, not <code>(5,0,0)</code>. The total represented count is the product of its dimensions. Thus <code>(5,5)</code> describes twenty-five positions, and <code>(5,5,5)</code> one hundred twenty-five. These are counts, not the largest valid indices; a dimension five has indices zero through four. The installed vector header and language reference agree on these defaults and layouts. <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html">CUDA Programming Guide §5.4.2, built-in types and variables</a>.</p>
+<p>The following complete example checks layout, omitted dimensions and storage lifetime. It launches one block of thirty-two threads twice, using the basic launch form <code>sample&lt;&lt;&lt;1,32&gt;&gt;&gt;</code>. Each thread puts its index plus one into a shared array, all threads reach the barrier, and thread zero sums the thirty-two entries and adds a constant bias of one half. The sum is \(1+\cdots+32=32\cdot33/2=528\), so each result should be 528.5. Only that single thread updates the counters, and the launches are ordered; this example does not require an atomic increment.</p>
+<pre><code class="language-cuda" data-file="cuda_types.cu" data-build="nvcc -arch=native -O2 -std=c++17 cuda_types.cu -o cuda_types" data-run="timeout 20 ./cuda_types" data-check="exact" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+
+#define CUDA(call) do { cudaError_t e = (call); if (e != cudaSuccess) { \
+    std::fprintf(stderr, &quot;%s: %s\n&quot;, #call, cudaGetErrorString(e)); \
+    std::exit(1); } } while (0)
+
+__device__ int device_calls;
+__constant__ float bias;
+__managed__ int managed_calls;
+
+__host__ __device__ float component_sum(float2 p) { return p.x + p.y; }
+__device__ float device_value(unsigned t)
+{
+    return component_sum(make_float2((float)t, 1.0f));
+}
+
+__global__ void sample(float *out, int pass)
+{
+    __shared__ float values[32];
+    unsigned t = threadIdx.x;
+    values[t] = device_value(t);
+    __syncthreads();
+    if (t == 0) {
+        float sum = 0;
+        for (unsigned j = 0; j &lt; 32; ++j) sum += values[j];
+        out[pass] = sum + bias;
+        ++device_calls;
+        ++managed_calls;
+    }
+}
+
+int main()
+{
+    CUDA(cudaSetDevice(0));
+    dim3 one(5), two(5,5), three(5,5,5);
+    std::printf(&quot;float2 size=%zu align=%zu; float3 size=%zu align=%zu; &quot;
+                &quot;float4 size=%zu align=%zu\n&quot;, sizeof(float2), alignof(float2),
+                sizeof(float3), alignof(float3), sizeof(float4), alignof(float4));
+    std::printf(&quot;dim3(5)=(%u,%u,%u); dim3(5,5)=(%u,%u,%u); &quot;
+                &quot;dim3(5,5,5)=(%u,%u,%u)\n&quot;, one.x,one.y,one.z,two.x,two.y,two.z,
+                three.x,three.y,three.z);
+    if (sizeof(float2)!=8 || alignof(float2)!=8 || sizeof(float3)!=12 ||
+        alignof(float3)!=4 || sizeof(float4)!=16 || alignof(float4)!=16 ||
+        one.y!=1 || one.z!=1 || two.z!=1) return 2;
+    int zero = 0;
+    float half = 0.5f;
+    CUDA(cudaMemcpyToSymbol(device_calls, &amp;zero, sizeof(zero)));
+    CUDA(cudaMemcpyToSymbol(bias, &amp;half, sizeof(half)));
+    managed_calls = 0;
+    float *out;
+    CUDA(cudaMalloc(&amp;out, 2*sizeof(float)));
+    for (int pass = 0; pass &lt; 2; ++pass) {
+        sample&lt;&lt;&lt;1,32&gt;&gt;&gt;(out, pass);
+        CUDA(cudaGetLastError());
+    }
+    CUDA(cudaDeviceSynchronize());
+    float result[2];
+    int calls;
+    CUDA(cudaMemcpy(result, out, sizeof(result), cudaMemcpyDeviceToHost));
+    CUDA(cudaMemcpyFromSymbol(&amp;calls, device_calls, sizeof(calls)));
+    float expected = half;
+    for (unsigned t = 0; t &lt; 32; ++t)
+        expected += component_sum(make_float2((float)t, 1.0f));
+    if (result[0]!=expected || result[1]!=expected || calls!=2 || managed_calls!=2)
+        return 3;
+    std::printf(&quot;shared sums=%.1f,%.1f device_calls=%d managed_calls=%d checked=2\n&quot;,
+                result[0],result[1],calls,managed_calls);
+    CUDA(cudaFree(out));
+    return 0;
+}
+</code></pre>
+<pre><code class="output">float2 size=8 align=8; float3 size=12 align=4; float4 size=16 align=16
+dim3(5)=(5,1,1); dim3(5,5)=(5,5,1); dim3(5,5,5)=(5,5,5)
+shared sums=528.5,528.5 device_calls=2 managed_calls=2 checked=2
+</code></pre>
+<p>The host/device helper is used in both execution spaces, while <code>device_value</code> is device-only. The host initializes the device and constant symbols through symbol-copy APIs. Shared entries are initialized afresh in each launch, while the global and managed counters persist and accumulate two calls. The host reads them after synchronization. All values in this small sum are exactly representable, making exact comparisons appropriate for this test. That justification will not apply to the general floating-point reduction later in the chapter.</p>
+
+<h2 id="launch">A launch specifies a set of indices, not just a thread count <a class="timestamp" href="https://www.youtube.com/watch?v=OmkTAFlVllg&amp;t=6s">W8L2 0:06</a></h2>
+<p>Inside a kernel, <code>gridDim</code> gives the grid's dimensions in blocks and <code>blockDim</code> the block's dimensions in threads. <code>blockIdx</code> identifies the current block and <code>threadIdx</code> the thread within that block. Counts and indices differ: for a one-dimensional block of 256 threads, <code>blockDim.x</code> is 256 while <code>threadIdx.x</code> ranges from zero through 255. The built-in objects are device-side values, not host variables to read before launching.</p>
+<p>The form <code>kernel&lt;&lt;&lt;grid,block,shared_bytes,stream&gt;&gt;&gt;(arguments)</code> separates execution configuration from ordinary function parameters. The first two entries choose grid and block dimensions. The third specifies additional dynamic shared-memory bytes per block; it does not mean a single shared array for the whole grid. The fourth selects a stream. Omitting the last two uses zero dynamic shared bytes and the default stream. The function name and argument list must match the declared kernel; the lecture's launch slide accidentally uses <code>kernel</code> where its second declaration names <code>myKernel</code>.</p>
+<p>In the vector-add source, \(i=bu+r\) becomes <code>(size_t)blockIdx.x * blockDim.x + threadIdx.x</code>. Conversion before multiplication prevents the product from first overflowing a narrower integer type. Bounds also depend on the input domain: our listed lengths are small enough for their byte counts and grid dimensions. General-purpose input handling would additionally reject lengths whose multiplication by element size overflows <code>size_t</code>.</p>
+<p>For positive \(n\), the ceiling calculation can be written without forming \(n+u-1\):</p>
+\[
+g=\left\lfloor\frac{n}{u}\right\rfloor+\mathbf 1_{n\bmod u\ne0}.\tag{20.1}
+\]
+<p>The indicator \(\mathbf 1\) is one when its condition holds and zero otherwise. Equation (20.1) avoids an unnecessary addition-overflow risk. For 1003 entries and 256 threads per block, quotient three and nonzero remainder give four blocks. Their candidate indices span zero through 1023. The guard rejects precisely indices 1003 through 1023.</p>
+<p>Every useful index has a unique writer. Euclidean division gives \(b=\lfloor i/u\rfloor\) and \(r=i\bmod u\), so a useful index belongs to exactly one launched thread. Conversely, each thread that passes the guard has a valid input and output index. Independent input arrays are read-only and each output is written once. No block barrier is needed for this elementwise kernel because no thread consumes another thread's intermediate result.</p>
+<p>A valid dimension component does not by itself prove a valid block. The product of the block's three dimensions must obey the total-thread limit, each component its own limit, and the grid components their grid limits. Resource use can impose additional kernel-specific restrictions. The program queries relevant device limits rather than importing the recording's illustrative count of streaming multiprocessors (SMs), the GPU hardware units that host resident thread blocks. Block dimensions also describe a software arrangement, not a permanent placement on a chosen SM.</p>
+
+<h2 id="memory-api">Byte counts, copy directions, and timing boundaries belong in the interface <a class="timestamp" href="https://www.youtube.com/watch?v=OmkTAFlVllg&amp;t=448s">W8L2 7:28</a></h2>
+<p>The comparison with C's <code>malloc</code>, <code>memcpy</code>, <code>memset</code> and <code>free</code> is useful provided their roles remain distinct. A CUDA allocation is not initialized by allocating it. A copy transfers bytes rather than converting element types. A byte count must match both the source's readable extent and destination's writable extent. The direction argument must describe the pointers actually supplied; exchanging source and destination does not merely reverse an abstract mathematical arrow.</p>
+<p><code>cudaMemset</code> fills bytes. Setting an integer array's bytes to one produces a repeated-byte bit pattern, not an array of integer ones. In a 32-bit integer this pattern is hexadecimal 01010101, or 16843009. A zero byte fill is useful for the IEEE binary floating-point zero used in the reduction accumulator. Other numerical initial values should be supplied by a typed initialization or a kernel. The distinction between a value and its byte representation is part of the memory API contract.</p>
+<p>The next program uses host C++ vectors and three independent device allocations. For each positive length it copies inputs, initializes an output with two guards, launches a bounded kernel, waits on a recorded event, copies all outputs back and frees device allocations. It validates every useful result and both guards after the measured host interval. The chosen quarter- and half-integer inputs make their sums exactly representable, allowing exact checks here. The total device allocation is \((3n+2)s\), about 12 MiB at the largest tested length.</p>
+<p>Three block sizes, 128, 256 and 512, are tested against empty, singleton, boundary-adjacent and nonmultiple lengths. With \(n=0\), the host skips allocation and launch rather than requesting a zero-block grid. The <code>inactive</code> field reports \(gu-n\), the number of launched threads rejected by the guard. The printed output is a sample run: both timing fields vary, so the execution contract checks successful exit after the program's own full validation. Its field named kernel_us is the event-to-event interval around submission of one kernel, including any intervening idle gaps, rather than isolated GPU busy time.</p>
+<pre><code class="language-cuda" data-file="vector_add.cu" data-build="nvcc -arch=native -O2 -std=c++17 vector_add.cu -o vector_add" data-run="timeout 20 ./vector_add" data-check="returncode" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;chrono&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+
+#define CUDA(call) do { cudaError_t e = (call); if (e != cudaSuccess) { \
+    std::fprintf(stderr, &quot;%s: %s\n&quot;, #call, cudaGetErrorString(e)); \
+    std::exit(1); } } while (0)
+
+__device__ float add_values(float a, float b) { return a + b; }
+__host__ float reference_value(float a, float b) { return a + b; }
+
+__global__ void vector_add(const float *__restrict__ a,
+                           const float *__restrict__ b,
+                           float *__restrict__ c, size_t n)
+{
+    size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i &lt; n) c[i] = add_values(a[i], b[i]);
+}
+
+int main()
+{
+    CUDA(cudaSetDevice(0));
+    cudaDeviceProp prop;
+    CUDA(cudaGetDeviceProperties(&amp;prop, 0));
+    std::printf(&quot;device=%s CC=%d.%d SMs=%d warp=%d max_threads=%d\n&quot;,
+                prop.name, prop.major, prop.minor, prop.multiProcessorCount,
+                prop.warpSize, prop.maxThreadsPerBlock);
+    cudaEvent_t start, stop;
+    CUDA(cudaEventCreate(&amp;start)); CUDA(cudaEventCreate(&amp;stop));
+    for (unsigned threads : {128u, 256u, 512u}) {
+        if (threads &gt; (unsigned)prop.maxThreadsPerBlock ||
+            threads &gt; (unsigned)prop.maxThreadsDim[0]) return 2;
+        for (size_t n : {size_t(0), size_t(1), size_t(255), size_t(256),
+                         size_t(257), size_t(1003), size_t(1048573)}) {
+            if (n == 0) {
+                std::printf(&quot;n=0 threads=%u skipped: no zero-grid launch\n&quot;, threads);
+                continue;
+            }
+            size_t blocks = n / threads + (n % threads != 0);
+            if (blocks &gt; (size_t)prop.maxGridSize[0]) return 3;
+            std::vector&lt;float&gt; a(n), b(n), result(n+2, -65536.0f);
+            for (size_t i = 0; i &lt; n; ++i) {
+                a[i] = (i % 1024) * 0.25f;
+                b[i] = (i % 37) * 0.5f;
+            }
+            size_t bytes = n * sizeof(float);
+            float *da, *db, *dc;
+            auto t0 = std::chrono::steady_clock::now();
+            CUDA(cudaMalloc(&amp;da, bytes)); CUDA(cudaMalloc(&amp;db, bytes));
+            CUDA(cudaMalloc(&amp;dc, (n+2)*sizeof(float)));
+            CUDA(cudaMemcpy(da, a.data(), bytes, cudaMemcpyHostToDevice));
+            CUDA(cudaMemcpy(db, b.data(), bytes, cudaMemcpyHostToDevice));
+            CUDA(cudaMemcpy(dc, result.data(), (n+2)*sizeof(float), cudaMemcpyHostToDevice));
+            CUDA(cudaEventRecord(start));
+            vector_add&lt;&lt;&lt;(unsigned)blocks, threads&gt;&gt;&gt;(da, db, dc+1, n);
+            CUDA(cudaGetLastError());
+            CUDA(cudaEventRecord(stop)); CUDA(cudaEventSynchronize(stop));
+            float milliseconds;
+            CUDA(cudaEventElapsedTime(&amp;milliseconds, start, stop));
+            CUDA(cudaMemcpy(result.data(), dc, (n+2)*sizeof(float), cudaMemcpyDeviceToHost));
+            CUDA(cudaFree(da)); CUDA(cudaFree(db)); CUDA(cudaFree(dc));
+            auto t1 = std::chrono::steady_clock::now();
+            for (size_t i = 0; i &lt; n; ++i) {
+                if (result[i+1] != reference_value(a[i], b[i])) {
+                    std::fprintf(stderr, &quot;payload mismatch at %zu\n&quot;, i); return 4;
+                }
+            }
+            if (result.front() != -65536.0f || result.back() != -65536.0f) return 5;
+            double workflow_us = std::chrono::duration&lt;double, std::micro&gt;(t1-t0).count();
+            std::printf(&quot;n=%zu threads=%u blocks=%zu inactive=%zu kernel_us=%.3f &quot;
+                        &quot;alloc_to_free_us=%.3f checked=%zu guards=2\n&quot;, n, threads,
+                        blocks, blocks*threads-n, milliseconds*1000, workflow_us, n);
+        }
+    }
+    CUDA(cudaEventDestroy(start)); CUDA(cudaEventDestroy(stop));
+    return 0;
+}
+</code></pre>
+<pre><code class="output">device=NVIDIA GeForce RTX 3050 Laptop GPU CC=8.6 SMs=16 warp=32 max_threads=1024
+n=0 threads=128 skipped: no zero-grid launch
+n=1 threads=128 blocks=1 inactive=127 kernel_us=15837.184 alloc_to_free_us=61204.096 checked=1 guards=2
+n=255 threads=128 blocks=2 inactive=1 kernel_us=6.144 alloc_to_free_us=1448.007 checked=255 guards=2
+n=256 threads=128 blocks=2 inactive=0 kernel_us=6.080 alloc_to_free_us=1238.804 checked=256 guards=2
+n=257 threads=128 blocks=3 inactive=127 kernel_us=22.528 alloc_to_free_us=1055.806 checked=257 guards=2
+n=1003 threads=128 blocks=8 inactive=21 kernel_us=7.040 alloc_to_free_us=836.662 checked=1003 guards=2
+n=1048573 threads=128 blocks=8192 inactive=3 kernel_us=135.616 alloc_to_free_us=8232.664 checked=1048573 guards=2
+n=0 threads=256 skipped: no zero-grid launch
+n=1 threads=256 blocks=1 inactive=255 kernel_us=19.456 alloc_to_free_us=1612.707 checked=1 guards=2
+n=255 threads=256 blocks=1 inactive=1 kernel_us=27.648 alloc_to_free_us=1207.977 checked=255 guards=2
+n=256 threads=256 blocks=1 inactive=0 kernel_us=5.120 alloc_to_free_us=860.354 checked=256 guards=2
+n=257 threads=256 blocks=2 inactive=255 kernel_us=28.384 alloc_to_free_us=854.624 checked=257 guards=2
+n=1003 threads=256 blocks=4 inactive=21 kernel_us=9.216 alloc_to_free_us=865.530 checked=1003 guards=2
+n=1048573 threads=256 blocks=4096 inactive=3 kernel_us=152.064 alloc_to_free_us=7270.646 checked=1048573 guards=2
+n=0 threads=512 skipped: no zero-grid launch
+n=1 threads=512 blocks=1 inactive=511 kernel_us=37.888 alloc_to_free_us=1240.670 checked=1 guards=2
+n=255 threads=512 blocks=1 inactive=257 kernel_us=41.984 alloc_to_free_us=965.253 checked=255 guards=2
+n=256 threads=512 blocks=1 inactive=256 kernel_us=38.912 alloc_to_free_us=944.114 checked=256 guards=2
+n=257 threads=512 blocks=1 inactive=255 kernel_us=39.840 alloc_to_free_us=861.496 checked=257 guards=2
+n=1003 threads=512 blocks=2 inactive=21 kernel_us=20.480 alloc_to_free_us=829.014 checked=1003 guards=2
+n=1048573 threads=512 blocks=2048 inactive=3 kernel_us=137.056 alloc_to_free_us=11052.903 checked=1048573 guards=2
+</code></pre>
+<p>The event pair is created outside the per-case workflow. For each nonempty case, recording the start event, launching the kernel and recording the stop event establishes an ordered device interval. Waiting for the stop event establishes completion before elapsed time is read. Event milliseconds are multiplied by one thousand for microseconds. The host interval includes allocations, four bulk copies including diagnostic output initialization, event operations, launch, completion and device deallocation. It excludes input generation, the initial device query and final validation. It is therefore called allocation-to-free time rather than whole-process runtime. <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html">Runtime API, Event Management</a>.</p>
+<p>These are individual launches rather than minimum-of-many steady-state throughput trials. Small cases can be dominated by launch and workflow costs. They should not be extrapolated into an arithmetic peak or an asymptotic memory-bandwidth claim. The larger workflow includes deliberate guard initialization and allocation costs that a production solver could amortize by keeping arrays resident across many iterations. Before deciding to optimize the arithmetic instruction, compare the interval it occupies with the interval whose runtime matters to the application.</p>
+<p>In the displayed fourth capture, 1003 entries with 256 threads per block produce four blocks and 21 inactive threads, with all 1003 outputs and both guards checked. The event interval is 9.216 microseconds, while allocation-to-free time is 865.530 microseconds. Across four serialized captures those intervals range from 6.144 to 27.648 and from 599.067 to 865.530 microseconds respectively. For 1,048,573 entries with the same block size, the ranges are 110.624–152.064 microseconds and 5.414–7.271 milliseconds.</p>
+<p>The first one-element launch in each process has a much larger event interval: 607.104–15837.184 microseconds across the captures. The printed field named kernel_us is elapsed time between event markers; it is not an isolated measurement of arithmetic latency or GPU busy time. Event markers can bracket device idle gaps while the host submits work, and these cases have no readiness warmup. The experiment does not isolate which runtime, scheduling or startup effects produced the long interval. A timeline would be needed to assign a cause.</p>
+<p>All four captures pass validation, but the timing variation prevents treating this sequence as a stable ranking of block sizes. The results instead demonstrate the importance of naming the interval, checking cold versus repeated work, and measuring the workflow that an optimization is intended to improve. They are neither confidence intervals nor controlled clock/power experiments.</p>
+<p>The canonical Jacobi solver illustrates the lifetime consequence without introducing a new solver listing here. Its old and new grids should generally remain allocated across sweeps. A kernel reading the old grid and writing the new one must complete in the relevant ordering before a later sweep consumes the new values; host pointer swaps need not copy arrays. A convergence norm that the host reads requires its own completed result. These are the same producer-consumer rules as vector addition, with more dependent invocations and distinct numerical stopping criteria.</p>
+
+<h2 id="synchronization">Atomicity protects an update; synchronization orders cooperating work <a class="timestamp" href="https://www.youtube.com/watch?v=OmkTAFlVllg&amp;t=526s">W8L2 8:46</a></h2>
+<p>A read-modify-write update such as adding to one shared total consists conceptually of reading its old value, computing a new value and storing it. If two threads do this with ordinary accesses, both can read the same old total and overwrite one another's contributions. <code>atomicAdd</code> makes the update atomic at its specified scope: competing atomic updates to that word do not lose contributions through this interleaving. It returns the old value. An atomic operation protects that operation, not an arbitrary region of surrounding code.</p>
+<p>The classic CUDA family includes arithmetic operations, exchange, compare-and-swap and bitwise AND, OR and XOR. <code>atomicCAS</code> conditionally replaces a value after comparing it with an expected value, returning the prior value. <code>atomicInc</code> and <code>atomicDec</code> have specified wrap/limit rules, rather than being unrestricted synonyms for adding or subtracting one. The displayed <code>atomicFetchAdd</code>-style names are not the classic CUDA intrinsics: <code>atomicAdd</code> already returns the old value. Newer atomic interfaces have their own spellings and contracts.</p>
+<p>For the legacy unsuffixed operations used here, scope is the device and memory ordering is relaxed. Atomicity of the total does not publish unrelated ordinary stores to every observer or act as a block barrier. Nor does an atomic operation guarantee one update per clock or a prescribed thread order. Correctness of our final total comes from atomic updates followed by completed kernel execution, after which the host copies the result. <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html">CUDA Programming Guide §5.4.5.1, legacy atomics</a>.</p>
+<p>A barrier solves another problem. <code>__syncthreads</code> coordinates a block's participating threads and orders the relevant earlier memory accesses before they proceed. A shared-memory reduction needs this before a thread reads contributions written by other threads. The calls must satisfy uniform block participation requirements; placing a barrier in a branch reached by only some active threads is not a safe tail-handling method. Idle threads can instead contribute the additive identity zero and still participate. The supplied programs use this structure. <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html">Writing SIMT Kernels, shared-memory synchronization</a>.</p>
+<p><code>__syncwarp</code> coordinates the lanes named by its mask under the warp API's participation rules; it does not coordinate unrelated warps or blocks. On the host, <code>cudaDeviceSynchronize</code> waits for preceding requested device work and reports failure if that work failed. <code>cudaEventSynchronize</code> waits for work captured by a recorded event. An event does not mean that all GPU threads gather at a new in-kernel rendezvous. Its position in the submitted work determines what completion it represents. <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html">Runtime API, device synchronization</a>; <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html">event synchronization</a>.</p>
+<p>A bounded reduction makes these differences concrete. Define \(f(x)=4/(1+x^2)\), whose integral on the unit interval is \(\pi\). With \(n\) midpoint samples, spacing \(h=1/n\) and sample positions \(x_i=(i+1/2)h\), the approximation is</p>
+\[
+\pi_n=h\sum_{i=0}^{n-1}f(x_i).\tag{20.2}
+\]
+<p>Here \(\pi_n\) denotes the quadrature result, not exact mathematical pi. In the program each logical thread first sums a disjoint sequence \(i=bu+r+qgu\), where \(q=0,1,\ldots\) until the index reaches \(n\). This grid-stride loop allows a bounded launch to cover more entries than its thread count. Every index has one quotient/remainder decomposition modulo \(gu\), so it belongs to exactly one thread.</p>
+<p>Threads write local sums into a dynamic shared array with \(u\) entries. A power-of-two block size lets the reduction halve the active range repeatedly: first combine entries separated by \(u/2\), then by \(u/4\), down to one. A barrier follows each level, outside the conditional that selects adding threads. Induction shows that the surviving entries represent disjoint sums of twice as many original contributions at each level. Thread zero writes its block partial and atomically adds it to the global total. Only one atomic operation per block is needed, rather than one per sample.</p>
+<p>Equation (20.2) also has a useful mathematical error bound. Direct differentiation gives \(f'(x)=-8x/(1+x^2)^2\) and \(f''(x)=8(3x^2-1)/(1+x^2)^3\). To bound its magnitude, put \(y=x^2\in[0,1]\). For \(y\le1/3\), \(1-3y\le1\le(1+y)^3\); otherwise \((1+y)^3-(3y-1)=2+3y^2+y^3\ge0\). Hence \(|f''(x)|\le8\). A midpoint cell of width \(h\) has absolute integration error at most \(8h^3/24\): the first-order term integrates to zero about the midpoint, and the second-order remainder is bounded by integrating \(8(x-x_i)^2/2\). Summing \(n\) cells gives</p>
+\[
+|\pi_n-\pi|\le\frac{1}{3n^2}.\tag{20.3}
+\]
+<p>Equation (20.3) concerns exact-arithmetic quadrature, not every floating-point evaluation. The implementation uses 64-bit double-precision floating-point arithmetic (FP64) and separately checks each block partial against a long-double host reference, checks the atomic aggregate against that reference, and checks its analytic error against the truncation bound plus a selected floating-point allowance of \(5\times10^{-12}\). This is a test allowance for the listed cases, not a proved universal rounding bound. Different addition orders can change final bits even when all atomic updates are correct, so bitwise equality is inappropriate.</p>
+<pre><code class="language-cuda" data-file="pi_partials.cu" data-build="nvcc -arch=native -O2 -std=c++17 pi_partials.cu -o pi_partials" data-run="timeout 20 ./pi_partials" data-check="returncode" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;algorithm&gt;
+#include &lt;chrono&gt;
+#include &lt;cmath&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+
+#define CUDA(call) do { cudaError_t e = (call); if (e != cudaSuccess) { \
+    std::fprintf(stderr, &quot;%s: %s\n&quot;, #call, cudaGetErrorString(e)); \
+    std::exit(1); } } while (0)
+
+__global__ void pi_partials(size_t n, double *partials, double *total)
+{
+    extern __shared__ double sums[];
+    unsigned t = threadIdx.x;
+    size_t first = (size_t)blockIdx.x * blockDim.x + t;
+    size_t stride = (size_t)gridDim.x * blockDim.x;
+    double value = 0;
+    for (size_t i = first; i &lt; n; i += stride) {
+        double x = ((double)i + 0.5) / (double)n;
+        value += 4.0 / (1.0 + x*x);
+    }
+    sums[t] = value;
+    __syncthreads();
+    for (unsigned step = blockDim.x/2; step &gt; 0; step /= 2) {
+        if (t &lt; step) sums[t] += sums[t+step];
+        __syncthreads();
+    }
+    if (t == 0) {
+        double part = sums[0] / (double)n;
+        partials[blockIdx.x] = part;
+        atomicAdd(total, part);
+    }
+}
+
+int main()
+{
+    CUDA(cudaSetDevice(0));
+    int major;
+    CUDA(cudaDeviceGetAttribute(&amp;major, cudaDevAttrComputeCapabilityMajor, 0));
+    if (major &lt; 6) { std::fprintf(stderr,&quot;double atomicAdd needs CC6.0+\n&quot;); return 2; }
+    constexpr unsigned threads = 256;
+    constexpr double tolerance = 5e-12;
+    cudaEvent_t start, stop;
+    CUDA(cudaEventCreate(&amp;start)); CUDA(cudaEventCreate(&amp;stop));
+    for (size_t n : {size_t(1), size_t(257), size_t(1000003)}) {
+        for (unsigned blocks : {1u, 16u, 64u}) {
+            size_t stride = (size_t)threads * blocks;
+            std::vector&lt;long double&gt; reference(blocks, 0);
+            for (size_t i = 0; i &lt; n; ++i) {
+                long double x = ((long double)i + 0.5L) / (long double)n;
+                unsigned owner = (unsigned)((i % stride) / threads);
+                reference[owner] += 4.0L / (1.0L+x*x) / (long double)n;
+            }
+            double *partials, *total;
+            auto t0 = std::chrono::steady_clock::now();
+            CUDA(cudaMalloc(&amp;partials, blocks*sizeof(double)));
+            CUDA(cudaMalloc(&amp;total, sizeof(double)));
+            CUDA(cudaMemset(total, 0, sizeof(double)));
+            CUDA(cudaEventRecord(start));
+            pi_partials&lt;&lt;&lt;blocks, threads, threads*sizeof(double)&gt;&gt;&gt;(n, partials, total);
+            CUDA(cudaGetLastError());
+            CUDA(cudaEventRecord(stop)); CUDA(cudaEventSynchronize(stop));
+            float milliseconds;
+            CUDA(cudaEventElapsedTime(&amp;milliseconds, start, stop));
+            std::vector&lt;double&gt; result(blocks);
+            double pi;
+            CUDA(cudaMemcpy(result.data(), partials, blocks*sizeof(double), cudaMemcpyDeviceToHost));
+            CUDA(cudaMemcpy(&amp;pi, total, sizeof(double), cudaMemcpyDeviceToHost));
+            CUDA(cudaFree(partials)); CUDA(cudaFree(total));
+            auto t1 = std::chrono::steady_clock::now();
+            double max_error = 0;
+            long double reference_pi = 0, ordered_sum = 0;
+            for (unsigned b = 0; b &lt; blocks; ++b) {
+                if (!std::isfinite(result[b])) return 3;
+                max_error = std::max(max_error, (double)std::fabs(result[b]-reference[b]));
+                reference_pi += reference[b];
+                ordered_sum += result[b];
+            }
+            double error_vs_reference = (double)std::fabs(pi-reference_pi);
+            double analytic_error = std::fabs(pi-std::acos(-1.0));
+            double quadrature_bound = 1.0 / (3.0*(double)n*(double)n);
+            if (!std::isfinite(pi) || max_error&gt;tolerance ||
+                error_vs_reference&gt;tolerance || analytic_error&gt;quadrature_bound+tolerance) {
+                std::fprintf(stderr,&quot;validation failure n=%zu blocks=%u partial=%.3e &quot;
+                            &quot;reference=%.3e analytic=%.3e bound=%.3e\n&quot;,n,blocks,
+                            max_error,error_vs_reference,analytic_error,quadrature_bound);
+                return 4;
+            }
+            double workflow_us = std::chrono::duration&lt;double,std::micro&gt;(t1-t0).count();
+            std::printf(&quot;n=%zu blocks=%u pi=%.15f partial_error=%.3e &quot;
+                        &quot;reference_error=%.3e order_gap=%.3e &quot;
+                        &quot;kernel_us=%.3f alloc_to_free_us=%.3f checked=%u\n&quot;,
+                        n,blocks,pi,max_error,error_vs_reference,
+                        (double)std::fabs(pi-ordered_sum),milliseconds*1000,workflow_us,blocks);
+        }
+    }
+    CUDA(cudaEventDestroy(start)); CUDA(cudaEventDestroy(stop));
+    return 0;
+}
+</code></pre>
+<pre><code class="output">n=1 blocks=1 pi=3.200000000000000 partial_error=1.776e-16 reference_error=1.776e-16 order_gap=0.000e+00 kernel_us=663.552 alloc_to_free_us=4774.620 checked=1
+n=1 blocks=16 pi=3.200000000000000 partial_error=1.776e-16 reference_error=1.776e-16 order_gap=0.000e+00 kernel_us=7.168 alloc_to_free_us=955.576 checked=16
+n=1 blocks=64 pi=3.200000000000000 partial_error=1.776e-16 reference_error=1.776e-16 order_gap=0.000e+00 kernel_us=34.816 alloc_to_free_us=784.203 checked=64
+n=257 blocks=1 pi=3.141593915279347 partial_error=1.080e-16 reference_error=1.080e-16 order_gap=0.000e+00 kernel_us=9.216 alloc_to_free_us=686.654 checked=1
+n=257 blocks=16 pi=3.141593915279347 partial_error=3.829e-16 reference_error=3.361e-16 order_gap=4.684e-17 kernel_us=35.840 alloc_to_free_us=640.035 checked=16
+n=257 blocks=64 pi=3.141593915279347 partial_error=3.829e-16 reference_error=3.361e-16 order_gap=4.684e-17 kernel_us=30.816 alloc_to_free_us=687.779 checked=64
+n=1000003 blocks=1 pi=3.141592653589876 partial_error=4.111e-16 reference_error=4.111e-16 order_gap=0.000e+00 kernel_us=7354.368 alloc_to_free_us=8696.828 checked=1
+n=1000003 blocks=16 pi=3.141592653589877 partial_error=3.640e-17 reference_error=4.810e-16 order_gap=5.551e-16 kernel_us=601.088 alloc_to_free_us=1801.076 checked=16
+n=1000003 blocks=64 pi=3.141592653589877 partial_error=8.965e-18 reference_error=4.781e-16 order_gap=4.718e-16 kernel_us=480.256 alloc_to_free_us=2145.995 checked=64
+</code></pre>
+<p>The launch requests \(256\times8=2048\) dynamic shared bytes per block. Threads with no samples still initialize their shared entries to zero and execute every barrier. All block partials, including empty ones, are checked. The host reference assigns sample \(i\) to block \(\lfloor(i\bmod gu)/u\rfloor\), independently reconstructing the kernel's ownership. The <code>order_gap</code> compares the atomic total with a host long-double sum of the returned double partials; a small nonzero gap is compatible with correct floating-point atomics.</p>
+<p>The displayed large case with sixty-four blocks gives 3.141592653589877, about \(8\times10^{-14}\) from pi, within the approximately \(3.33\times10^{-13}\) quadrature bound and the separate floating allowance. Across all cases in the four captures, the largest printed block-partial difference from the long-double reference is \(4.111\times10^{-16}\), and the largest total difference is \(4.810\times10^{-16}\), both below \(5\times10^{-12}\). The singleton case gives 3.2, correctly exposing a coarse quadrature rather than promising high accuracy at every size.</p>
+<p>For 1,000,003 samples, the sixteen-block event interval ranges from 467.968 to 601.088 microseconds and the sixty-four-block interval from 480.256 to 561.152. These overlapping short-run ranges do not establish one universally optimal grid. Host allocation-to-free intervals are larger and exclude construction of the long-double reference. As in vector addition, event intervals can include submission gaps; these numbers describe the bounded experiment rather than a certified kernel peak.</p>
+<p>This construction separates two types of determinism. The block partition and tree are fixed for one configuration, while the global atomic order can vary. Neither a race-free execution nor a fixed tree automatically reproduces a serial sum bit for bit, because serial accumulation uses another arithmetic order. Scientific reproducibility therefore requires a stated tolerance or a deliberately reproducible summation method in addition to correct synchronization.</p>
+
+<h2 id="queries">Device queries establish limits; errors identify failed operations <a class="timestamp" href="https://www.youtube.com/watch?v=OmkTAFlVllg&amp;t=996s">W8L2 16:36</a></h2>
+<p>Device queries replace guesses about an enabled GPU with inspectable capabilities. The runtime uses <code>cudaGetDeviceProperties</code> and <code>cudaDeviceGetAttribute</code>. For example, <code>cudaDevAttrMaxThreadsPerBlock</code> selects the maximum block thread count. The driver API instead uses <code>cuDeviceGetAttribute</code> with a <code>CUdevice_attribute</code> enumerator such as <code>CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK</code>. These are different function, handle and enumeration families. Copying a driver enumerator into a runtime call is not a supported way to ask the same question. <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html">Runtime API, Device Management</a>.</p>
+<p>Properties are constraints, not performance predictions. A maximum thread count does not prove that a particular kernel can use that many threads after its register and shared-memory requirements are accounted for. An SM count does not tell how many blocks are simultaneously resident. A queried nominal clock does not measure a running kernel's frequency. The vector program uses limits to reject invalid dimensions, and measures its own operation rather than inferring runtime from those limits.</p>
+<p><code>cudaError_t</code> is an error-code type. Constants such as <code>cudaErrorMemoryAllocation</code>, <code>cudaErrorInvalidValue</code> and <code>cudaErrorInvalidConfiguration</code> are values returned by operations, not functions to call in order to test a hypothesis. Functions such as <code>cudaGetErrorName</code> and <code>cudaGetErrorString</code> turn a code into a diagnostic. The installed CUDA 13.3 runtime header contains <code>cudaErrorMemoryAllocation</code>; the slide's <code>cudaErrorOutOfMemory</code> is not its runtime enumerator. Some older entries in the table are retained as deprecated names rather than useful modern diagnoses.</p>
+<p>Errors can become visible at different times. An invalid launch configuration can be rejected during submission; an execution fault can be reported at a later synchronization or other API call. <code>cudaPeekAtLastError</code> inspects the host thread's runtime error state without clearing it. <code>cudaGetLastError</code> returns that state and resets it to success. Clearing this bookkeeping does not repair an illegal access or make a failed execution valid. The API explicitly notes that these functions can report earlier asynchronous failures. <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__ERROR.html">Runtime API, Error Handling</a>.</p>
+<p>The next diagnostic first validates a legal one-thread launch, resets its output, then deliberately requests one more thread than the queried block limit. It recognizes only <code>cudaErrorInvalidConfiguration</code> or <code>cudaErrorInvalidValue</code> as the intended submission rejection, verifies inspection and clearing, and validates another legal launch afterward. The second result must come from new work because the output was reset. This is a bounded test of a recoverable submission error, not an experiment in invalid memory accesses, deadlocks or a watchdog timeout. The program treats every other error as a failure. On the captured RTX 3050 Laptop stack, runtime 13030, driver API 13010 and driver package 592.82, the oversized request returned cudaErrorInvalidValue. The initial test expecting only cudaErrorInvalidConfiguration failed and was corrected; no cause for the enum difference was isolated, and no identical enum is promised on every stack.</p>
+<pre><code class="language-cuda" data-file="launch_diagnostic.cu" data-build="nvcc -arch=native -O2 -std=c++17 launch_diagnostic.cu -o launch_diagnostic" data-run="timeout 20 ./launch_diagnostic" data-check="returncode" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+
+#define CUDA(call) do { cudaError_t e = (call); if (e != cudaSuccess) { \
+    std::fprintf(stderr, &quot;%s: %s\n&quot;, #call, cudaGetErrorString(e)); \
+    std::exit(1); } } while (0)
+
+__global__ void write_one(int *out) { *out = 1; }
+
+int main()
+{
+    CUDA(cudaSetDevice(0));
+    int limit;
+    CUDA(cudaDeviceGetAttribute(&amp;limit, cudaDevAttrMaxThreadsPerBlock, 0));
+    int *out;
+    CUDA(cudaMalloc(&amp;out, sizeof(int)));
+    CUDA(cudaMemset(out, 0, sizeof(int)));
+    write_one&lt;&lt;&lt;1,1&gt;&gt;&gt;(out);
+    CUDA(cudaGetLastError()); CUDA(cudaDeviceSynchronize());
+    int before;
+    CUDA(cudaMemcpy(&amp;before, out, sizeof(int), cudaMemcpyDeviceToHost));
+    if (before != 1) return 5;
+    CUDA(cudaMemset(out, 0, sizeof(int)));
+    CUDA(cudaGetLastError());
+    write_one&lt;&lt;&lt;1,(unsigned)(limit+1)&gt;&gt;&gt;(out);
+    cudaError_t seen = cudaPeekAtLastError();
+    if (seen != cudaErrorInvalidConfiguration &amp;&amp; seen != cudaErrorInvalidValue) {
+        std::fprintf(stderr,&quot;unexpected diagnostic: %s\n&quot;,cudaGetErrorName(seen)); return 2;
+    }
+    cudaError_t cleared = cudaGetLastError();
+    if (cleared != seen) return 3;
+    CUDA(cudaPeekAtLastError());
+    write_one&lt;&lt;&lt;1,1&gt;&gt;&gt;(out);
+    CUDA(cudaGetLastError()); CUDA(cudaDeviceSynchronize());
+    int result;
+    CUDA(cudaMemcpy(&amp;result, out, sizeof(int), cudaMemcpyDeviceToHost));
+    CUDA(cudaFree(out));
+    if (result != 1) return 4;
+    int runtime, driver;
+    CUDA(cudaRuntimeGetVersion(&amp;runtime)); CUDA(cudaDriverGetVersion(&amp;driver));
+    std::printf(&quot;runtime=%d driver=%d limit=%d requested=%d recognized=%s &quot;
+                &quot;cleared=yes before=%d after=%d\n&quot;,runtime,driver,limit,limit+1,
+                cudaGetErrorName(seen),before,result);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">runtime=13030 driver=13010 limit=1024 requested=1025 recognized=cudaErrorInvalidValue cleared=yes before=1 after=1
+</code></pre>
+<p>Successful compilation proves that source translation and linking completed; it does not prove that the selected device accepts the launch or that the numerical answer is right. Conversely, a runtime error should be diagnosed at the operation that returned it while retaining enough context to identify earlier asynchronous work. The checked protocol supplies those boundaries. A production program can add structured cleanup and richer diagnostics, but removing checks to shorten an example hides essential execution semantics.</p>
+
+<h2 id="tools">Compiler options select distinct stages and numerical contracts <a class="timestamp" href="https://www.youtube.com/watch?v=OmkTAFlVllg&amp;t=1267s">W8L2 21:07</a></h2>
+<p>A CUDA source contains host and device code, and <code>nvcc</code> coordinates their translation. Here <code>-arch=native</code> selects visible GPU targets, <code>-std=c++17</code> selects the language dialect, and <code>-O2</code> sets host optimization. Native targeting is useful for this machine's executable tests; it is not a distribution strategy for unknown future GPUs. A deeper account of intermediate representations and linking belongs to the compilation chapter.</p>
+<p>The lecture's debug flag needs a case-sensitive correction: <code>nvcc -g</code> supplies host debug information; <code>-G</code> supplies device debug information and normally disables device optimization unless the relevant optimization option is requested. <code>-lineinfo</code> supports source-line correlation for profiling. The device assembler has its own optimization level, whose documented default is three. Thus <code>nvcc -O3</code> being a host option does not mean device code otherwise receives no optimization.</p>
+<p><code>--maxrregcount</code> requests a register limit, subject to minimum requirements of the application binary interface (ABI), which defines compiled-code calling conventions; reducing the limit can move values from registers into thread-local memory, a process called spilling. <code>--use_fast_math</code> changes specified floating-point behaviors, including single-precision subnormal handling and division/square-root options. <code>--fmad</code> controls contraction of multiplication and addition; it is not a switch allocating a special physical unit to a function. Numerical validation must accompany changes. <a href="https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html">NVCC manual §§4.2.3, 4.2.7 and 4.2.9</a>.</p>
+<p>A register cap can increase the number of resident threads while making each thread perform more memory accesses. A faster approximate operation can reduce runtime while violating the application's error requirement. These are changes in a resource or numerical tradeoff, not an optimization ordering that guarantees improvement. The examples retain ordinary arithmetic settings and explicit validation before any such experiment. We make no general claim that omitting a target flag must cause compilation or execution failure.</p>
+<table><thead><tr><th>Question</th><th>Suitable evidence or tool</th></tr></thead><tbody>
+<tr><td>What device and launch limits are visible?</td><td>Runtime properties/attributes; a management query such as nvidia-smi.</td></tr>
+<tr><td>Did a runtime operation or launch fail?</td><td>Checked return codes, launch status and completion status.</td></tr>
+<tr><td>Was memory or synchronization used incorrectly?</td><td>Compute Sanitizer memcheck, racecheck, initcheck and synccheck, each with its own scope.</td></tr>
+<tr><td>Where does a kernel spend device resources?</td><td>Nsight Compute kernel metrics.</td></tr>
+<tr><td>How do host work, launches, transfers and kernels interact over time?</td><td>Nsight Systems timeline.</td></tr>
+</tbody></table>
+<p>The tools answer different questions. Compute Sanitizer's racecheck targets shared-memory access hazards, not a proof that all application-level races are absent. Nsight Compute profiles kernels, while Nsight Systems exposes a broader execution timeline. A correct numerical answer alone cannot replace those diagnostics when an unresolved memory or scheduling question remains. Conversely, a profiler's timing is not a numerical correctness certificate. <a href="https://docs.nvidia.com/compute-sanitizer/ComputeSanitizer/index.html">Compute Sanitizer, tool descriptions</a>; <a href="https://docs.nvidia.com/nsight-compute/NsightCompute/index.html">Nsight Compute overview</a>; <a href="https://docs.nvidia.com/nsight-systems/UserGuide/index.html">Nsight Systems user guide</a>.</p>
+<p>The checked listings and retained captures provide the execution evidence stated here. The tool table is a research extension identifying possible next diagnostics; it is not a claim that every listed profiler or sanitizer was run. Keeping that distinction explicit prevents a compilation check, a payload check and a performance diagnosis from being silently promoted into one another.</p>
+
+<h2 id="limits">Claims, evidence and limits</h2>
+<table><thead><tr><th>Claim</th><th>Evidence and boundary</th></tr></thead><tbody>
+<tr><td>The guarded one-dimensional launch covers each useful output once.</td><td>Euclidean-division proof, full payload checks and boundary-adjacent lengths; only the stated indexing expression and valid dimensions are covered.</td></tr>
+<tr><td>Vector types have specific layouts and dim3 has omitted-dimension defaults.</td><td>Installed headers, official type table and executable checks; grouping components does not guarantee coalescing or SIMD instructions.</td></tr>
+<tr><td>Global/managed state persists across the example's two launches.</td><td>Initialized symbols, checked results and post-completion counters; no concurrent host/device access is attempted.</td></tr>
+<tr><td>The midpoint implementation preserves every block's contribution.</td><td>Independent long-double reference for all partials and a tolerance-checked atomic total; floating-point orders need not be bitwise identical.</td></tr>
+<tr><td>Kernel and allocation-to-free timings describe different work.</td><td>Device events and host steady-clock endpoints with exclusions stated; neither establishes whole-application speedup or a hardware peak.</td></tr>
+<tr><td>A rejected configuration can be diagnosed without running a faulty kernel.</td><td>Recognized rejected-configuration check with validated launches before and after; this does not imply that arbitrary execution faults are recoverable.</td></tr>
+<tr><td>Host and device compiler controls differ.</td><td>NVCC documentation and installed-tool help; no universal performance or precision improvement follows from changing a flag.</td></tr>
+</tbody></table>
+<p>The four programs are original teaching constructions grounded in the recordings' interfaces. The recordings do not contain this midpoint reduction or a complete CUDA Jacobi solver. The Jacobi connection illustrates object lifetime and ordering, while later numerical and memory chapters develop its implementation. The tests use one GPU, bounded sizes and a single default stream. They establish the stated cases rather than every CUDA architecture, arbitrary user input or all concurrency patterns.</p>
+<p>Primary documentation was opened on 28 October 2026 UTC. The current online CUDA pages can describe a newer toolkit than the installed 13.3 headers and compiler; executable API choices and type layouts were checked locally. The HIP reference is explicitly the dated ROCm 6.4.1 porting guide. Portability descriptions do not certify every current package/backend combination. Raw build/run commands, source hashes, outputs, errors and UTC plus monotonic endpoints were retained privately with the execution evidence.</p>
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> For \(n=1003\), prove coverage and uniqueness for four one-dimensional blocks of 256 threads. Identify the owner of entry 1002 and count inactive threads. A programmer changes each block to <code>dim3(32,8)</code> while retaining the expression using only <code>threadIdx.x</code> and <code>blockDim.x</code>. Explain the error and derive a corrected flattening.</p>
+<details><summary>Solution</summary>
+<p>For every useful \(i\), Euclidean division by 256 gives a unique pair \(b=\lfloor i/256\rfloor\), \(r=i\bmod256\). Since \(i\le1002\), \(b\le3\), so that pair is launched. If two pairs produced the same index, subtracting their equations gives \(256(b-b')=r'-r\). The right side has magnitude below 256, forcing both sides to zero and proving uniqueness. Entry 1002 belongs to block three and thread 234 because \(3\cdot256+234=1002\). There are \(4\cdot256-1003=21\) inactive threads, all in the last block.</p>
+<p>With a 32-by-8 block, the old expression becomes \(32b+\mathrm{threadIdx.x}\), independent of the y coordinate. Eight threads now address each candidate entry, and four blocks reach only indices zero through 127. Equal total thread count did not preserve the indexing function. Define the flattened local index as \(r=\mathrm{threadIdx.x}+32\,\mathrm{threadIdx.y}\), ranging uniquely from zero through 255, and then use \(i=256b+r\). The same bound guard and proof apply. The omitted z dimension is one, not zero. For an empty array, skip the launch rather than substituting a zero grid.</p>
+</details>
+<p><strong>Exercise 2 (compute and interpret).</strong> For 1003 FP32 elements, compute the vector program's total device allocation, host-to-device bytes and device-to-host bytes, including guards and diagnostic output initialization. Can dividing all those transferred bytes by allocation-to-free time be interpreted as the GPU's local-memory bandwidth?</p>
+<details><summary>Solution</summary>
+<p>Each input has \(1003\times4=4012\) bytes. The output including two guards has \(1005\times4=4020\) bytes. Total device allocation is \(4012+4012+4020=12044\) bytes. The program copies both inputs and the initialized guarded output to the device, so host-to-device traffic is also 12044 bytes. It copies the whole guarded output back, adding 4020 bytes and giving 16064 transferred bytes in the two directions combined.</p>
+<p>An unguarded production operation that overwrites all output values needs only two input copies and one output copy, totaling 12036 bytes. The demonstration intentionally does more work for validation. Dividing 16064 by the host interval would define a transfer-bytes-per-workflow-second quantity, but its denominator includes allocation, event handling, launch, waiting and deallocation. Its numerator describes transfers between host and device, not the kernel's requested traffic to local GPU memory. It therefore cannot be relabeled as local-memory or peak link bandwidth. A meaningful transfer measurement must name its direction, included operations, memory type and timing interval.</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> A programmer claims that atomic addition makes a floating-point sum reproducible and exact. Start an FP32 total at \(2^{24}\), then atomically add one and \(-2^{24}\) from two different threads. Under nearest-even rounding, show two permitted final results. Does the example establish a data race?</p>
+<details><summary>Solution</summary>
+<p>If the addition of one occurs first, adjacent FP32 values at \(2^{24}\) are two units apart. The exact value \(2^{24}+1\) lies halfway between them and nearest-even rounding selects \(2^{24}\). Adding \(-2^{24}\) then gives zero. If the negative term occurs first, cancellation gives zero exactly, followed by one exactly. Both update orders are permitted, so final results can be zero or one even though the real-arithmetic answer is one.</p>
+<p>Each update is atomic; no contribution is lost through a non-atomic read/store interleaving. The discrepancy is caused by finite-precision nonassociativity and unspecified order, not evidence of a data race between these atomic operations. Correct atomic access and reproducible arithmetic are separate requirements. A tolerance or a reproducible summation algorithm must be chosen for the scientific problem. The classic <code>atomicAdd</code> returns the old value, which also differs between the two orders; it does not promise a newly accumulated result or a predetermined position in the sequence.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> In the last block of the 1003-element example, a reduction writes a shared entry and calls <code>__syncthreads</code> only inside <code>if (i &lt; n)</code>. It then reduces all 256 shared entries. Diagnose the participation and initialization problems, and give a valid structure. Would a host <code>cudaDeviceSynchronize</code> after the launch repair the in-kernel protocol?</p>
+<details><summary>Solution</summary>
+<p>The last block has 235 useful threads and 21 padding threads. The branch does not supply a common block-wide barrier path for all active threads, and the 21 unused shared entries have not been assigned the identity element. Even if a particular execution happens to finish, the reduction has no valid proof that all consumed entries were initialized and ordered. An observed result or lack of a hang cannot repair those missing assumptions.</p>
+<p>Every thread should first write its own entry: the contribution when its index is valid, and zero otherwise. All threads then execute a barrier. At each tree level only selected threads add, but every participating block thread executes the following barrier outside that selection. Each read then sees initialized contributions from the preceding level. The host device wait occurs after the kernel's internal work; it cannot retroactively order a shared-memory read before which a block barrier was needed. It supplies host/device completion, not an in-kernel communication phase. The faulty version should be diagnosed from its dependencies rather than run as a hang experiment.</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> Consider one hundred dependent same-size GPU steps whose intermediate results are needed only by later device steps. Assume serialized costs of 60 microseconds for allocation/free, 80 for input transfer, 10 for one kernel and 40 for final output transfer. Compare rebuilding the complete workflow at every step with retaining arrays on the device. State the synchronization and numerical assumptions needed for the comparison.</p>
+<details><summary>Solution</summary>
+<p>Rebuilding at every step costs \(100(60+80+10+40)=19000\) microseconds. Keeping storage resident costs \(60+80+100\cdot10+40=1180\) microseconds, an idealized ratio \(19000/1180\approx16.10\). This is a model with hypothetical costs, not a measured speedup. It removes repeated setup and transfer rather than improving the kernel's arithmetic throughput.</p>
+<p>The resident scheme must preserve producer-before-consumer ordering between steps, for example by placing their launches in one stream. Changing host pointer variables to designate old and new device allocations need not copy grid data. Storage must remain allocated until all users complete, and the host must wait before reading the final result. If a convergence check requires host inspection each step, that introduces intermediate completion and transfer costs excluded by the question. The kernels must also implement the same recurrence and precision; changing a math flag or updating a Jacobi grid in place could change the numerical algorithm and invalidate a timing comparison.</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement).</strong> Design a bounded check for the pi kernel with 257 samples, sixteen blocks and 256 threads per block. Identify which block partials should be empty. Explain how to test numerical correctness, barrier structure, expected launch-error handling and timing scope without claiming that any one check proves all the others.</p>
+<details><summary>Solution</summary>
+<p>The grid has 4096 threads, so each of the 257 samples is visited once with no second grid-stride iteration. Block zero owns samples zero through 255, block one owns sample 256, and the remaining fourteen blocks have no samples. All threads in those empty blocks still write zero shared entries and execute the same reduction barriers. Their returned partials should be zero. The host reference's block owner formula \(\lfloor(i\bmod4096)/256\rfloor\) independently gives the same partition.</p>
+<p>Compute a long-double reference for every block, compare each finite returned partial within the stated tolerance, compare the atomic total with the reference sum, and check analytic error against \(1/(3\cdot257^2)\) plus the floating-point allowance. This avoids demanding serial/GPU bitwise identity. Include the singleton and large cases and several grids to test empty groups and repeated grid-stride work. Inspect that every reduction level's barrier lies outside the adding-thread branch; passing payload checks alone is not an exhaustive synchronization analysis.</p>
+<p>Separately, request one more thread than the queried block limit and require a specifically recognized dimension-rejection code, then clear it and validate a legal result after resetting the output, in addition to the baseline legal launch. The captured stack reports cudaErrorInvalidValue; the listing also recognizes cudaErrorInvalidConfiguration. A random crash or a different error must fail the test. For timing, use ordered events around the kernel and a host clock around the stated allocation-to-free workflow, retaining the different exclusions. Repeat serialized captures and report their range without treating it as a confidence interval. Full payload checks, expected-error handling, API checks and timing endpoints supply complementary evidence; a sanitizer or profiler would add its own specifically scoped evidence.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources</h2>
+<ol>
+<li>NPTEL, IIT Bombay, <a href="https://www.youtube.com/watch?v=vKUl3M0e9pU">W8L1, An Introduction to GPU Programming: Tools, Techniques, and CUDA, Part 1</a>, recording 44. Approaches, execution flow, qualifiers and vector types.</li>
+<li>NPTEL, IIT Bombay, <a href="https://www.youtube.com/watch?v=OmkTAFlVllg">W8L2, Part 2</a>, recording 45. Built-ins, launch configuration, memory functions, atomics, synchronization, queries, errors and flags.</li>
+<li>NVIDIA, <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html">CUDA Programming Guide, C/C++ Language Extensions</a>, §§5.4.1–5.4.3 and 5.4.5. Function/storage annotations, vector layouts, execution configuration and classic atomic semantics. Installed 13.3 headers were also inspected.</li>
+<li>NVIDIA, <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html">Writing SIMT Kernels</a>, shared-memory synchronization discussion. Cooperation and block barriers.</li>
+<li>NVIDIA, <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY.html">Runtime API, Memory Management</a>, and <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html">API Synchronization Behavior</a>. Allocation/copy/free interfaces, byte operations and host versus device completion.</li>
+<li>NVIDIA, Runtime API: <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html">Device Management</a>, <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html">Event Management</a>, and <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__ERROR.html">Error Handling</a>. Queries, waits, event timing and last-error behavior.</li>
+<li>NVIDIA, <a href="https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html">NVCC manual</a>, §§4.2.3, 4.2.7 and 4.2.9. Host/device debug and optimization, native targets, register cap and floating-point options.</li>
+<li>AMD, <a href="https://rocm.docs.amd.com/projects/HIP/en/docs-6.4.1/how-to/hip_porting_guide.html">HIP Porting Guide, ROCm 6.4.1</a>, Porting a CUDA Project. NVIDIA-to-AMD source-porting workflow.</li>
+<li>Kokkos, <a href="https://kokkos.org/kokkos-core-wiki/API/core/execution_spaces.html">Execution Spaces</a>; Khronos, <a href="https://registry.khronos.org/SYCL/specs/sycl-2020/html/sycl-2020.html">SYCL 2020 specification, revision 12, 6 August 2026</a>, §§2–3. Enabled execution backends and the distinction between a portable interface and a particular implementation.</li>
+<li>NVIDIA, <a href="https://docs.nvidia.com/compute-sanitizer/ComputeSanitizer/index.html">Compute Sanitizer</a>, tool descriptions; <a href="https://docs.nvidia.com/nsight-compute/NsightCompute/index.html">Nsight Compute</a>, overview; <a href="https://docs.nvidia.com/nsight-systems/UserGuide/index.html">Nsight Systems User Guide</a>, profiling and timeline. Diagnostic scopes, not claimed executions.</li>
+</ol>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-19-thread-hierarchy-warp-scheduling.html">Previous available chapter</a><a href="index.html">Lecture index</a><span>Further chapters pending</span></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

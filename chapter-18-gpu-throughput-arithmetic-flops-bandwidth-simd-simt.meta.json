@@ -1,0 +1,417 @@
+{
+  "chapter": 18,
+  "title": "GPU throughput arithmetic: FLOPS, memory bandwidth, SIMD and SIMT",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "xjd58BMpLpw",
+      "label": "W6L6",
+      "playlist_index": 38,
+      "duration_seconds": 1299
+    },
+    {
+      "video_id": "rS1_t2xKA5Y",
+      "label": "W7L1",
+      "playlist_index": 39,
+      "duration_seconds": 1667
+    }
+  ],
+  "frames_viewed": {
+    "xjd58BMpLpw": [
+      "f0002",
+      "f0005",
+      "f0008",
+      "f0012",
+      "f0015",
+      "f0018",
+      "f0021",
+      "f0025",
+      "f0028",
+      "f0032",
+      "f0035",
+      "f0038",
+      "f0041"
+    ],
+    "rS1_t2xKA5Y": [
+      "f0004",
+      "f0008",
+      "f0012",
+      "f0016",
+      "f0020",
+      "f0024",
+      "f0029",
+      "f0033",
+      "f0037",
+      "f0041",
+      "f0045",
+      "f0049",
+      "f0052"
+    ]
+  },
+  "source_uncertainties": [
+    "Both assigned transcripts were read completely and all 26 listed frames inspected. No complete independent audio review was performed. Corrections are supported by viewed numerical slides and actual primary references, not a claim that garbled transcription faithfully represents speech.",
+    "The original GTX 1660 board datasheet was not retrieved. Its 192-bit/2001 MHz example is interpreted as a lecture arithmetic model consistent with approximately 8 Gb/s effective rate and 192 GB/s, not an independently verified board specification or a verified internal-clock signaling identity.",
+    "The exact local memory-clock-to-effective-pin-rate convention was not established. The chapter reports cudaDevAttrMemoryClockRate and bus width without multiplying them into an asserted RTX 3050 Laptop memory peak.",
+    "CUDA online guides were retrieved as current documentation, with pages served as 13.4; installed headers and version metadata were CUDA 13.3.1, nvcc 13.3.73. The property query uses attributes because installed cudaDeviceProp clock members were removed. No claim of version identity is made.",
+    "The whitepapers were read from actual downloaded PDFs shared read-only under work/ch17-sol and independently extracted into this private chapter directory. V100 is August 2017 v1.1; A100 is v1.0 copyright 2020; GA10x bytes are v2.1 despite the V1 URL filename. One initial A100 web-open timed out; direct local PDF inspection, rather than the failed web extraction, supports its cited passages.",
+    "Tensor numerical rates are model calculations using the dated enabled products, dense or explicitly structured-sparse-equivalent work and stated clocks. No Tensor kernel was benchmarked, and the cancellation exercise uses an explicitly idealized nearest TF32 input conversion rather than asserting every library mode.",
+    "The three-stage scalar/vector pipeline is a checked ideal simulation with one-cycle stages, full-width operand supply and no stalls. It is not a CPU SIMD or GPU instruction-latency measurement.",
+    "Four sequential memory/FMA captures ran in an exclusive slot. Device power, temperature, dynamic clocks and background services were not controlled. Reported peak-clock attributes and a separate idle clock are not sampled kernel clocks; the 82.4 percent ratio is relative to the stated model, not a certified absolute utilization.",
+    "Effective bandwidth counts source-level requested bytes, not DRAM hardware-counter traffic. Arrays were already device-resident, so results do not measure PCIe, NVLink, a NIC or inter-node communication. The empirical arithmetic-intensity comparison combines two microbenchmarks and is not a measured physical roofline.",
+    "Exact floating-point comparisons are justified only by the deliberately binary-exact test values and bounded recurrence. Full payload checks passed, but do not establish numerical accuracy for arbitrary FP32 inputs or correctness for every architecture.",
+    "The final structured checker reran the five complete printed contracts once. Its variable timing samples are verification evidence and are excluded from the four-capture ranges. Later prose-only cleanup preserved the complete parsed executable fingerprint exactly."
+  ],
+  "lecture_corrections": [
+    "A 4x4 bare matrix product has 64 multiplies and 48 adds, 112 operations. Matrix accumulation AB+C has 64 FMA-equivalents, conventionally 128 FLOPs. The slide listing four multiplies plus three adds but labeling four operations per output is interpreted as four FMA-equivalents, not four individual FLOPs.",
+    "A100 table entries 64 FP64 and 512 TF32 FMA-equivalents per SM per cycle are throughput quantities, not physical Tensor-core counts; the enabled product has four Tensor cores per SM, 108 SMs and 432 total.",
+    "The GDDR/HBM table reverses the numerical interface-width comparison and conflates per-chip with per-stack units. HBM2 uses 1024 bits per stack in these examples; no universal latency/capacity ordering follows.",
+    "RTX 2080 in the actual GA10x table uses GDDR6/NRZ rather than GDDR6X/PAM4; a quoted effective bit rate must not be multiplied again for DDR or PAM4.",
+    "The GTX clock is 2001 MHz, about 2 GHz, rather than 2 MHz. Its rounded bandwidth is not an exact equality with every printed clock digit.",
+    "160 blocks across 80 SMs is an arithmetic average of two, not a guarantee of uniform simultaneous residency. Logical thread identities do not identify persistent physical CUDA cores; PTX explicitly warns diagnostic smid may change after preemption."
+  ],
+  "sections": [
+    {
+      "id": "model",
+      "section": "Count work, count traffic, and name the measured interval",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Operation rates, memory bandwidth and GPU execution vocabulary.",
+      "research_extension": "Compatible-operation and interface accounting from NVIDIA performance guides.",
+      "teaching_construction": "FP32 streaming triad formal model; local measurement scope; first-use definitions.",
+      "evidence_class": "definition"
+    },
+    {
+      "id": "tensor",
+      "section": "Tensor throughput is an operation count, not a count of cores W6L6 0:06",
+      "video_id": "xjd58BMpLpw",
+      "start": 6,
+      "end": 492,
+      "lecture_material": "V1004x4 Tensor throughput and A100 FP64/TF32 aggregate arithmetic.",
+      "research_extension": "Actual V100/A100 whitepapers and NVIDIA per-SM throughput table.",
+      "teaching_construction": "Bare matrix-product versus accumulated-product count; hierarchy audit; enabled versus physical counts; precision/sparsity boundary.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "memory",
+      "section": "GDDR and HBM trade interface organization, not arithmetic precision W6L6 8:12",
+      "video_id": "xjd58BMpLpw",
+      "start": 492,
+      "end": 727,
+      "lecture_material": "GDDR/HBM layouts, widths, capacities and board examples.",
+      "research_extension": "Actual HBM2 controller diagrams and A100 NVLink direction rates.",
+      "teaching_construction": "Separate per-chip/per-stack units, capacity from width, board-photo hypotheses and path-specific rates.",
+      "evidence_class": "product specification"
+    },
+    {
+      "id": "bandwidth",
+      "section": "Multiply width by a fully specified bit rate W6L6 12:07",
+      "video_id": "xjd58BMpLpw",
+      "start": 727,
+      "end": 1299,
+      "lecture_material": "Bit width, clock/pumping/signaling, DDR/PAM4, GTX1660/RTX2080/RTX3080 and V100/A100 HBM examples.",
+      "research_extension": "Actual GA10x v2.1 Table2; A100 memory specification; Best Practices unit conventions.",
+      "teaching_construction": "Dimensional derivation, effective-bit-rate double-counting correction, GB/GiB conversion and deterministic arithmetic program.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "rates",
+      "section": "Query the enabled device and measure a named data path",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Tests the bandwidth concepts after W6L6.",
+      "research_extension": "Installed CUDA13.3 header attributes; GA10x FP32 paths; event and effective-bandwidth semantics.",
+      "teaching_construction": "Device-property query; bounded192MiB copy/triad benchmarks; full exact payload checks; four-capture ranges.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "id": "pipeline",
+      "section": "Pipeline latency and vector width answer different questions W7L1 1:24",
+      "video_id": "rS1_t2xKA5Y",
+      "start": 84,
+      "end": 690,
+      "lecture_material": "Load/execute/store pipeline,64bit scalar,128bit two-lane and256bit four-lane examples.",
+      "research_extension": "No hardware cycle timing inferred.",
+      "teaching_construction": "Finite ceil(n/v)+stages−1 derivation, validated twenty-element simulation, latency versus initiation distinction.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "simt",
+      "section": "SIMD and SIMT expose different software state W7L1 11:30",
+      "video_id": "rS1_t2xKA5Y",
+      "start": 690,
+      "end": 1148,
+      "lecture_material": "Separate scalar units, SIMD versus SIMT, individual thread state and grouped data operations.",
+      "research_extension": "PTX thread/CTA/warp model and performance guide latency-hiding discussion.",
+      "teaching_construction": "Separate logical ownership, instruction grouping and physical resources; thread-level versus instruction-level independence.",
+      "evidence_class": "definition"
+    },
+    {
+      "id": "mapping",
+      "section": "Blocks describe cooperation; SMs supply execution resources W7L1 19:08",
+      "video_id": "rS1_t2xKA5Y",
+      "start": 1148,
+      "end": 1667,
+      "lecture_material": "Thread/block/grid to processor/SM/GPU sketch; block placement and160blocks/80SM example.",
+      "research_extension": "CUDA resource scheduling and PTX diagnostic smid preemption caveat.",
+      "teaching_construction": "Average versus simultaneous uniform residency; logical indices rather than physical identities;16/128block launch interpretation.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "id": "compute",
+      "section": "Independent arithmetic exposes a different throughput limit",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Applies FLOP counts, independent pipelines and SIMT mapping.",
+      "research_extension": "PTX FMA rounding and NVIDIA arithmetic-intensity model.",
+      "teaching_construction": "Exact register recurrence, native FFMA inspection, one/eight chains and one/eight blocks per SM grid models; empirical rate versus peak and requested-byte reference.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "id": "limits",
+      "section": "Claims, evidence and limits",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Claim table follows lecture sequence.",
+      "research_extension": "Already cited primary references.",
+      "teaching_construction": "Separates verified products, arithmetic models, payload tests and bounded measurements.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "id": "exercises",
+      "section": "Exercises",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "All assigned lecture concepts.",
+      "research_extension": "Previously established product/signaling/precision semantics.",
+      "teaching_construction": "Exactly six full solutions: operation derivation, signaling arithmetic, precision counterexample, finite pipeline timing, optimization judgment and FMA measurement audit.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "primary-sources",
+      "section": "Primary sources",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Recordings first.",
+      "research_extension": "Seven relied-upon external primary sources, with claim-specific descriptions.",
+      "teaching_construction": "Date/version/installed-header distinction.",
+      "evidence_class": "definition"
+    }
+  ],
+  "references": [
+    {
+      "title": "NVIDIA Tesla V100 GPU Architecture, WP-08608-001 v1.1, August 2017",
+      "url": "https://images.nvidia.com/content/volta-architecture/pdf/volta-architecture-whitepaper.pdf",
+      "supports": "Full GV10084 versus enabled V10080 SMs; HBM2 controllers; 640 Tensor cores, 64 FMA-equivalents/core/cycle, FP16 multiplication and FP32 accumulation.",
+      "page_checked": "Direct actual PDF text: printed pp.8-10 and 14-16.",
+      "downloaded_pdf_sha256": "86ab6ff6b0d8633fc196f709810f20e185769af0698ec9274034119bf3feec8d"
+    },
+    {
+      "title": "NVIDIA A100 Tensor Core GPU Architecture, v1.0, copyright2020",
+      "url": "https://images.nvidia.com/aem-dam/en-zz/Solutions/data-center/nvidia-ampere-architecture-whitepaper.pdf",
+      "supports": "Enabled108 SMs/four Tensor cores per SM/432 total versus fullGA100128/512; FP64 Tensor aggregate rate and TF32 mode; 40GB1555GB/s HBM2; NVLink25GB/s each direction/link,12 links,600GB/s bidirectional aggregate.",
+      "page_checked": "Direct actual PDF text: printed pp.16-20 and 27-28; NVLink passage spans pp.16-17. Failed initial web-open is not treated as verification.",
+      "downloaded_pdf_sha256": "3a800ad7668ec37037fa5870a8e3bb681b75f19668b3d11492ab9b0da0d58815"
+    },
+    {
+      "title": "NVIDIA Ampere GA102 GPU Architecture, actual retrieved v2.1",
+      "url": "https://images.nvidia.com/aem-dam/en-zz/Solutions/geforce/ampere/pdf/NVIDIA-ampere-GA102-GPU-Architecture-Whitepaper-V1.pdf",
+      "supports": "128 FP32 pipelines per GA10x SM and shared FP32/INT32 paths; historical RTX2080 GDDR6/256bit/14Gb/s448GB/s and originalRTX3080 GDDR6X/320bit/19Gb/s760GB/s; NRZ versus PAM4.",
+      "page_checked": "Direct actual PDF text: SM architecture pp.11-13, Table2 printedp.14; actual PDF version2.1 confirmed from title page.",
+      "downloaded_pdf_sha256": "14a63f094fd064ee24dc2521f02ce30ba37707473783d0d570f00393b90455c8"
+    },
+    {
+      "title": "NVIDIA GPU Performance Background",
+      "url": "https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html",
+      "supports": "Per-SM multiply-add throughput and factor2; A100108SM1.41GHz arithmetic; block scheduling/resource/latency reasoning; intensity-based compute-versus-memory model.",
+      "page_checked": "Opened §§2-4, tables and associated prose."
+    },
+    {
+      "title": "NVIDIA Ampere GPU Architecture Tuning Guide, online page served13.4",
+      "url": "https://docs.nvidia.com/cuda/ampere-tuning-guide/index.html",
+      "supports": "Compute-capability8.6 versus8.0 scalar FP32 throughput; Tensor formats and resources.",
+      "page_checked": "Opened §§1.4.1.1,1.4.1.5,1.4.1.6 and1.4.2."
+    },
+    {
+      "title": "NVIDIA CUDA C++ Best Practices Guide, current online documentation",
+      "url": "https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html",
+      "supports": "CUDA-event elapsed timing; width-clock bandwidth calculation; effective bandwidth from read/write byte count; requested versus actual traffic.",
+      "page_checked": "Opened §§9.1-9.2, especially9.2.1-9.2.2 and timing prose."
+    },
+    {
+      "title": "NVIDIA Parallel Thread Execution ISA, online version9.4",
+      "url": "https://docs.nvidia.com/cuda/parallel-thread-execution/index.html",
+      "supports": "SIMT thread/CTA/warp model; nearest-even floating-point arithmetic; smid is volatile and can change after preemption/rescheduling.",
+      "page_checked": "Opened programming model§2, rounding§6.5 and diagnostic special register§10.8."
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "F,t,P",
+      "first_section": "model",
+      "definition": "Counted floating-point operations, elapsed seconds and operations/second."
+    },
+    {
+      "symbol": "n_SM,q_FMA,nu_SM,P_peak",
+      "first_section": "model",
+      "definition": "Enabled SM count; compatible FMA-equivalent results per SM per clock; assumed SM clock Hz; model arithmetic throughput."
+    },
+    {
+      "symbol": "w,r_b,B_peak,C_mem",
+      "first_section": "model",
+      "definition": "Interface width bits; effective bit/s per pin; ideal bytes/s; capacity bytes."
+    },
+    {
+      "symbol": "n,a_i,b_i,c_i,s,Q,I,B_eff",
+      "first_section": "model",
+      "definition": "Array length, triad inputs/output, bytes per element, requested bytes, FLOP/byte intensity and requested-byte effective bandwidth."
+    },
+    {
+      "symbol": "A,B,C,Y,m,k,n,i,j,ell,F_MMA",
+      "first_section": "tensor",
+      "definition": "Matrix factors/accumulation output; row/contracted/column dimensions and corresponding indices; conventional matrix accumulate FLOP count. Matrix dimension n is local to this derivation."
+    },
+    {
+      "symbol": "nu_m,d,b_s",
+      "first_section": "bandwidth",
+      "definition": "Identified memory-clock frequency, symbol transfers per that cycle and bits per symbol."
+    },
+    {
+      "symbol": "v,g,d_s,T_cycles,T_i",
+      "first_section": "pipeline",
+      "definition": "Vector lanes; ceil(n/v) groups; model stage count; elapsed cycles; numbered cycle labels."
+    },
+    {
+      "symbol": "x_z,z,gamma,k_c",
+      "first_section": "compute",
+      "definition": "One FMA accumulator state; recurrence index; chain index; number of independent chains per thread."
+    },
+    {
+      "symbol": "b,u,r",
+      "first_section": "compute",
+      "definition": "Blocks, threads per block and updates per chain in the FMA operation count."
+    },
+    {
+      "symbol": "P_0,B_0,I_0,I_ridge",
+      "first_section": "compute",
+      "definition": "Compatible arithmetic limit, interface bandwidth, work per byte at that interface and crossover intensity."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B tools/check_chapter_code.py --file ../work/ch18-sol/chapter-18-gpu-throughput-arithmetic-flops-bandwidth-simd-simt.html --report ../work/ch18-sol/code-validation.json",
+    "listings": 5,
+    "all_passed": true,
+    "checks": {
+      "exact": 2,
+      "returncode": 3
+    },
+    "checked_at_utc": "2026-10-28T06:31:33.470152+00:00",
+    "fingerprint_sha256": "db6d24d647bdff44f1a12c12e74a8f7e7ecab06db04ce504d06e3e3b2b3583fb",
+    "notes": "Two exact Python arithmetic/simulation programs, one device-property query with architecture-conditional model, two CUDA benchmarks checking every output. All CUDA API and launch results checked. Prose-only final changes preserve complete parsed source/build/run/check/expected-output fingerprint."
+  },
+  "measurement_provenance": {
+    "capture_date_utc": "2026-10-28",
+    "capture_utc_start": "2026-10-28T06:14:58.425452+00:00",
+    "capture_utc_end": "2026-10-28T06:15:11.395088+00:00",
+    "builds": 3,
+    "python_runs": 2,
+    "queries": [
+      "nvcc-version",
+      "nvidia-smi",
+      "gpu_properties"
+    ],
+    "timing_captures": 4,
+    "configurations_per_capture": {
+      "memory": 4,
+      "fma": 4
+    },
+    "displayed_capture": 4,
+    "native_sass_inspected": true,
+    "maximum_device_allocation_MiB": 192,
+    "exclusive_agent_slot": true,
+    "claim_scope": "One RTX3050Laptop, compute8.6, CUDA13.3 native SASS; device-resident requested-byte streaming and scalar FP32 FMA recurrence, no Tensor/link/network throughput measurements.",
+    "evidence": "Private captures/capture-index.json with command arrays/source SHA256/UTC+monotonic endpoints/returncode/environment and separate raw stdout/stderr. All17 recorded commands returned0. Final structured check is separate.",
+    "memory_bandwidth_ranges_GBps": [
+      {
+        "min": 164.66,
+        "max": 165.17
+      },
+      {
+        "min": 170.96,
+        "max": 171.26
+      },
+      {
+        "min": 175.24,
+        "max": 175.35
+      },
+      {
+        "min": 180.13,
+        "max": 180.17
+      }
+    ],
+    "fma_ranges_GFLOPs": [
+      {
+        "min": 1669.71,
+        "max": 2240.55
+      },
+      {
+        "min": 4424.37,
+        "max": 4435.78
+      },
+      {
+        "min": 4588.95,
+        "max": 4599.96
+      },
+      {
+        "min": 5062.77,
+        "max": 5067.11
+      }
+    ]
+  },
+  "reference_access_date_utc": "2026-10-28",
+  "installed_header_checks": {
+    "header": "//wsl.localhost/Ubuntu/usr/local/cuda-13.3/targets/x86_64-linux/include/driver_types.h",
+    "method": "Read-only direct inspection of installed header and version.json",
+    "facts": [
+      "cudaDeviceProp clockRate and memoryClockRate absent",
+      "cudaDevAttrClockRate13,MemoryClockRate36,GlobalMemoryBusWidth37,L2CacheSize38 present with kHz/bits/bytes units",
+      "CUDA13.3.1,nvcc13.3.73,cudart13.3.29"
+    ]
+  },
+  "author_validation": {
+    "prose_words": 7915,
+    "content_sections": 9,
+    "total_h2": 12,
+    "static_issues": [],
+    "listing_contracts_unchanged_after_check": true,
+    "exercises": 6,
+    "listings": 5
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch18-r1.md",
+      "changes": "Full independent source, mathematical, code, capture and six-solution review; no findings."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch18-r2.md",
+      "changes": "Fresh independent full-chapter source, mathematical, listing-contract, raw-capture and six-solution review; no findings."
+    }
+  ]
+}

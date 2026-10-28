@@ -1,0 +1,366 @@
+{
+  "chapter": 17,
+  "title": "GPU computing: the software stack, architectural units and the cost of offloading",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "FTXikoQr46U",
+      "label": "W6L3",
+      "playlist_index": 35,
+      "duration_seconds": 1891.1724375
+    },
+    {
+      "video_id": "xa3qPx9pz5E",
+      "label": "W6L4",
+      "playlist_index": 36,
+      "duration_seconds": 1512.733625
+    },
+    {
+      "video_id": "dUnxcaeidYg",
+      "label": "W6L5",
+      "playlist_index": 37,
+      "duration_seconds": 1987.256625
+    }
+  ],
+  "frames_viewed": {
+    "FTXikoQr46U": [
+      "f0025",
+      "f0032",
+      "f0060",
+      "f0061",
+      "f0062"
+    ],
+    "xa3qPx9pz5E": [
+      "f0004",
+      "f0021",
+      "f0028",
+      "f0038"
+    ],
+    "dUnxcaeidYg": [
+      "f0006",
+      "f0021",
+      "f0024",
+      "f0037",
+      "f0042",
+      "f0050",
+      "f0061"
+    ]
+  },
+  "source_uncertainties": [
+    "Intel2024PDF URL on the lecture frame returned an unsupported content type through the web tool. The individually opened dated March2023HTML guide supports the Intel architecture facts used here;no unavailable2024PDF claim is relied on.",
+    "Full-chip diagrams and enabled product configurations differ. No laptop GPC/TPC layout is inferred from the reported SM count.",
+    "No Ponte Vecchio/Xe-HPC GPU, NVLink connection or two-device PCIe peer path was available for execution; those facts are dated documentation-based evidence, not local measurements.",
+    "The reported clock is an API peak-frequency attribute,not a sustained clock sampled during the workload. The6.144TFLOP/s value is a nominal scalar-FMA model,not observed performance.",
+    "Three timing captures retain extrema of five trials per configuration,not every individual trial duration. No paired-trial speedup,physical-link rate or energy claim is made.",
+    "The CUDA13.0archived API pages provide documentation context. Actual CUDA13.3.1headers/version metadata were read;used APIs were compiled and executed. Older cudaDeviceProp clock fields are absent in those actual headers,so the program uses attribute queries.",
+    "One viewed W6L3frame(f0060)was black and supplied no evidence;adjacent f0061contains the comparison table.",
+    "PCIe4.0generation/coding arithmetic describes a standard-generation example,not the measured negotiated link of this laptop."
+  ],
+  "lecture_corrections": [
+    {
+      "recording": "W6L3",
+      "claim": "V100NVLink25GB/s bidirectional per link gives300GB/s over six links.",
+      "correction": "25GB/s is per direction;50GB/s bidirectional aggregate per link yields300GB/s across six."
+    },
+    {
+      "recording": "W6L3",
+      "claim": "PCIe peer communication always requires CPU-memory staging;no inter-warp switching;CPU has no API limitations.",
+      "correction": "Supported PCIe peer paths can avoid host staging. Hardware selects ready resident warps without an OS context save for each selection. Both CPU/GPU software stacks have supported interface constraints."
+    },
+    {
+      "recording": "W6L4/W6L5",
+      "claim": "Architecture diagram/unit counts and shared-cache capacities apply uniformly.",
+      "correction": "Full GV10084SM versus enabled V10080;full GA100128versus enabled A100108. The192KB combined capacity belongs to A100;V100uses128KB."
+    },
+    {
+      "recording": "W6L5",
+      "claim": "512/64elements times eight engines and FMA implies128FP64operations/core/cycle.",
+      "correction": "Element count does not fix execution issue rate. IntelMarch2023guide specifies256FP64and256FP32operations/core/cycle for Xe-HPC."
+    },
+    {
+      "recording": "W6L5",
+      "claim": "INT32arithmetic rate labeled FLOPs.",
+      "correction": "Integer operations require integer-operation units;scalar floating-point and matrix/sparse peaks must be identified separately."
+    }
+  ],
+  "sections": [
+    {
+      "section": "model",
+      "video_id": null,
+      "start": 0,
+      "end": 0,
+      "lecture_material": "Chapter objects and the affine-recurrence running case.",
+      "research_extension": "Work/traffic and nominal arithmetic-rate definitions.",
+      "teaching_construction": "Exact-value recurrence,host/device traffic distinction and cost symbols.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "node",
+      "video_id": "FTXikoQr46U",
+      "start": 303,
+      "end": 1062,
+      "lecture_material": "CPU/GPU nodes,PCIe lanes/generation/coding,NVLink.",
+      "research_extension": "Dated Intel PCIe parameters;NVIDIA NVLink directional units and CUDA peer support.",
+      "teaching_construction": "Coding-ceiling derivation and topology/measurement boundaries.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "workload",
+      "video_id": "FTXikoQr46U",
+      "start": 1062,
+      "end": 1891.1724375,
+      "lecture_material": "CPU/GPU tendencies,graphics-to-general-purpose evolution,integrated/discrete devices and comparison table.",
+      "research_extension": "Distinguish latency/throughput and resident warp selection from OS context switching.",
+      "teaching_construction": "Qualify universal clock/API claims and connect independence to workload suitability.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "stack",
+      "video_id": "xa3qPx9pz5E",
+      "start": 77,
+      "end": 550,
+      "lecture_material": "Software stack,host/device roles and compilers/libraries/drivers.",
+      "research_extension": "CUDA API error/completion semantics and nvcc native target.",
+      "teaching_construction": "Actual installed-header audit and checked256-square launch.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "nvidia",
+      "video_id": "xa3qPx9pz5E",
+      "start": 550,
+      "end": 1512.733625,
+      "lecture_material": "GPC/TPC/SM hierarchy,processing partitions,schedulers,registers,L1/shared memory,execution units and SFUs.",
+      "research_extension": "Dated Volta/A100 capacities and programming/hardware-unit distinctions.",
+      "teaching_construction": "Register-byte and residency bounds;hypothetical Little-law transaction calculation.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "intel",
+      "video_id": "dUnxcaeidYg",
+      "start": 109,
+      "end": 1103,
+      "lecture_material": "Xe families,Ponte Vecchio packaging,stacks/slices/cores/vector/XMX and width arithmetic.",
+      "research_extension": "IntelMarch2023guide specifies256FP64rather than slide128operations/core/cycle.",
+      "teaching_construction": "Hierarchy count and effective issue-rate factor exposing width-only inference.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "terminology",
+      "video_id": "dUnxcaeidYg",
+      "start": 1103,
+      "end": 1301,
+      "lecture_material": "Hardware/software terminology across NVIDIA and Intel;SIMT/SIMD.",
+      "research_extension": "Programming abstractions versus physical arithmetic resources.",
+      "teaching_construction": "Question-preserving translation table and ownership-first portability reasoning.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "peak",
+      "video_id": "dUnxcaeidYg",
+      "start": 1301,
+      "end": 1987.256625,
+      "lecture_material": "V100/A100 full-chip and product counts,FMA convention,boost-clock scalar rates.",
+      "research_extension": "Dated white papers,actual device query and fused-rounding semantics.",
+      "teaching_construction": "Enabled scalar peaks,INT32unit correction,FMA C check and Python arithmetic model.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "offload",
+      "video_id": null,
+      "start": 0,
+      "end": 0,
+      "lecture_material": "Motivated by accelerator/host architecture;not a lecture code transcription.",
+      "research_extension": "CUDA copy completion and timing scope.",
+      "teaching_construction": "Break-even proof,index-ownership proof and three fresh five-trial CPU/naive/resident captures.",
+      "evidence_class": "empirical result"
+    }
+  ],
+  "references": [
+    {
+      "title": "Intel desktop datasheet,Volume1,revision004,May2022",
+      "url": "https://cdrdv2-public.intel.com/634648/634648-004.pdf",
+      "supports": "PCIe4.0:16GT/s,128b/130b encoding and31.5GB/s x16 one-direction coding ceiling.",
+      "page_checked": "§§2.2.3–2.2.4,Table2-10,printedp29. Web PDF opened.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "NVIDIA Tesla V100 GPU Architecture,v1.1,August2017",
+      "url": "https://images.nvidia.com/content/volta-architecture/pdf/volta-architecture-whitepaper.pdf",
+      "supports": "Full GV10084SM hierarchy,V10080enabled SMs,64FP32/32FP64lanes,register partitions and NVLink total.",
+      "page_checked": "Actual downloaded PDF and local text:hardwarepp8–13,NVLinkp19;full-diagram PDFindex13,partition discussion index16.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "NVIDIA A100 Tensor Core GPU Architecture,v1.0,2020",
+      "url": "https://images.nvidia.com/aem-dam/en-zz/Solutions/data-center/nvidia-ampere-architecture-whitepaper.pdf",
+      "supports": "Full128versus enabled108SMs;192KB versus V100128KB L1/shared capacity;25GB/s per direction/link,12versus6links.",
+      "page_checked": "Actual downloaded PDF/text:hardware PDFindex18,capacity indices14/32,NVLink15/51.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "NVIDIA GA10x architecture white paper,actual v2.1 served at V1filename",
+      "url": "https://images.nvidia.com/aem-dam/en-zz/Solutions/geforce/ampere/pdf/NVIDIA-ampere-GA102-GPU-Architecture-Whitepaper-V1.pdf",
+      "supports": "128FP32lanes per GA10xSM;architectural resource counts must match device class.",
+      "page_checked": "Actual PDFtitle v2.1;SM architecture printedpp11–13,local text indices10–12.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "Intel oneAPI GPU Optimization Guide,31March2023,Intel Xe GPU Architecture",
+      "url": "https://www.intel.com/content/www/us/en/docs/oneapi/optimization-guide-gpu/2023-1/intel-xe-gpu-architecture.html",
+      "supports": "Xe-HPC8vector/8matrix engines per core,512/4096-bit descriptors and256FP32/256FP64operations/core/cycle;two-stack hierarchy counts.",
+      "page_checked": "Dated HTML paragraph and Xe configuration table;full page opened.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA13.0 device-management API",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-runtime-api/group__CUDART__DEVICE.html",
+      "supports": "Device enumeration,properties/attribute queries and synchronization interfaces.",
+      "page_checked": "§6.1 API page opened;local13.3header fields independently read and compiled query executed.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA13.0 device-property structure",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-runtime-api/structcudaDeviceProp.html",
+      "supports": "Property field meanings:SM count,thread limits,register/shared/global/L2resources.",
+      "page_checked": "Struct reference opened;actual installed13.3driver_types.hread for used fields.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA13.0 error handling",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-runtime-api/group__CUDART__ERROR.html",
+      "supports": "cudaGetLastError and error-string handling used by checked launches.",
+      "page_checked": "§6.3 error-handling page opened.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA13.0 API synchronization behavior",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-runtime-api/api-sync-behavior.html",
+      "supports": "Device-to-host synchronous copy completes the result transfer before host reuse/timing endpoint.",
+      "page_checked": "API synchronization behavior page opened.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA13.0 Programming Guide,peer access",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-programming-guide/index.html#peer-to-peer-memory-access",
+      "supports": "PCIe/NVLink topology and support queries govern peer access;enabled peer copies need not stage through host.",
+      "page_checked": "§6.2.9.4–6.2.9.5 text opened.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "NVIDIA Floating Point and IEEE754 white paper",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/floating-point/index.html#the-fused-multiply-add-fma",
+      "supports": "FMA has one final rounding and can differ from separate multiply/add;no stale historical CPU-availability claim used.",
+      "page_checked": "§2.3FMA and§4.3control text opened.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA13.0 Best Practices Guide",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-best-practices-guide/index.html#timing",
+      "supports": "Host timer scope,asynchronous work and device events;minimizing unnecessary host/device transfers.",
+      "page_checked": "§9.1timing and§10.1transfer discussion opened.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA13.0 nvcc manual",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-compiler-driver-nvcc/index.html#gpu-architecture-arch",
+      "supports": "Native architecture targeting versus portable deployment policy.",
+      "page_checked": "Architecture-option section opened.",
+      "checked_utc_date": "2026-10-28"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "n,K,x_i,y_i",
+      "first_section": "model",
+      "definition": "Vector length,pass count,immutable input and updated output."
+    },
+    {
+      "symbol": "F,Q,I",
+      "first_section": "model",
+      "definition": "Floating-point operation count,bytes moved and arithmetic intensity F/Q."
+    },
+    {
+      "symbol": "T_H2D,T_D2H,t_launch,T_kernel",
+      "first_section": "model",
+      "definition": "Transfer times,per-pass launch overhead and resident-data kernel time."
+    },
+    {
+      "symbol": "n_SM,c_32,nu_clk,P_peak",
+      "first_section": "model",
+      "definition": "Enabled SMs,FP32lanes per SM,declared clock and nominal FMA peak."
+    },
+    {
+      "symbol": "B_lane,B_x16",
+      "first_section": "node",
+      "definition": "Coding-limited one-direction byte rates per lane and16-lane link."
+    },
+    {
+      "symbol": "R,b_t,r_t,S,s_b,t_max",
+      "first_section": "nvidia",
+      "definition": "Register-slot budget,threads/block,registers/thread,shared-byte budget,shared bytes/block and resident-thread limit."
+    },
+    {
+      "symbol": "L,X,lambda,m_txn,B",
+      "first_section": "nvidia",
+      "definition": "Average transaction latency,transaction throughput,in-flight count,bytes/transaction and target byte rate."
+    },
+    {
+      "symbol": "w,b,v,o,q_b",
+      "first_section": "intel",
+      "definition": "Representation width,element bits,engines/core,operations/element and effective vector-sized throughput factor."
+    },
+    {
+      "symbol": "c,g,d,t_launch",
+      "first_section": "offload",
+      "definition": "CPUpass time,GPUkernel time,one total transfer round and launch overhead."
+    },
+    {
+      "symbol": "B_peak",
+      "first_section": "offload",
+      "definition": "A stated memory-bandwidth ceiling for the roofline model."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B tools/check_chapter_code.py --file work/ch17-sol/chapter-17-gpu-stack-and-architectures.html --report work/ch17-sol/code-validation.json",
+    "listings": 5,
+    "all_passed": true,
+    "status": "Formal extracted validation passed 5/5 on 2026-10-28; exact output for stack, FMA and arithmetic model; successful checked return for device query and timing program. Manual timing program also has three retained captures.",
+    "fingerprint_sha256": "3aaedd3a9eba6e3a10193bd0c444ce369ad39dfbe0f0675cfb0e1bd41d2c4fb8",
+    "checked_at_utc": "2026-10-28T06:33:33.518557+00:00"
+  },
+  "measurement_provenance": {
+    "utc_start": "2026-10-28T06:17:42.154Z",
+    "utc_end": "2026-10-28T06:18:12.143Z",
+    "exclusive_agent_slot": true,
+    "timing_captures": 3,
+    "trials_per_configuration_per_capture": 5,
+    "largest_user_device_allocation_bytes": 33554432,
+    "displayed_timing_capture": 3,
+    "clock_scope": "Host steady-clock elapsed interval includes copies/launches/completed results;allocation and initialization excluded.",
+    "records": "Exact source hashes,argv,stdout/stderr,return codes,UTC and monotonic endpoints retained privately.",
+    "environment": "Actual runtime_API13030,driver_API13010;CUDAtoolkit13.3.1/nvcc13.3.73;NVIDIA GeForce RTX3050Laptop,16SMs,CC8.6;reported peak clock1.5GHz. Windows11/WSL Ubuntu24.04 hybrid i5-12450Hlaptop.",
+    "warnings": "Manual wrapper emitted one pre-existing WSL configuration warning;no configuration was modified. All programs returned0."
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT WITH FIXES",
+      "blocking": 0,
+      "major": 0,
+      "minor": 1,
+      "report": "work/reviews/ch17-r1.md",
+      "repair": "Corrected inline CUDA launch delimiter; independent round 2 pending."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch17-r2.md",
+      "changes": "Fresh independent full-chapter source, mathematical, listing-contract, raw-capture and six-solution review; no findings."
+    }
+  ]
+}

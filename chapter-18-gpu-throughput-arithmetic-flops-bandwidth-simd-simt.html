@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="cc07635127e4d8e466b7da50f72e101e94fa1acec25e2227bf866446a4b6733b"><title>GPU throughput arithmetic: FLOPS, memory bandwidth, SIMD and SIMT · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>GPU throughput arithmetic: FLOPS, memory bandwidth, SIMD and SIMT</h1>
+<p class="lead">The local GPU's queried configuration gives an FP32 arithmetic model of 6.144 trillion operations per second. A streaming triad nevertheless performs about 30 billion operations per second in one captured run, while moving about 180 billion logical bytes per second. That is not a contradiction: the triad performs only one sixth of an operation per byte. Conversely, an A100's advertised 156 TFLOP/s Tensor rate does not mean that every FP32 instruction executes at that rate. To interpret either number, identify the operation, precision, hardware units, clock convention and data path before multiplying anything.</p>
+<p class="source-note">Grounded in NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay: <a href="https://www.youtube.com/watch?v=xjd58BMpLpw">W6L6, Understanding FLOPS and Memory Bandwidth Calculations for NVIDIA GPUs</a> and <a href="https://www.youtube.com/watch?v=rS1_t2xKA5Y">W7L1, SIMD vs. SIMT: Thread Mapping, Scheduling, and Pipelining in NVIDIA GPUs</a>. <strong>Lecture material:</strong> V100 and A100 Tensor throughput arithmetic, GDDR and HBM, interface widths and transfer rates, DDR and PAM4, memory-bandwidth examples, scalar and vector pipelines, SIMD versus SIMT, and thread/block/grid mapping. <strong>Research extensions:</strong> NVIDIA's V100, A100 and GA10x whitepapers identify the actual products and throughput units; its performance and CUDA guides supply effective-bandwidth, execution and timing semantics; the installed CUDA headers define the queried attributes; PTX documents native arithmetic and diagnostic SM identifiers. <strong>Original teaching constructions:</strong> dimensional checks, correction of operation and signaling counts, the triad running case, ideal pipeline simulation, property query, bounded memory/FMA experiments and six worked exercises.</p>
+
+<h2 id="model">Count work, count traffic, and name the measured interval</h2>
+<p>A <em>floating-point operation</em>, abbreviated FLOP, is an arithmetic operation on a specified floating-point format. A FLOP count \(F\) is work, while FLOP/s is a rate \(P=F/t\), where \(t\) is elapsed seconds. “FLOPS” conventionally names that rate. A multiply and an add count as two operations. A fused multiply-add, or <em>FMA</em>, computes a product plus an addend with one final rounding and conventionally counts as two FLOPs even when implemented by one instruction. Counting instructions and counting arithmetic operations are different tasks.</p>
+<p>The format is part of the claim. FP32 denotes ordinary 32-bit single precision and FP64 64-bit double precision. FP16 is a shorter floating-point format. TensorFloat-32, abbreviated TF32, is a Tensor arithmetic mode with a reduced input significand compared with FP32 while retaining its exponent range. Input storage and accumulator precision need not be identical. A rate specified for one mode cannot be relabeled as a rate for another merely because its final output occupies a 32-bit array.</p>
+<p>A <em>streaming multiprocessor</em>, or SM, contains instruction schedulers, registers and execution pipelines. Let \(n_{\mathrm{SM}}\) be the number of enabled SMs, \(q_{\mathrm{FMA}}\) the supported scalar FMA-equivalent results per SM per clock in a stated mode, and \(\nu_{\mathrm{SM}}\) the assumed SM clock frequency in hertz. A compatible arithmetic throughput model is \(P_{\mathrm{peak}}=2n_{\mathrm{SM}}q_{\mathrm{FMA}}\nu_{\mathrm{SM}}\). The factor two counts multiply and add; it says nothing about memory transfers. A full chip diagram can contain more units than an enabled product exposes.</p>
+<p>The memory model uses \(w\) for data-interface width in bits and \(r_b\) for the effective bit rate per data pin in bit/s. Its ideal payload bandwidth is \(B_{\mathrm{peak}}=wr_b/8\) bytes/s. Memory capacity \(C_{\mathrm{mem}}\), measured in bytes, answers a separate question: how much can be stored. Increasing capacity does not necessarily increase interface width or transfer rate. The clock driving arithmetic and a clock reported for memory are also distinct quantities.</p>
+<p>The running operation is a <em>triad</em>, \(c_i=a_i+2b_i\), for \(n\) array elements. Its arithmetic count is \(F=2n\), whether the compiler uses an FMA or a separate multiply and add. Counting one read of each input and one write of the output gives logical traffic \(Q=3sn\), where \(s\) is bytes per element. With FP32, \(s=4\) and the <em>arithmetic intensity</em> is \(I=F/Q=1/6\) FLOP/byte. These are source-level requested bytes, not a hardware-counter measurement of DRAM transactions.</p>
+<p>The measured arithmetic rate is \(F/t\) and effective bandwidth \(B_{\mathrm{eff}}=Q/t\). They satisfy \(P=I B_{\mathrm{eff}}\) by their definitions. This identity checks accounting; it is not an independent demonstration that the external memory interface is saturated. Caches, transaction granularity, memory-controller scheduling and write traffic can make physical memory bytes differ from the logical count.</p>
+<p>The numerical GPU experiments use an Intel Core i5-12450H laptop, an NVIDIA GeForce RTX 3050 Laptop GPU under WSL 2, and the installed CUDA 13.3 toolkit. Every runtime call and kernel launch is checked, and every printed computation is validated against a deterministic expected value. CUDA events delimit device work; allocation, initialization and copying results to the host occur outside the timed interval. Four sequential captures supply limited repeat ranges, not confidence intervals or power-controlled peak measurements.</p>
+
+<h2 id="tensor">Tensor throughput is an operation count, not a count of cores <a class="timestamp" href="https://www.youtube.com/watch?v=xjd58BMpLpw&amp;t=6s">W6L6 0:06</a></h2>
+<p>Chapter 17 introduced scalar peak rates and distinguished full-chip diagrams from enabled products. Matrix multiply-accumulate throughput requires a separate operation count. For matrices \(A\) of shape \(m\times k\), \(B\) of shape \(k\times n\), and \(C,Y\) of shape \(m\times n\), the operation is \(Y=AB+C\). Here \(i\) indexes rows, \(j\) columns and \(\ell\) the contracted dimension, ranging respectively from one to \(m,n,k\). Each output is \(Y_{ij}=C_{ij}+\sum_{\ell=1}^kA_{i\ell}B_{\ell j}\). An implementation can perform \(k\) scalar FMAs per output, giving the conventional work count</p>
+\[
+F_{\mathrm{MMA}}=2mnk. \tag{18.1}
+\]
+<p>For \(4\times4\) matrices, equation (18.1) gives 64 scalar FMAs or 128 FLOPs. A bare \(AB\), counted without an initial accumulation, instead uses four multiplies and three adds for each of sixteen outputs: \(16(4+3)=112\) elementary operations. The lecture slide lists four multiplies and three adds but then labels four operations per output before doubling for FMA. The coherent interpretation is four FMA-equivalents per output in \(AB+C\), not four individual FLOPs in a standalone dot product.</p>
+<p>The <a href="https://images.nvidia.com/content/volta-architecture/pdf/volta-architecture-whitepaper.pdf">V100 whitepaper, printed pp. 14–16</a>, explicitly specifies 64 floating-point FMA operations per Tensor Core per clock, eight Tensor Cores per SM, and 640 in the enabled V100. It defines \(Y=AB+C\) with FP16 multiply inputs and accumulation that can be FP32. Thus the V100 SXM2 arithmetic at the slide's 1.53 GHz is \(640\times64\times2\times1.53\times10^9=125.3376\times10^{12}\) FLOP/s, conventionally rounded to 125 TFLOP/s.</p>
+<p>The units expose the meaning of every factor: Tensor Cores, multiplied by scalar FMAs per Tensor Core per cycle, multiplied by FLOPs per FMA, multiplied by cycles per second. Multiplying the factor 640 by another full SM count would double-count the hierarchy. Using the full GV100 diagram's 84 SMs instead of the enabled V100's 80 would describe a different configuration. The pipeline's throughput also is not the latency of a complete CUDA matrix instruction or an arbitrary large matrix multiplication.</p>
+<p>A100 makes the distinction between hardware count and throughput especially important. The lecture's table contains 64 FP64 and 512 TF32 FMA-equivalent results per SM per cycle. These are not 64 or 512 physical Tensor Cores in each SM. The <a href="https://images.nvidia.com/aem-dam/en-zz/Solutions/data-center/nvidia-ampere-architecture-whitepaper.pdf">A100 whitepaper, printed pp. 19 and 28</a>, specifies four Tensor Cores per SM, 108 enabled SMs and 432 Tensor Cores for that A100 configuration. The full GA100 design has 128 SMs and 512 Tensor Cores in total.</p>
+<p>Using the aggregate per-SM throughput directly, dense FP64 Tensor arithmetic is \(108\times64\times2\times1.41\ \mathrm{GHz}=19.49184\) TFLOP/s. Dense TF32 Tensor arithmetic is \(108\times512\times2\times1.41\ \mathrm{GHz}=155.93472\) TFLOP/s. Once the factor already means results per SM, the number of physical Tensor Cores per SM is not multiplied again. The two descriptions can be converted into each other only when the per-core throughput and supported arithmetic mode are correctly specified.</p>
+<p>Ordinary A100 scalar FP32 arithmetic is approximately 19.5 TFLOP/s for this configuration, not the 156 TF32 Tensor rate. FP64 Tensor operations and FP32 scalar operations can have similar numerical rates while executing different instructions. A matrix algorithm can access Tensor throughput only when its operations, layout and precision are suitable. Elementwise addition cannot be transformed into a matrix multiply merely by renaming its arrays as tensors.</p>
+<p>Sparsity adds another denominator. The doubled advertised sparse rate assumes a supported structured pattern, such as two nonzero values out of a group of four, and associated metadata. It is often reported as dense-equivalent work accomplished while skipping prescribed zeros. It does not mean the hardware executed twice as many arbitrary dense FMAs. A comparison must state whether \(F\) counts actually executed arithmetic, a dense-equivalent workload or an application-specific useful result.</p>
+<p>Precision can change scientific conclusions even when throughput improves. TF32 uses fewer input fraction bits than FP32; accumulating in FP32 cannot restore information already removed from an input. An application must account for its sensitivity to input rounding before accepting a reduced-precision operation. The throughput table alone proves no accuracy guarantee. Exercise 3 constructs a cancellation example that makes this distinction concrete.</p>
+
+<h2 id="memory">GDDR and HBM trade interface organization, not arithmetic precision <a class="timestamp" href="https://www.youtube.com/watch?v=xjd58BMpLpw&amp;t=492s">W6L6 8:12</a></h2>
+<p>Graphics double data rate memory, GDDR, commonly places discrete memory packages around a GPU on a board. High-bandwidth memory, HBM, places stacked memory dies close to the GPU through advanced packaging and a wide interface. Proximity and interface width help explain bandwidth and energy characteristics, but neither acronym establishes a universal latency, capacity or cost ordering for all products and generations.</p>
+<p>The lecture's comparison table calls a GDDR interface of 32 or 64 bits per chip wider than an HBM interface of 1024 bits per stack. Those widths refer to different packaging units, and the numeric inequality goes the other way. A conventional HBM2 stack is connected through two 512-bit controllers in the cited V100/A100 designs, giving 1024 bits per stack. V100's four such stacks give 4096 bits; the discussed A100 configuration has five stacks and 5120 bits. The corresponding whitepaper diagrams specify these arrangements.</p>
+<p>Capacity requires an independent count. Six packages of 1 GB each provide 6 GB of nominal capacity; replacing them with compatible 2 GB packages can provide 12 GB without changing the aggregate data width. Conversely, activating more independently connected interfaces can increase width if the controller and board support them. Two packages can also share aspects of an interface organization, so multiplying package count by a guessed chip width is not a substitute for a board specification.</p>
+<p>Unused positions in a board photograph do not prove that extra memory can be installed. The GPU controller, wiring, package organization, firmware and electrical design must support the configuration. A photograph can motivate a hypothesis, while interface diagrams and product documentation establish the supported arrangement. The same caution applies to assuming that an HBM stack is physically inside the GPU silicon: the memory dies and GPU die are distinct components connected through packaging.</p>
+<p>GDDR, HBM and cache capacity also describe different levels of the memory hierarchy. A GPU can read a reused value from an on-chip cache without traversing its external interface again. A kernel's effective bandwidth can therefore exceed a DRAM pin-rate calculation if its requested bytes repeatedly hit cache. Such a result needs a stated traffic boundary, not an immediate claim that the external memory specification has been exceeded.</p>
+<p>The useful design question is which interface supplies the data that limit the operation. Arithmetic pipelines access registers; a streaming array operation reaches global memory through caches; transferring an input from a CPU uses a host–device path such as PCI Express (PCIe). A GPU's local memory bandwidth does not describe PCIe, NVIDIA's GPU interconnect NVLink, or a Message Passing Interface (MPI) network. Those paths also differ in whether a quoted number is one-direction bandwidth or a sum over both directions.</p>
+
+<p>For example, the A100 whitepaper states 25 GB/s in each direction per NVLink and twelve links. Their ideal sum is 300 GB/s in one direction and 600 GB/s when both directions are added. A one-direction transfer cannot be assigned 600 GB/s simply because that aggregate number is advertised. This link arithmetic is separate from the 1555 GB/s local HBM specification and is not measured by our array kernels. <a href="https://images.nvidia.com/aem-dam/en-zz/Solutions/data-center/nvidia-ampere-architecture-whitepaper.pdf">A100 whitepaper, printed pp.16–17</a>.</p>
+
+<h2 id="bandwidth">Multiply width by a fully specified bit rate <a class="timestamp" href="https://www.youtube.com/watch?v=xjd58BMpLpw&amp;t=727s">W6L6 12:07</a></h2>
+<p>If \(w\) data pins each transfer \(r_b\) bits per second, the aggregate ideal bandwidth is</p>
+\[
+B_{\mathrm{peak}}=\frac{wr_b}{8}. \tag{18.2}
+\]
+<p>For a data rate expressed in gigabits per second per pin, equation (18.2) directly gives decimal GB/s after division by eight. One GB is \(10^9\) bytes; one GiB is \(2^{30}\) bytes. Consequently, 192 GB/s is \(192\times10^9/2^{30}\approx178.814\) GiB/s. A product rate and a benchmark rate must use the same byte unit before computing a percentage.</p>
+<p>A clock-based derivation is possible when the clock convention is known. Let \(\nu_m\) be a particular memory clock in cycles/s, \(d\) symbol transfers per that clock cycle and \(b_s\) bits represented per symbol. Then \(r_b=\nu_m d b_s\). Ordinary two-level non-return-to-zero signaling, NRZ, carries one bit per symbol. Four-level pulse amplitude modulation, PAM4, can represent two bits per symbol. Double data rate describes transfers on both clock edges; it is not the same physical factor as bits per symbol.</p>
+<p>The danger is that a published data rate can already include both factors. If a specification says 19 Gb/s per pin, that is already a bit rate. Multiplying it by two again because the memory uses PAM4 double-counts signaling. Likewise, a controller “memory clock,” a memory-device clock and an effective transfer clock can have different numerical values. The lecture's recipe listing data-rate, pumping and signaling factors is safe only after each factor's meaning has been established, rather than treating them as universally independent multipliers.</p>
+<p>The GTX 1660 row is consistent with a 192-bit interface and an effective rate of approximately 8 Gb/s per pin, giving \(192(8)/8=192\) GB/s. This checks the lecture's arithmetic model. Its listed clock is 2001 MHz, approximately 2 GHz, not 2 MHz. Four effective bits per that listed cycle would yield 8.004 Gb/s and 192.096 GB/s; the displayed 192 GB/s is a rounded rate. The exact relationship between an internal clock and pin activity must come from the memory documentation, not from interpreting a label by eye.</p>
+<p>The historical <a href="https://images.nvidia.com/aem-dam/en-zz/Solutions/geforce/ampere/pdf/NVIDIA-ampere-GA102-GPU-Architecture-Whitepaper-V1.pdf">GA10x whitepaper, Table 2 on printed p. 14</a>, supplies a cleaner comparison. Its RTX 2080 uses GDDR6, a 256-bit interface and 14 Gb/s, giving 448 GB/s. Its original 10 GB RTX 3080 uses GDDR6X, a 320-bit interface and 19 Gb/s, giving 760 GB/s. The RTX 2080 entry is not a PAM4 GDDR6X product. Other capacities and board variants must be identified separately.</p>
+<p>For HBM2, the lecture supplies a 4096-bit V100 interface and a clock of 877.5 MHz with double-data-rate transfers. Equation (18.2) gives \(4096(877.5\times10^6)(2)/8=898.56\times10^9\) bytes/s, approximately 900 GB/s. For its A100 example, \(5120(1.215\times10^9)(2)/8=1555.2\times10^9\) bytes/s. The A100 40 GB whitepaper reports 1555 GB/s. A later A100 80 GB product is not assumed to have the same memory rate.</p>
+<p>The following Python program checks operation and bandwidth arithmetic from the stated models and dated configurations. It has no hardware dependencies and prints exact deterministic results. Its sparse number is explicitly dense-equivalent, and its HBM rows use the slide clocks rather than silently replacing them with other rounded clocks.</p>
+<pre><code class="language-python" data-file="peak_arithmetic.py" data-build="" data-run="python3 -B peak_arithmetic.py" data-check="exact">&quot;&quot;&quot;Dated product/model arithmetic; these are not measured rates.&quot;&quot;&quot;
+def tf(sms, fmas_per_sm_cycle, ghz):
+    return sms * fmas_per_sm_cycle * 2 * ghz / 1000
+
+print(&quot;V100 4x4 A*B only: multiplies=64 adds=48 total=112&quot;)
+print(&quot;V100 4x4 A*B+C: scalar_FMAs=64 conventional_flops=128&quot;)
+print(f&quot;V100 SXM2 FP16 Tensor model: {640*64*2*1.53/1000:.6f} TFLOP/s&quot;)
+print(f&quot;A100 FP64 Tensor dense model: {tf(108,64,1.41):.6f} TFLOP/s&quot;)
+print(f&quot;A100 TF32 Tensor dense model: {tf(108,512,1.41):.6f} TFLOP/s&quot;)
+print(f&quot;A100 TF32 structured-sparse equivalent: {2*tf(108,512,1.41):.6f} TFLOP/s&quot;)
+for label, width, rate_gbps in [
+    (&quot;GTX1660&quot;, 192, 8), (&quot;RTX2080&quot;, 256, 14),
+    (&quot;RTX3080&quot;, 320, 19), (&quot;V100 slide clocks&quot;,4096,2*0.8775),
+    (&quot;A100 slide clocks&quot;,5120,2*1.215),
+]:
+    gbps = width * rate_gbps / 8
+    gibps = gbps * 1e9 / 2**30
+    print(f&quot;{label}: width={width} bit rate={rate_gbps:.4f} Gb/s/pin &quot;
+          f&quot;bandwidth={gbps:.3f} GB/s = {gibps:.3f} GiB/s&quot;)
+print(&quot;Six chips changing from 1 GB to 2 GB each: capacity doubles; width unchanged if organization unchanged.&quot;)
+</code></pre>
+<pre><code class="output">V100 4x4 A*B only: multiplies=64 adds=48 total=112
+V100 4x4 A*B+C: scalar_FMAs=64 conventional_flops=128
+V100 SXM2 FP16 Tensor model: 125.337600 TFLOP/s
+A100 FP64 Tensor dense model: 19.491840 TFLOP/s
+A100 TF32 Tensor dense model: 155.934720 TFLOP/s
+A100 TF32 structured-sparse equivalent: 311.869440 TFLOP/s
+GTX1660: width=192 bit rate=8.0000 Gb/s/pin bandwidth=192.000 GB/s = 178.814 GiB/s
+RTX2080: width=256 bit rate=14.0000 Gb/s/pin bandwidth=448.000 GB/s = 417.233 GiB/s
+RTX3080: width=320 bit rate=19.0000 Gb/s/pin bandwidth=760.000 GB/s = 707.805 GiB/s
+V100 slide clocks: width=4096 bit rate=1.7550 Gb/s/pin bandwidth=898.560 GB/s = 836.849 GiB/s
+A100 slide clocks: width=5120 bit rate=2.4300 Gb/s/pin bandwidth=1555.200 GB/s = 1448.393 GiB/s
+Six chips changing from 1 GB to 2 GB each: capacity doubles; width unchanged if organization unchanged.
+</code></pre>
+<p>The calculations separate five different counts: matrix operations, physical execution units, enabled SMs, data-interface bits and capacity bytes. Their dimensions make several common errors visible. A result in operations per clock is not yet operations per second; a memory rate in bits is not bytes; and a sparse-equivalent matrix rate is not a dense scalar instruction rate.</p>
+
+<h2 id="rates">Query the enabled device and measure a named data path</h2>
+<p>The lecture's bandwidth products are useful models, but a program runs on an enabled product with a particular software stack. The following query is an original extension that makes those assumptions inspectable. NVIDIA's GA10x whitepaper describes 128 FP32 execution pipelines per SM, including paths shared with integer arithmetic. Its Ampere tuning guide distinguishes compute capability 8.6 from the compute capability 8.0 A100. Thus the FP32 FMA throughput factor for this local 8.6 device is 128 FMA-equivalent results per SM per cycle under the applicable instruction mix; the factor is not inferred merely from the word Ampere. Integer instructions, dependencies and operand delivery can reduce an application's sustained FP32 rate. <a href="https://images.nvidia.com/aem-dam/en-zz/Solutions/geforce/ampere/pdf/NVIDIA-ampere-GA102-GPU-Architecture-Whitepaper-V1.pdf">GA10x whitepaper, v2.1, SM architecture</a>; <a href="https://docs.nvidia.com/cuda/ampere-tuning-guide/index.html">Ampere tuning guide §1.4.1.6</a>.</p>
+<p>CUDA is NVIDIA's GPU programming platform. Here the host is the CPU program and the device is GPU 0. The macro named <code>CUDA</code> checks each runtime API result and exits on an error. Device properties describe the enabled configuration, while device attributes query particular capabilities. The installed CUDA 13.3 headers omit the old <code>cudaDeviceProp</code> clock members used in some older examples, so this program obtains clock attributes through <code>cudaDeviceGetAttribute</code>. The header descriptions identify these attributes as peak clock frequencies in kilohertz; they are not continuous measurements of the clock during a kernel. The arithmetic model is deliberately conditional on compute capability 8.6.</p>
+<pre><code class="language-cuda" data-file="gpu_properties.cu" data-build="nvcc -arch=native -O2 -std=c++17 gpu_properties.cu -o gpu_properties" data-run="timeout 20 ./gpu_properties" data-check="returncode" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+
+#define CUDA(call) do { cudaError_t err = (call); if (err != cudaSuccess) { \
+    std::fprintf(stderr, &quot;%s: %s\n&quot;, #call, cudaGetErrorString(err)); \
+    std::exit(1); } } while (0)
+
+int main()
+{
+    int device = 0, runtime = 0, driver = 0;
+    CUDA(cudaSetDevice(device));
+    cudaDeviceProp prop;
+    CUDA(cudaGetDeviceProperties(&amp;prop, device));
+    CUDA(cudaRuntimeGetVersion(&amp;runtime));
+    CUDA(cudaDriverGetVersion(&amp;driver));
+    int sm_khz, mem_khz, width, cache;
+    CUDA(cudaDeviceGetAttribute(&amp;sm_khz, cudaDevAttrClockRate, device));
+    CUDA(cudaDeviceGetAttribute(&amp;mem_khz, cudaDevAttrMemoryClockRate, device));
+    CUDA(cudaDeviceGetAttribute(&amp;width, cudaDevAttrGlobalMemoryBusWidth, device));
+    CUDA(cudaDeviceGetAttribute(&amp;cache, cudaDevAttrL2CacheSize, device));
+    std::printf(&quot;device: %s\ncompute capability: %d.%d\n&quot;,
+                prop.name, prop.major, prop.minor);
+    std::printf(&quot;runtime=%d driver=%d SMs=%d warp=%d\n&quot;,
+                runtime, driver, prop.multiProcessorCount, prop.warpSize);
+    std::printf(&quot;global_memory_bytes=%zu L2_bytes=%d bus_bits=%d\n&quot;,
+                prop.totalGlobalMem, cache, width);
+    std::printf(&quot;reported_peak_SM_kHz=%d reported_peak_memory_kHz=%d\n&quot;,
+                sm_khz, mem_khz);
+    if (prop.major == 8 &amp;&amp; prop.minor == 6) {
+        double fp32 = prop.multiProcessorCount * 128.0 * 2 * sm_khz * 1000;
+        std::printf(&quot;CC8.6 FP32 FMA model at reported clock: %.4f TFLOP/s\n&quot;, fp32/1e12);
+    } else {
+        std::printf(&quot;No architecture-specific FP32 rate assumed for this device.\n&quot;);
+    }
+    CUDA(cudaDeviceSynchronize());
+    return 0;
+}
+</code></pre>
+<pre><code class="output">device: NVIDIA GeForce RTX 3050 Laptop GPU
+compute capability: 8.6
+runtime=13030 driver=13010 SMs=16 warp=32
+global_memory_bytes=4294443008 L2_bytes=1572864 bus_bits=128
+reported_peak_SM_kHz=1500000 reported_peak_memory_kHz=5871000
+CC8.6 FP32 FMA model at reported clock: 6.1440 TFLOP/s
+</code></pre>
+<p>Sixteen enabled SMs, 128 FP32 FMA-equivalent results per SM per clock, and the reported 1.5 GHz SM frequency give \(16\times128\times2\times1.5\times10^9=6.144\times10^{12}\) FLOP/s. This is a configuration-and-clock model. Dynamic power, temperature, scheduling, instruction mix and frequency can change sustained performance. A separate idle query reported an SM clock of 210 MHz; multiplying that idle observation into a compute benchmark would also be wrong. Neither value is a sampled time series of the benchmark's clock.</p>
+<p>The reported memory clock is 5,871,000 kHz and the interface is 128 bits wide. Their names alone do not establish the signaling multiplier that converts this clock representation into a per-pin effective bit rate on this laptop. We therefore do not publish a numerical local memory peak from an unverified multiplier. The program's byte capacity is the runtime-visible allocation capacity, which need not equal the nominal board label exactly. Its 1,572,864-byte second-level (L2) cache is much smaller than even one 4 MiB test array.</p>
+<p>The next program measures device-array copy and triad operations. Its CUDA kernel is a function marked <code>__global__</code>, called from the host with a grid of blocks and a number of threads per block. For these one-dimensional examples, <code>blockIdx.x * blockDim.x + threadIdx.x</code> gives a distinct array index. The guard prevents the final partially filled block from accessing beyond the array. This is enough syntax to follow the experiment; the mapping section below explains why these software threads are not a permanent list of physical arithmetic units.</p>
+<p>Each array element is FP32. The two tested lengths are \(2^{20}\) and \(2^{24}\), giving 4 MiB and 64 MiB per array, where one MiB is \(2^{20}\) bytes. Three device arrays require at most 192 MiB. Copy requests one read and one write, hence \(8n\) logical bytes; triad requests two reads and one write, hence \(12n\). Adjacent threads request adjacent elements. This organization supports efficient combined memory transactions, although the program does not collect hardware transaction counters or prove their exact sizes.</p>
+<p>After initialization and three untimed warmups, each trial places CUDA events around eight launches in the same default stream. Event synchronization waits for completion before reading elapsed milliseconds. Dividing by eight gives a batch mean per kernel; seven trials yield a minimum and median of those means. Event timing avoids treating an asynchronous host launch's return as kernel completion. It still includes the device timeline between launches, so very short kernels can include launch-related gaps. Allocation, host transfers and validation are outside this interval. NVIDIA's Best Practices Guide distinguishes this timing method and effective requested-byte bandwidth from actual memory traffic. <a href="https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html">Best Practices Guide §§9.1–9.2</a>.</p>
+<pre><code class="language-cuda" data-file="memory_rates.cu" data-build="nvcc -arch=native -O2 -std=c++17 memory_rates.cu -o memory_rates" data-run="timeout 20 ./memory_rates" data-check="returncode" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;algorithm&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+
+#define CUDA(call) do { cudaError_t err = (call); if (err != cudaSuccess) { \
+    std::fprintf(stderr, &quot;%s: %s\n&quot;, #call, cudaGetErrorString(err)); \
+    std::exit(1); } } while (0)
+
+__global__ void init(float *a, float *b, int n)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i &lt; n) { a[i] = (i % 1024) * 0.25f; b[i] = (i % 37) * 0.5f; }
+}
+
+__global__ void copy_values(const float *a, float *out, int n)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i &lt; n) out[i] = a[i];
+}
+
+__global__ void triad(const float *a, const float *b, float *out, int n)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i &lt; n) out[i] = fmaf(2.0f, b[i], a[i]);
+}
+
+int main()
+{
+    CUDA(cudaSetDevice(0));
+    constexpr int trials = 7, repeats = 8, threads = 256;
+    cudaEvent_t start, stop;
+    CUDA(cudaEventCreate(&amp;start)); CUDA(cudaEventCreate(&amp;stop));
+    for (int n : {1 &lt;&lt; 20, 1 &lt;&lt; 24}) {
+        size_t bytes = (size_t)n * sizeof(float);
+        float *a, *b, *out;
+        CUDA(cudaMalloc(&amp;a, bytes)); CUDA(cudaMalloc(&amp;b, bytes));
+        CUDA(cudaMalloc(&amp;out, bytes));
+        int blocks = (n + threads - 1) / threads;
+        init&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(a, b, n);
+        CUDA(cudaGetLastError()); CUDA(cudaDeviceSynchronize());
+        for (int which = 0; which &lt; 2; ++which) {
+            auto launch = [&amp;]() {
+                if (which == 0) copy_values&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(a, out, n);
+                else triad&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(a, b, out, n);
+                CUDA(cudaGetLastError());
+            };
+            for (int warm = 0; warm &lt; 3; ++warm) launch();
+            CUDA(cudaDeviceSynchronize());
+            float elapsed[trials];
+            for (int t = 0; t &lt; trials; ++t) {
+                CUDA(cudaEventRecord(start));
+                for (int r = 0; r &lt; repeats; ++r) launch();
+                CUDA(cudaEventRecord(stop)); CUDA(cudaEventSynchronize(stop));
+                CUDA(cudaEventElapsedTime(&amp;elapsed[t], start, stop));
+                elapsed[t] /= repeats; /* milliseconds per kernel */
+            }
+            std::sort(elapsed, elapsed + trials);
+            std::vector&lt;float&gt; result(n);
+            CUDA(cudaMemcpy(result.data(), out, bytes, cudaMemcpyDeviceToHost));
+            for (int i = 0; i &lt; n; ++i) {
+                float expected = (i % 1024) * 0.25f;
+                if (which == 1) expected += (i % 37);
+                if (result[i] != expected) {
+                    std::fprintf(stderr, &quot;payload mismatch at %d\n&quot;, i); return 2;
+                }
+            }
+            double logical_bytes = (which == 0 ? 2.0 : 3.0) * bytes;
+            double gbps = logical_bytes / (elapsed[0] * 1e6);
+            double gflops = which == 0 ? 0 : 2.0*n / (elapsed[0] * 1e6);
+            std::printf(&quot;n=%d %s min_us=%.3f median_us=%.3f effective_GBps=%.2f &quot;
+                        &quot;GFLOPs=%.2f checked=%d\n&quot;, n, which == 0 ? &quot;copy&quot; : &quot;triad&quot;,
+                        elapsed[0]*1000, elapsed[trials/2]*1000, gbps, gflops, n);
+        }
+        CUDA(cudaFree(a)); CUDA(cudaFree(b)); CUDA(cudaFree(out));
+    }
+    CUDA(cudaEventDestroy(start)); CUDA(cudaEventDestroy(stop));
+    return 0;
+}
+</code></pre>
+<pre><code class="output">n=1048576 copy min_us=50.816 median_us=50.944 effective_GBps=165.08 GFLOPs=0.00 checked=1048576
+n=1048576 triad min_us=73.600 median_us=74.752 effective_GBps=170.96 GFLOPs=28.49 checked=1048576
+n=16777216 copy min_us=765.924 median_us=766.188 effective_GBps=175.24 GFLOPs=0.00 checked=16777216
+n=16777216 triad min_us=1117.532 median_us=1118.072 effective_GBps=180.15 GFLOPs=30.03 checked=16777216
+</code></pre>
+<p>The displayed result is the fourth of four serialized captures on 28 October 2026 UTC. Both kernels check every output element after timing. Their inputs are small multiples of one quarter and one half, so the expected triad values are exactly representable; an exact comparison here is purposeful rather than a universal floating-point testing rule. Any mismatch or runtime failure exits nonzero. The <code>checked</code> field counts output elements actually visited by validation.</p>
+<p>Across the four captures, the large copy's minimum-trial bandwidth ranged from 175.24 to 175.35 GB/s; the large triad ranged from 180.13 to 180.17 GB/s. Small-array ranges were 164.66–165.17 and 170.96–171.26 GB/s respectively. These are repeat ranges for this short sequence, not statistical confidence intervals. Four captures do not control thermal state, background activity or long-term power limits. Slightly different copy and triad rates do not establish two different physical interface peaks: request mix, transaction behavior and instruction overhead differ.</p>
+<p>For the large triad, \(2\times2^{24}\) operations divided by approximately 1.118 milliseconds gives 30.03 GFLOP/s. The same elapsed time and \(12\times2^{24}\) logical bytes give 180.15 GB/s, so their ratio is the stipulated one sixth FLOP per byte. This measurement concerns arrays already resident in device memory. It is neither CPU-to-GPU PCI Express bandwidth nor an NVLink measurement, and it includes no network interface. A faster host link would not increase this kernel's arithmetic intensity.</p>
+
+<h2 id="pipeline">Pipeline latency and vector width answer different questions <a class="timestamp" href="https://www.youtube.com/watch?v=rS1_t2xKA5Y&amp;t=84s">W7L1 1:24</a></h2>
+<p>W7L1 changes the question from chip-wide rates to how independent array operations pass through execution stages. Its teaching pipeline has three stages: load the input pair, execute an addition, and store the result. Assume each stage takes one cycle, different stages can work concurrently, there are no hazards or stalls, and the load stage can supply the required operands every cycle. These assumptions describe a model, not a measured modern CPU or GPU instruction pipeline. Actual global-memory latency is not one cycle.</p>
+<p>Label cycles \(T_0,T_1,\ldots\). The first scalar input pair loads during \(T_0\), adds during \(T_1\), and stores during \(T_2\). Its result appears at the end of the third cycle. Meanwhile the second pair can load during \(T_1\), and the third during \(T_2\). Once full, the pipeline finishes one result per cycle. Thus first-result latency is three cycles, while the steady initiation interval, the time between starting successive pairs, is one cycle. Neither number can replace the other in a finite workload calculation.</p>
+<p>A 64-bit element, such as an FP64 value, fills one 64-bit lane. A 128-bit packed vector can hold two such elements, and a 256-bit vector four. A <em>lane</em> is an element position that participates in the vector operation. Let \(v\) denote the number of lanes, \(g=\lceil n/v\rceil\) the number of element groups, and \(d_s\) the number of pipeline stages. If every stage processes a full group each cycle, the last group enters at cycle \(g-1\) and finishes at the end of cycle \(g+d_s-2\). Therefore elapsed cycles are</p>
+<div class="equation">\[T_{\mathrm{cycles}}=g+d_s-1=\lceil n/v\rceil+d_s-1.\tag{18.3}\]</div>
+<p>For twenty additions and three stages, equation (18.3) gives 22 cycles for scalar execution, 12 for two lanes and 7 for four lanes. The four-lane speedup over scalar is \(22/7\), approximately 3.143, rather than four, because pipeline filling and draining remain. The finite-run rates are twenty divided by those cycle counts. As the number of complete groups becomes large, the rate approaches \(v\) elements per cycle under the model assumptions. A partial final group can reduce lane utilization as well.</p>
+<p>Width alone does not provide that rate. Four FP64 additions per cycle require an execution path capable of four additions and enough operand delivery. If each group needs two 256-bit input vectors and one 256-bit output vector, the ideal memory stages must sustain that traffic at their respective stages. Merely placing four elements in a wider register does not turn one scalar adder or one narrow load path into four. The lecture's diagrams make the architectural resource assumption visible by widening stages together.</p>
+<p>The following simulation reconstructs the lecture's first four scalar sums and extends them to twenty deterministic entries. It groups operands by vector width, evaluates all sums, verifies equality across widths, and reports the ideal timing formula. It is a checked teaching model. Running it on a CPU does not measure CPU SIMD instructions, and its printed cycle labels do not claim the GPU's hardware pipeline depth.</p>
+<pre><code class="language-python" data-file="pipeline_model.py" data-build="" data-run="python3 -B pipeline_model.py" data-check="exact">&quot;&quot;&quot;Ideal three-stage pipeline, one-cycle stages and no resource stalls.&quot;&quot;&quot;
+from math import ceil
+
+a = [21, 12, 4, 9, 34, 27, 17, 18, 98, 67, 46, 87, 99, 88, 56, 48, 49, 35, 41, 23]
+b = [12, 32, 14, 99, 42, 17, 71, 81, 89, 76, 64, 78, 90, 80, 65, 81, 94, 53, 18, 30]
+answer = [x+y for x,y in zip(a,b)]
+print(&quot;first four sums:&quot;, answer[:4])
+for lanes in (1, 2, 4):
+    reconstructed = [a[base+lane]+b[base+lane]
+                     for base in range(0, len(a), lanes)
+                     for lane in range(lanes) if base+lane &lt; len(a)]
+    assert reconstructed == answer
+    groups = ceil(len(a)/lanes)
+    completion_slots = [2+i for i in range(groups)]
+    cycles = groups+2
+    print(f&quot;lanes={lanes} groups={groups} first_slot=T{completion_slots[0]} &quot;
+          f&quot;last_slot=T{completion_slots[-1]} elapsed_cycles={cycles} &quot;
+          f&quot;elements_per_cycle={len(a)/cycles:.6f}&quot;)
+assert answer[:4] == [33, 44, 18, 108]
+print(&quot;Validation: all lane widths produce the same 20 sums.&quot;)
+</code></pre>
+<pre><code class="output">first four sums: [33, 44, 18, 108]
+lanes=1 groups=20 first_slot=T2 last_slot=T21 elapsed_cycles=22 elements_per_cycle=0.909091
+lanes=2 groups=10 first_slot=T2 last_slot=T11 elapsed_cycles=12 elements_per_cycle=1.666667
+lanes=4 groups=5 first_slot=T2 last_slot=T6 elapsed_cycles=7 elements_per_cycle=2.857143
+Validation: all lane widths produce the same 20 sums.
+</code></pre>
+<p>The phrase “64-bit machine” is therefore insufficient evidence for either one FP64 addition per cycle or one 64-bit load per cycle. Address size, architectural register width, instruction-set vector width, execution throughput and memory bandwidth are separate properties. Conversely, a machine can support a 256-bit vector instruction yet internally execute it over narrower resources. To convert the lecture model into a hardware prediction, one would need the actual instruction mix, latency and throughput tables, cache behavior and memory constraints for that machine.</p>
+<p>The practical lesson transfers directly to the triad. Enough arithmetic lanes do not guarantee enough bytes per cycle. A pipeline model that assumes unlimited operand supply predicts an execution limit; adding a bandwidth limit can change the bottleneck. Short vectors can be dominated by startup and drain costs even when their large-vector steady throughput is excellent. Batch size is part of a performance claim, not incidental experimental detail.</p>
+
+<h2 id="simt">SIMD and SIMT expose different software state <a class="timestamp" href="https://www.youtube.com/watch?v=rS1_t2xKA5Y&amp;t=690s">W7L1 11:30</a></h2>
+<p>The recording next contrasts a packed vector with several scalar execution units, and then names SIMD and SIMT. <em>Single instruction, multiple data</em>, or SIMD, describes one operation applied across several data lanes. A vector addition expresses several element additions in one vector instruction. The programmer or compiler organizes values into vectors, handles bounds and deals with lanes that should be inactive. It does not follow that every SIMD architecture uses the same register width or predication rules.</p>
+<p><em>Single instruction, multiple threads</em>, or SIMT, exposes separate logical threads, each with its own registers and program state. CUDA lets each thread describe a scalar-looking operation on its index. Hardware groups threads into warps, which contain 32 threads on the queried device, and issues instructions for participating threads in those groups. The software state belongs to individual threads; issue and execution resources are shared. This is why a SIMT source program can be easier to express with scalar variables while its execution still requires reasoning about grouped instruction issue. <a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html">PTX ISA §2, programming model</a>.</p>
+<p>The difference is not that SIMD has parallel data while SIMT has completely independent instruction streams every cycle. Threads in one warp can take different control paths, but executing those paths can reduce the number of lanes doing useful work at an instant. Nor does SIMT imply that every thread owns a physical CUDA core for its lifetime. The number of logical threads may exceed the number of arithmetic pipelines by orders of magnitude; schedulers select ready warp instructions as resources and dependencies permit.</p>
+<p>Consider one hundred independent sums. A source loop can assign one sum to each of one hundred logical threads. Alternatively, fifty threads can each perform two sums through a loop. Both choices describe ownership of work, while vector width or warp issue width describes how instructions are executed. The second program does not automatically use half as many physical arithmetic lanes, and the first does not reserve one hundred processors. Register use, instruction count, memory access pattern and available ready work can change performance even when the mathematical sum set is identical.</p>
+<p>Multiple threads also help tolerate latency. If one warp waits for an operand, a scheduler may issue another ready warp. This overlaps independent work rather than reducing the latency of the waiting memory operation itself. Similarly, several independent accumulators inside one thread can expose ready arithmetic while another accumulator awaits a dependency. These are two different sources of concurrency, both explored by the final experiment. More of either can increase register demand or other resource pressure, so “more threads” is not a proof of faster execution.</p>
+<p>SIMD and SIMT are therefore useful descriptions at different layers, not mutually exclusive physical circuit categories. A GPU's warp instruction acts across many thread lanes, while its programming model preserves individual thread state. A CPU compiler can vectorize iterations that a programmer wrote as scalar loops. Performance reasoning becomes clearer by explicitly naming the layer: source work ownership, machine instruction, scheduler issue group, arithmetic pipeline, or memory transaction.</p>
+
+<h2 id="mapping">Blocks describe cooperation; SMs supply execution resources <a class="timestamp" href="https://www.youtube.com/watch?v=rS1_t2xKA5Y&amp;t=1148s">W7L1 19:08</a></h2>
+<p>A CUDA <em>grid</em> is the collection of blocks launched for one kernel invocation. A <em>block</em> is a group of threads that can cooperate through block-scoped synchronization and shared memory. Shared memory here means the GPU's explicitly managed on-chip memory available to a block, not the MPI shared-memory transport of earlier chapters. An SM is hardware; a block is a software scheduling and cooperation unit. A grid is not a hardware chip component, even though the recording usefully sketches grid-to-GPU, block-to-SM and thread-to-arithmetic-unit relationships.</p>
+<p>Blocks are assigned to SMs for execution. An SM may host several resident blocks when thread, warp, register and shared-memory limits permit. It may also have fewer resident blocks than a simple thread-count quotient suggests because a different resource is exhausted. A block that cannot yet be admitted waits while others execute. Its logical indices do not encode the SM chosen for it. NVIDIA's GPU performance background explains this scheduling and the need for enough work to occupy resources. <a href="https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html">GPU performance background §3</a>.</p>
+<p>The lecture's example of 160 blocks on an 80-SM GPU gives an arithmetic average of two blocks per SM if all assignments are counted evenly. It does not establish that every SM holds two simultaneously, that the distribution is uniform at every instant, or that each block occupies a fixed fraction of an SM. Different block runtimes and resource requirements can produce different residency histories. The local device instead has sixteen enabled SMs; importing the lecture's eighty into a local launch would confuse an example product with the actual device.</p>
+<p>The usual teaching picture places a block on one SM while its threads execute and share block resources. Avoid strengthening that picture into a persistent software identity rule about hardware location. PTX explicitly warns that the diagnostic SM identifier can change following preemption and rescheduling. An algorithm must use logical thread and block indices for ownership, not rely on a sampled physical SM number staying constant. The point is relevant even without using that special register in these examples. <a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html">PTX ISA §10.8, special register %smid</a>.</p>
+<p>All measured kernels below use 256 threads per block, giving eight warps per full block. A launch of sixteen blocks contains 4096 threads, but that count alone does not prove one block lands on every SM, nor prove that all arithmetic pipelines are busy. A launch of 128 blocks supplies eight times as many threads and lets the scheduler draw from more work. This changes the opportunity for latency hiding, not the GPU's enabled SM count or advertised per-cycle arithmetic resources.</p>
+<p>These distinctions prevent three common count errors. A Tensor core is not a CUDA block. A CUDA thread is not one physical scalar processor reserved forever. And a warp's thirty-two thread positions are not automatically thirty-two completed floating-point results per cycle for every instruction type. The supported operation, issue constraints and hardware pipelines determine the throughput of a warp instruction. The lecture's mapping is a starting vocabulary; numerical peak claims still require the operation-specific count developed earlier.</p>
+
+<h2 id="compute">Independent arithmetic exposes a different throughput limit</h2>
+<p>The triad streams data with little work per element. To study scalar arithmetic separately, the final program keeps one or eight FP32 accumulators per thread in registers and performs 4096 FMA updates of each. The recurrence is \(x_{z+1}=1\cdot x_z+2^{-23}\), where \(z\) is the iteration index. Accumulator \(\gamma\), with \(\gamma=0,\ldots,k_c-1\) for \(k_c\) chains, starts at \(1+\gamma/8\). Different accumulators have no data dependencies on one another, while successive updates of one accumulator do. Thus eight chains expose instruction-level parallelism within one thread without claiming that one thread has eight permanently assigned physical arithmetic units.</p>
+<p>The multiplication by one makes a deliberately exact validation case, but ordinary source optimization might remove that multiplication or simplify the loop. The listing therefore uses volatile inline PTX <code>fma.rn.f32</code>, specifying an FP32 FMA with round-to-nearest-even. The read/write operand supplies the previous accumulator and receives its new value. Volatile assembly preserves the stated arithmetic instructions. A native-machine-code inspection of the built executable confirmed scalar <code>FFMA</code> instructions. This is an experiment in ordinary FP32 arithmetic, not a Tensor matrix benchmark. PTX is introduced only for this narrow purpose; readers can use the operation count without writing PTX themselves.</p>
+<p>All intermediate values remain in the interval from one to two. In that interval adjacent FP32 numbers differ by \(2^{-23}\), so every increment is exact. After 4096 updates the expected value is \(1+\gamma/8+2^{-11}\), below two even for the eighth chain. The host checks every stored accumulator against this expression, rejecting any mismatch. This special construction supplies a strong numerical check without using a tolerance that could conceal a missing loop or a missing chain.</p>
+<p>Let \(b\) be the number of blocks, \(u\) the threads per block, \(k_c\) the chains per thread and \(r\) the update count. There are \(buk_c\) output values and \(2buk_cr\) counted FLOPs. Initialization, loop control and storing outputs take time but are excluded from that arithmetic count. The reported rate is therefore the rate of the selected FMA work over the full timed kernel, not a count of all instructions. The four cases cross one/eight chains with one/eight blocks per enabled SM as a grid-size construction. Actual placement remains the scheduler's decision.</p>
+<pre><code class="language-cuda" data-file="fma_rates.cu" data-build="nvcc -arch=native -O2 -std=c++17 fma_rates.cu -o fma_rates" data-run="timeout 20 ./fma_rates" data-check="returncode" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;algorithm&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+
+#define CUDA(call) do { cudaError_t err = (call); if (err != cudaSuccess) { \
+    std::fprintf(stderr, &quot;%s: %s\n&quot;, #call, cudaGetErrorString(err)); \
+    std::exit(1); } } while (0)
+
+template&lt;int chains&gt;
+__global__ void fma_loop(float *out, int iterations, float scale, float increment)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    float value[chains];
+    #pragma unroll
+    for (int c = 0; c &lt; chains; ++c) value[c] = 1.0f + c * 0.125f;
+    for (int i = 0; i &lt; iterations; ++i) {
+        #pragma unroll
+        for (int c = 0; c &lt; chains; ++c)
+            asm volatile(&quot;fma.rn.f32 %0, %0, %1, %2;&quot;
+                         : &quot;+f&quot;(value[c]) : &quot;f&quot;(scale), &quot;f&quot;(increment));
+    }
+    #pragma unroll
+    for (int c = 0; c &lt; chains; ++c) out[tid * chains + c] = value[c];
+}
+
+template&lt;int chains&gt;
+static void measure(int blocks)
+{
+    constexpr int threads = 256, iterations = 4096, repeats = 8, trials = 7;
+    size_t count = (size_t)blocks * threads * chains;
+    float *out;
+    CUDA(cudaMalloc(&amp;out, count * sizeof(float)));
+    auto launch = [&amp;]() {
+        fma_loop&lt;chains&gt;&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(out, iterations, 1.0f, 0x1p-23f);
+        CUDA(cudaGetLastError());
+    };
+    for (int warm = 0; warm &lt; 3; ++warm) launch();
+    CUDA(cudaDeviceSynchronize());
+    cudaEvent_t start, stop;
+    CUDA(cudaEventCreate(&amp;start)); CUDA(cudaEventCreate(&amp;stop));
+    float elapsed[trials];
+    for (int t = 0; t &lt; trials; ++t) {
+        CUDA(cudaEventRecord(start));
+        for (int r = 0; r &lt; repeats; ++r) launch();
+        CUDA(cudaEventRecord(stop)); CUDA(cudaEventSynchronize(stop));
+        CUDA(cudaEventElapsedTime(&amp;elapsed[t], start, stop));
+        elapsed[t] /= repeats;
+    }
+    std::sort(elapsed, elapsed + trials);
+    std::vector&lt;float&gt; result(count);
+    CUDA(cudaMemcpy(result.data(), out, count * sizeof(float), cudaMemcpyDeviceToHost));
+    for (size_t i = 0; i &lt; count; ++i) {
+        float expected = 1.0f + (i % chains) * 0.125f + iterations * 0x1p-23f;
+        if (result[i] != expected) {
+            std::fprintf(stderr, &quot;FMA recurrence mismatch at %zu\n&quot;, i); std::exit(2);
+        }
+    }
+    double operations = 2.0 * count * iterations;
+    std::printf(&quot;blocks=%d chains=%d min_us=%.3f median_us=%.3f GFLOPs=%.2f checked=%zu\n&quot;,
+                blocks, chains, elapsed[0]*1000, elapsed[trials/2]*1000,
+                operations/(elapsed[0]*1e6), count);
+    CUDA(cudaEventDestroy(start)); CUDA(cudaEventDestroy(stop)); CUDA(cudaFree(out));
+}
+
+int main()
+{
+    CUDA(cudaSetDevice(0));
+    int sms;
+    CUDA(cudaDeviceGetAttribute(&amp;sms, cudaDevAttrMultiProcessorCount, 0));
+    for (int multiple : {1, 8}) {
+        measure&lt;1&gt;(sms * multiple);
+        measure&lt;8&gt;(sms * multiple);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">blocks=16 chains=1 min_us=14.976 median_us=15.360 GFLOPs=2240.55 checked=4096
+blocks=16 chains=8 min_us=60.516 median_us=60.672 GFLOPs=4435.78 checked=32768
+blocks=128 chains=1 min_us=58.364 median_us=58.368 GFLOPs=4599.33 checked=32768
+blocks=128 chains=8 min_us=424.172 median_us=424.704 GFLOPs=5062.77 checked=262144
+</code></pre>
+<p>The timing protocol is again three warmups, seven trials and eight launches per trial, with outputs copied and checked afterward. Device allocation for the largest case is only 1 MiB. In capture four, the sixteen-block, one-chain case reaches 2240.55 GFLOP/s; eight chains reach 4435.78. With 128 blocks, one chain reaches 4599.33 and eight reach 5062.77. Compare rates rather than raw kernel times: eight chains perform eight times as much selected work per thread. A longer elapsed time can accompany a higher operations-per-second rate.</p>
+<p>The four-capture ranges are 1669.71–2240.55, 4424.37–4435.78, 4588.95–4599.96 and 5062.77–5067.11 GFLOP/s respectively. The lightly populated dependent case varies substantially more than the large eight-chain case. These observations support a bounded conclusion: in this program, supplying more independent work improves achieved FMA throughput. They do not uniquely identify scheduler stalls, register occupancy or clock changes without additional counters. The best displayed case is approximately 82.4% of the 6.144 TFLOP/s configuration model, whose clock is reported rather than sampled during execution.</p>
+<p>A useful engineering model combines arithmetic and data delivery. If a compatible arithmetic limit is \(P_0\), the available bandwidth at a stated interface is \(B_0\), and a kernel has intensity \(I_0\) measured in operations per byte crossing that same interface, then an idealized bound is</p>
+<div class="equation">\[P\le\min(P_0,I_0B_0),\qquad I_{\mathrm{ridge}}=P_0/B_0.\tag{18.4}\]</div>
+<p>In equation (18.4), the crossover intensity \(I_{\mathrm{ridge}}\) is the amount of work per byte needed for arithmetic rather than bandwidth to become the smaller limit. NVIDIA's performance background develops this arithmetic-versus-memory reasoning. Dependencies, inadequate parallelism and instruction overhead can keep execution below both idealized limits. The inequality assumes that the work and byte definitions match the chosen limits; TF32 Tensor work and scalar FP64 work cannot share one interchangeable arithmetic ceiling. <a href="https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html">GPU performance background §4</a>.</p>
+<p>Using about 5.06 TFLOP/s as an empirical scalar-FMA reference and 180 GB/s as an empirical requested-byte streaming reference gives an illustrative crossover near 28 FLOP/byte. This combines two different microbenchmarks and is not a measured physical roofline with hardware-counter traffic. Nevertheless it explains scale: the triad's one sixth FLOP/byte is far below 28, and multiplying by 180 GB/s gives 30 GFLOP/s. Replacing ordinary arithmetic by a faster matrix unit alone cannot create the missing input reuse or make an arbitrary elementwise triad into a matrix multiplication.</p>
+<p>The same reasoning sharpens a stencil optimization plan. A naive FP64 five-point Jacobi update reads four neighbours and writes one output: 40 requested bytes and three additions plus one multiplication, or four FLOPs, giving 0.1 FLOP/byte. Neighbour reuse can make DRAM traffic smaller than that source-level count. A tiled implementation should therefore distinguish its counted requests from bytes at DRAM before predicting a speedup. Merely quoting the GPU's FP32 Tensor peak would mix both precision and operation type with the stencil. The right question is how much useful work each byte supports and which measured path supplies that byte.</p>
+
+<h2 id="limits">Claims, evidence and limits</h2>
+<table><thead><tr><th>Claim</th><th>Evidence</th><th>Boundary of the claim</th></tr></thead><tbody>
+<tr><td>An FMA counts two FLOPs; a dense matrix accumulation has \(2mnk\) work.</td><td>Explicit scalar count, checked arithmetic and NVIDIA Tensor descriptions.</td><td>Instruction counts and sparse-equivalent rates are different quantities.</td></tr>
+<tr><td>The dated V100 and A100 models reproduce rounded advertised Tensor rates.</td><td>Viewed lecture frames, actual whitepapers and deterministic products.</td><td>No Tensor kernel was benchmarked; enabled product counts differ from full-chip diagrams.</td></tr>
+<tr><td>Bandwidth is interface width times effective bit rate divided by eight.</td><td>Dimensional derivation, lecture examples and dated GA10x product table.</td><td>Clock representations and PAM4 factors must be identified before use; local memory peak is unresolved here.</td></tr>
+<tr><td>The local large triad achieves about 180 GB/s of requested-byte throughput.</td><td>Four serialized event-timed captures, every output checked.</td><td>Device-resident arrays, not a transfer-link measurement or a DRAM-counter result.</td></tr>
+<tr><td>Vector width changes ideal steady throughput and finite-run duration.</td><td>Three-stage derivation and a simulation checking all twenty sums.</td><td>Ideal operand supply and full-width stages; no measured CPU SIMD cycle claim.</td></tr>
+<tr><td>Additional independent work improves this FP32 FMA kernel's rate.</td><td>Four configurations, four captures, exact recurrence checks and native FFMA inspection.</td><td>No unique stall diagnosis or universal peak assertion; clocks and power were uncontrolled.</td></tr>
+<tr><td>Logical threads and blocks do not fix physical processor identities.</td><td>CUDA/PTX programming model and SM-identifier warning.</td><td>The chapter does not derive every residency limit or scheduling policy.</td></tr>
+</tbody></table>
+<p>The GTX 1660's original board datasheet was not retrieved, so its row is treated as the lecture's consistent 192-bit, approximately 8 Gb/s model rather than an independently verified board specification. Corrections to the matrix-operation count, the HBM width comparison and the RTX 2080 signaling category are grounded in the displayed teaching examples and the cited primary specifications.</p>
+<p>The measurements used CUDA 13.3.1 toolkit metadata, nvcc 13.3.73 and the runtime/driver versions printed by the query on an RTX 3050 Laptop GPU. CUDA documentation retrieved for interpretation was current online documentation, including pages served as 13.4, rather than an assertion that the installed toolkit had that version. Native compilation and installed-header inspection establish the executable API used here. Raw commands, source hashes, stdout, stderr and UTC plus monotonic endpoints were retained privately. No private source material is required to run the public listings.</p>
+<p>The programs establish correctness on their bounded deterministic cases. They do not certify all floating-point inputs, every CUDA device, memory reliability or sustained performance under a different power limit. In particular, exact validation of these binary-friendly values must not be generalized to equality testing for an arbitrary numerical algorithm. The separate models, checks and measurements each answer the narrower question stated beside them.</p>
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive and audit).</strong> For matrices \(A\in\mathbb R^{m\times k}\), \(B\in\mathbb R^{k\times n}\) and \(C\in\mathbb R^{m\times n}\), count work for \(AB\) and for \(AB+C\). Explain the 112-versus-128 distinction for 4-by-4 matrices. Then reproduce the V100 Tensor model using eighty enabled SMs, eight Tensor cores per SM, sixty-four FMA-equivalent results per core per cycle and 1.53 GHz. What would go wrong if eighty-four physical-design SMs were substituted?</p>
+<details><summary>Solution</summary>
+<p>There are \(mn\) output entries. A length-\(k\) dot product has \(k\) multiplications and \(k-1\) additions if started from its first product, so \(AB\) has \(mn(2k-1)\) scalar operations. Adding an existing \(C\) entry introduces one more addition, giving \(2mnk\). Equivalently, accumulate \(k\) products into each existing entry using \(mnk\) FMAs, conventionally two FLOPs each. For \(m=n=k=4\), the first count is \(16\times7=112\), the second \(16\times8=128\). Hardware may execute a matrix multiply by accumulating into zero, so its conventional advertised FMA count can still use 128; the mathematical expression and counting convention must be stated.</p>
+<p>The dated enabled V100 model gives \(80\times8=640\) Tensor cores, \(640\times64=40960\) scalar FMA-equivalent results per cycle, and \(40960\times2\times1.53\times10^9=125.3376\times10^{12}\) FLOP/s. This rounds to 125 TFLOP/s. Substituting eighty-four multiplies the model by \(84/80=1.05\), producing 131.60448 TFLOP/s for resources the stated product does not enable. The error is a product-configuration error, not a subtle rounding discrepancy. The physical diagram and enabled-device specification answer different questions.</p>
+</details>
+<p><strong>Exercise 2 (find the signaling error).</strong> An engineer reads “256-bit interface, effective 14 Gb/s per pin” and computes \(256\times14\times2/8=896\) GB/s because the memory is double-data-rate. Correct the result and express it in GiB/s. A second design has a 320-bit interface at effective 19 Gb/s and uses PAM4. Should another factor two be applied? Finally, explain why doubling the storage capacity of every package need not change either answer.</p>
+<details><summary>Solution</summary>
+<p>Effective bit rate already states transferred bits per second per pin. Therefore the first payload model is \(256\times14\times10^9/8=448\times10^9\) bytes/s, or \(448\times10^9/2^{30}\approx417.233\) GiB/s. The engineer counted the transfer-edge factor twice. If the input had instead been a clearly defined underlying clock, a signaling conversion would be needed, but it is not needed for an already effective bit rate.</p>
+<p>The second model is \(320\times19\times10^9/8=760\times10^9\) bytes/s, approximately 707.805 GiB/s. PAM4 conveys two bits per symbol, but those bits are already represented in 19 Gb/s. Multiplying again would incorrectly produce 1520 GB/s. For comparison, a hypothetical 9.5-gigasymbol/s pin carrying two bits per symbol would first give 19 Gb/s; only then would width and division by eight be applied. Capacity depends on how many bits are stored, while the bandwidth model depends on how many data pins transfer how many bits per second. Denser packages can double capacity while preserving both interface width and signaling rate. No bandwidth increase follows from capacity alone.</p>
+</details>
+<p><strong>Exercise 3 (precision counterexample).</strong> TF32 retains FP32's exponent range but reduces the input significand. Use an idealized round-to-nearest TF32 input conversion with ten stored fraction bits. Consider the two-term dot product \((1+2^{-12})\cdot1+(-1)\cdot1\). Compute its exact result, its result after the two nontrivial inputs are converted to TF32, and the relative error. Why can FP32 accumulation fail to restore the lost value? State the boundary of the example.</p>
+<details><summary>Solution</summary>
+<p>In exact arithmetic the terms cancel except for \(2^{-12}\), so the result is \(1/4096\). FP32 can represent all the stated inputs and this difference exactly. Near one, TF32 spacing with ten fraction bits is \(2^{-10}\). The perturbation \(2^{-12}\) is one quarter of that spacing, so nearest rounding maps \(1+2^{-12}\) to one; negative one and both multiplier ones are exactly representable. The converted dot product is consequently \(1-1=0\). Relative error against the nonzero exact answer is \(|0-2^{-12}|/2^{-12}=1\), or 100%.</p>
+<p>A wider accumulator receives products of the already rounded operands. It cannot infer information removed before multiplication. This is a counterexample to treating exponent range or FP32 accumulation as proof of FP32-input accuracy. It is not a claim that every TF32 computation has this error, nor a specification of every library's conversion, fallback or correction mode. A real application must identify the chosen math mode and validate error on its conditioning and data. The higher Tensor throughput is useful only if that numerical contract is acceptable.</p>
+</details>
+<p><strong>Exercise 4 (pipeline timing).</strong> In the three-stage model, nineteen additions are processed with four lanes. Give the number of groups, first-result and final-result cycle labels, total elapsed cycles, average useful elements per cycle and steady full-group throughput. Compare with scalar execution of the same nineteen additions. Explain why assuming a one-cycle first-result latency produces the wrong answer.</p>
+<details><summary>Solution</summary>
+<p>There are \(\lceil19/4\rceil=5\) groups, the last with three useful lanes. The first group starts in \(T_0\) and finishes at the end of \(T_2\), after three elapsed cycles. The fifth starts in \(T_4\) and finishes at the end of \(T_6\), giving seven elapsed cycles. Average useful throughput is \(19/7\approx2.714286\) elements/cycle. For a continuing stream of full groups, ideal throughput is four elements/cycle, a different quantity from the finite useful rate.</p>
+<p>Scalar execution uses nineteen groups and \(19+3-1=21\) elapsed cycles, ending at \(T_{20}\). The finite speedup is \(21/7=3\), below four because of startup/drain costs and the unfilled lane. A one-cycle initiation interval means a new group can start each cycle; it does not mean the first group finishes after one cycle. Omitting the two fill/drain cycles would predict five cycles for the vector case. Even seven is conditional: enough load, arithmetic and store throughput must exist, with no hazards or stalls. The timing model alone does not establish those hardware resources.</p>
+</details>
+<p><strong>Exercise 5 (choose a useful optimization).</strong> A device-resident FP32 triad reads two arrays and writes one, performing two FLOPs per element. Suppose an empirical streaming reference is 180 GB/s and a scalar arithmetic reference is 5.06 TFLOP/s. Predict the intensity-limited rate under the chapter's accounting. Evaluate three proposals: merely doubling arithmetic peak, halving the requested bytes without changing useful work, and doubling the host-link bandwidth. Which claims need extra evidence?</p>
+<details><summary>Solution</summary>
+<p>Requested traffic is twelve bytes per element, so intensity is \(2/12=1/6\) FLOP/byte. The illustrative memory-side rate is \(180/6=30\) GFLOP/s, far below 5060 GFLOP/s. Doubling the arithmetic reference to 10.12 TFLOP/s leaves the smaller limit at 30 GFLOP/s in this model. It cannot by itself speed an already bandwidth-limited triad. The crossover intensity based on the original references is \(5060/180\approx28.111\) FLOP/byte.</p>
+<p>Halving requested bytes at equal useful work doubles intensity to one third FLOP/byte, producing a 60 GFLOP/s model rate if the applicable bandwidth remains 180 GB/s. That is a conditional opportunity, not a proof that bytes can be removed: inputs may be mathematically required, and fusion or reuse must preserve the intended result. Changed transaction patterns, caches and instructions can change the achieved bandwidth. Doubling a CPU-to-device link has no effect on the stated timed interval, because the arrays are already on the device. It could improve an end-to-end workflow that includes transfers, which requires a separately measured interval. Finally, the two references are microbenchmark rates with logical byte accounting, not independently established physical ceilings for every kernel.</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement audit).</strong> Audit the largest FMA case: 128 blocks, 256 threads per block, eight chains per thread and 4096 updates per chain. Derive the output count and FLOP count, reconstruct its approximately 5062.77 GFLOP/s rate from 424.172 microseconds, and prove the exact expected output. Describe a bounded test plan that would detect missing work and distinguish correctness from timing claims.</p>
+<details><summary>Solution</summary>
+<p>The number of logical threads is \(128\times256=32768\). Each stores eight values, so output count is 262144, not 262144 threads. There are \(262144\times4096=1073741824\) FMAs, conventionally 2147483648 FLOPs. Dividing by \(424.172\times10^{-6}\) seconds and then \(10^9\) yields approximately 5062.77 GFLOP/s; the final digits reflect printed-time rounding. One must not multiply the count by eight launches again when the printed elapsed time has already been divided by eight.</p>
+<p>Chain \(\gamma\) starts at \(1+\gamma/8\). Each FMA with multiplicand one adds exactly \(2^{-23}\), because every intermediate value is representable at the spacing in this interval. After 4096 updates the increment is \(2^{12}2^{-23}=2^{-11}\). The largest result is \(1+7/8+2^{-11}\), still below two, which closes the representability argument. Checking every output against \(1+\gamma/8+2^{-11}\) detects a missing chain, wrong initialization or missing updates; checking only finiteness or a single checksum would be weaker. The supplied implementation also checks all CUDA calls and launch errors, and synchronizes before reading results.</p>
+<p>A bounded plan runs both chain counts with both grid sizes, performs the exact full-output check each time, verifies native FFMA instructions, and retains build flags, source hashes, commands, device query, stdout, stderr and timing endpoints. It then repeats timing serially with warmups and the same event protocol. The actual four configurations and four captures passed those payload checks. That establishes the stated cases; repeat ranges characterize short-run variability. It does not establish a stable peak, explain every stall, or make the 82.4% model ratio an architecture-independent utilization percentage.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources</h2>
+<ol>
+<li>NPTEL, IIT Bombay, <a href="https://www.youtube.com/watch?v=xjd58BMpLpw">W6L6: Understanding FLOPS and Memory Bandwidth Calculations for NVIDIA GPUs</a>, recording 38. Lecture spine: Tensor arithmetic, GDDR/HBM organization, signaling and bandwidth examples.</li>
+<li>NPTEL, IIT Bombay, <a href="https://www.youtube.com/watch?v=rS1_t2xKA5Y">W7L1: SIMD vs. SIMT: Thread Mapping, Scheduling, and Pipelining in NVIDIA GPUs</a>, recording 39. Lecture spine: three-stage pipeline, scalar/vector width, SIMD/SIMT and software-to-hardware mapping.</li>
+<li>NVIDIA, <a href="https://images.nvidia.com/content/volta-architecture/pdf/volta-architecture-whitepaper.pdf">Tesla V100 GPU Architecture whitepaper</a>, 2017, printed pp.8–10 and 14–16. Full versus enabled counts, Tensor multiply-accumulate and sixty-four FMA-equivalent results per Tensor core per cycle. Actual downloaded PDF text was checked.</li>
+<li>NVIDIA, <a href="https://images.nvidia.com/aem-dam/en-zz/Solutions/data-center/nvidia-ampere-architecture-whitepaper.pdf">A100 Tensor Core GPU Architecture whitepaper</a>, 2020, printed pp.16, 19 and 28. Enabled 108-SM/432-Tensor-core configuration, 40 GB memory specification, FP64 Tensor rate and precision modes. Actual downloaded PDF text was checked.</li>
+<li>NVIDIA, <a href="https://images.nvidia.com/aem-dam/en-zz/Solutions/geforce/ampere/pdf/NVIDIA-ampere-GA102-GPU-Architecture-Whitepaper-V1.pdf">Ampere GA102 GPU Architecture whitepaper</a>, actual retrieved version 2.1 despite the URL's V1 filename, printed pp.13–14 and SM architecture discussion. RTX 2080 GDDR6/NRZ, original RTX 3080 GDDR6X/PAM4, interface widths and effective rates; GA10x FP32 paths. Actual downloaded PDF text was checked.</li>
+<li>NVIDIA, <a href="https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html">GPU Performance Background</a>, §§2–4. Per-SM multiply-add throughput, grouped execution, resource scheduling and arithmetic intensity.</li>
+<li>NVIDIA, <a href="https://docs.nvidia.com/cuda/ampere-tuning-guide/index.html">Ampere GPU Architecture Tuning Guide</a>, §§1.4.1.5–1.4.1.6. Tensor formats and compute-capability-specific scalar FP32 throughput.</li>
+<li>NVIDIA, <a href="https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html">CUDA C++ Best Practices Guide</a>, §§9.1–9.2. CUDA-event timing, theoretical/effective bandwidth and the difference between requested and actual traffic.</li>
+<li>NVIDIA, <a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html">Parallel Thread Execution ISA</a>, programming model, floating-point rounding and §10.8. Thread groups, native FMA semantics and the diagnostic SM-identifier limitation.</li>
+</ol>
+<p>Primary references were opened on 28 October 2026 UTC. Locally installed CUDA 13.3 headers and toolkit version metadata were also read to check the executable property-query API. Web documentation is versioned separately from that installation. Product-rate examples refer to the dated configurations named above, and the chapter does not assert that those boards are current purchase recommendations.</p>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-17-gpu-stack-and-architectures.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-19-thread-hierarchy-warp-scheduling.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

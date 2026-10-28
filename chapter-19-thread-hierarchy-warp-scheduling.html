@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="12543f6289c2026f70a73b9082cd0ead2c92eab143c8f5d0675c53bd48c0baef"><title>The thread hierarchy: index maps, warps, scheduling and occupancy · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>The thread hierarchy: index maps, warps, scheduling and occupancy</h1>
+<p class="lead">A Jacobi sweep on a 37×37 interior has 1,369 independent output cells. A 16×16 thread block needs a 3×3 grid: 2,304 logical invocations, of which 935 must avoid the array. An 8×8 block needs 25 blocks and only 231 excess invocations. Neither arithmetic establishes the faster launch. First prove that every cell has exactly one owner; then distinguish launched work, resident work and instructions ready to issue. An indexing error corrupts the solution, while an occupancy percentage alone cannot predict its running time.</p>
+<p class="source-note">Grounded in <a href="https://www.youtube.com/watch?v=BY_4cdGuFsg">W7L2, Understanding 1D, 2D, and 3D Grid Arrangements, Part 1</a>, <a href="https://www.youtube.com/watch?v=e-6zAbvZ5BI">W7L3, Part 2</a>, <a href="https://www.youtube.com/watch?v=HT20KQf0BQY">W7L4, Thread Block Mapping and Warp Scheduling</a>, and <a href="https://www.youtube.com/watch?v=cNV8UdrEPQo">W7L5, Warp Scheduling and Latency Management</a>, presented by Vamshi Krishna, C-DAC Pune, in NPTEL's <em>High Performance Scientific Computing</em>. <strong>Lecture material:</strong> grid/block coordinates, built-in dimensions and indices, one-dimensional and general global-thread enumeration, block-to-SM mapping, warp grouping, instruction dispatch, illustrative pipelines, latency arithmetic and block granularity. <strong>Research extensions:</strong> CUDA 13.0 programming, tuning, runtime and best-practices documents specify indexing and synchronization contracts, architecture limits, compiled-function resources and occupancy calculations; Vasily Volkov's 2010 presentation separates latency, throughput and instruction-level parallelism. <strong>Original teaching constructions:</strong> index-bijection proofs, the distinction between block-major and array-major order, nonmultiple-domain checks, a masked warp exchange, bounded scheduling simulation, actual-device occupancy queries and six worked exercises.</p>
+
+<h2 id="model">The objects: logical work, addresses and finite execution capacity</h2>
+<p>A kernel launch creates a grid of thread blocks. A thread is one logical invocation of the kernel, with its own indices and program state. A block is a cooperating group of invocations with block-scoped storage and synchronization. A grid is the collection of blocks in that launch. These are software objects. A streaming multiprocessor, abbreviated SM, is a hardware execution resource on which blocks can reside. The number of threads named by a launch can greatly exceed the number resident at one instant.</p>
+<p>Write the grid dimensions as \(G=(G_x,G_y,G_z)\) and block dimensions as \(B=(B_x,B_y,B_z)\), all positive integers within the device's supported limits. A block coordinate is \(b=(b_x,b_y,b_z)\), with \(0\le b_a\lt G_a\) on each axis a. Its local thread coordinate is \(t=(t_x,t_y,t_z)\), with \(0\le t_a\lt B_a\). Unused axes have extent one and coordinate zero. Extent counts objects; coordinate locates one object. Confusing them changes the stride of an index map.</p>
+<p>The block contains \(P_b=B_xB_yB_z\) threads and the grid contains \(P_g=G_xG_yG_z\) blocks, so the launch creates \(P_bP_g\) invocations. Here P_b and P_g are counts, not a performance rate. A logical domain has extents \(n=(n_x,n_y,n_z)\), containing \(n_xn_yn_z\) data elements. Typically the launch rounds each extent upward to whole blocks. Threads outside the logical domain still exist; their kernel path must prevent invalid accesses.</p>
+<p>We use two index questions throughout. The first asks for a unique serial identifier of every launched invocation. The second asks which logical array element that invocation owns. A bijection is a one-to-one, onto map between two sets. Proving a bijection gives both uniqueness and coverage. A guard then restricts the launched set to the valid logical domain. The memory layout is a separate map from logical coordinates to addresses.</p>
+<p>For the running Jacobi case, N=37 is the number of interior points along each side. Arrays u and unew include a one-cell boundary, so each has (N+2)×(N+2) doubles in row-major order. Array index i is the row, j the column, and the address offset is \(i(N+2)+j\). The interior is \(1\le i,j\le N\). A sweep reads four neighbors of u and writes their average into unew. Every output has one owner, and no sweep overwrites the input field it is reading.</p>
+<p>A warp is a hardware execution grouping of 32 threads in the NVIDIA architectures considered here. Residency means that a block's execution state and required resources are allocated on an SM. Readiness means an instruction's operands and required issue/execution resources permit progress. A resident warp need not be ready, and a launched block need not yet be resident. Occupancy quantifies resident warp capacity; it is neither a count of valid array elements nor a measurement of useful arithmetic throughput.</p>
+
+<h2 id="dimensions">Dimensions count; indices locate <a class="timestamp" href="https://www.youtube.com/watch?v=BY_4cdGuFsg&amp;t=491s">W7L2 8:11</a></h2>
+<p>CUDA exposes four related built-in vectors. gridDim gives the number of blocks on each axis. blockIdx gives the current block's coordinates. blockDim gives the number of threads along each block axis. threadIdx gives the current invocation's coordinates inside that block. Thus blockIdx.x repeats across blocks with different y or z coordinates, and threadIdx.x repeats across every block. None of those individual components is a globally unique thread identifier.</p>
+<p>A three-dimensional drawing is not a physical placement map. Adjacent blocks in a diagram need not execute on adjacent hardware, at the same time, or in increasing coordinate order. Likewise, a two-dimensional block describes a useful naming system for a matrix tile; it does not require a rectangular patch of physical arithmetic cores with the same shape. A correct program must preserve its meaning under the permitted scheduling choices.</p>
+<p>The one-dimensional example has three blocks and three threads per block. Written as vectors, G=(3,1,1) and B=(3,1,1), so P_g=3 and P_b=3. Extents of zero would eliminate a dimension's product rather than describe its absence. The default unit extent is what allows the same three-axis formulas to cover one-, two- and three-dimensional arrangements.</p>
+<p>The W7L2 built-in-variable slide repeats threadIdx.y in the line describing the z coordinate; the accompanying explanation corrects that label to threadIdx.z. Its one-dimensional diagram also labels blockDim.x as a y-direction count even though the pictured threads run along x. The formulas use blockDim.x for the x extent. These are notation corrections, not evidence that CUDA switches the meaning of its built-ins.</p>
+<p>The supported dimensions are constraints on a launch, not recommendations that every maximum be used. The product of block extents must fit the maximum threads per block, and each individual extent has an axis-specific limit. Grid dimensions have their own limits. A block with legal individual dimensions can still have an illegal product or request too many registers or shared bytes. The actual-device program later queries the relevant scalar limits and checks each launch operation.</p>
+<p>A useful design order is to choose ownership independently of tuning. State the logical coordinate a thread will handle, prove that no other invocation owns it, establish that all required coordinates appear, and place the bounds check before every affected array access. Only afterward compare shapes and resource usage. This prevents an apparently successful timing run from being used to excuse a missing row, a duplicate update or an overwritten halo.</p>
+<p>For Jacobi, an output thread assigned interior coordinate (i,j) reads u at (i−1,j), (i+1,j), (i,j−1) and (i,j+1). Interior bounds guarantee all four neighbors lie in the allocated boundary-inclusive array. The ownership proof therefore connects directly to memory safety. A guard for the output alone would be insufficient if a different stencil required a wider halo or used additional indirect addresses.</p>
+
+<h2 id="one-d">One dimension: a quotient-and-remainder proof <a class="timestamp" href="https://www.youtube.com/watch?v=BY_4cdGuFsg&amp;t=1406s">W7L2 23:26</a></h2>
+<p>For one-dimensional x-oriented blocks and grid, define the global coordinate \(x=b_xB_x+t_x\). A block contributes a consecutive interval of B_x coordinates. Block zero owns zero through B_x−1; block one owns B_x through 2B_x−1. Using threadIdx.x alone would give each block the same initial interval, duplicating its writes and leaving later elements untouched.</p>
+<p>The map is injective. Suppose \(b_xB_x+t_x=b'_xB_x+t'_x\). Then \((b_x-b'_x)B_x=t'_x-t_x\). The right side has magnitude less than B_x, while the left side is an integer multiple of B_x. Both must be zero, implying equal block and local coordinates. This establishes uniqueness without relying on execution order or on a visual numbering convention.</p>
+<p>The map is onto the launched interval. For any integer \(0\le x\lt G_xB_x\), integer division gives the unique quotient \(b_x=\lfloor x/B_x\rfloor\) and remainder \(t_x=x\bmod B_x\). The quotient is below G_x and the remainder below B_x, so they name a valid invocation. This is the inverse map and completes the bijection.</p>
+<p>The multiplier is B_x, the number of threads per block, rather than G_x, the number of blocks. The lecture's three-by-three illustration happens to use equal values, so its numerical example cannot by itself distinguish those symbols. A counterexample is G_x=3, B_x=4: the wrong formula b_xG_x+t_x maps both (b_x,t_x)=(0,3) and (1,0) to three. A successful check on an equal-dimension example is a weak test of the stride.</p>
+<p>For n_x valid elements, choose \(G_x=\lceil n_x/B_x\rceil\) and execute the array operation only when \(x\lt n_x\). Every valid x is covered by the inverse above, and the guard rejects the padding coordinates. With n_x=37 and B_x=8, G_x=5 creates 40 invocations. Exactly 37 perform the operation; three have no array element to access. The guard does not make those extra invocations disappear from the launch.</p>
+<p>Ceiling division also has a finite-integer boundary. The expression (n+B−1)/B is convenient for bounded positive sizes but can overflow if n is near the integer maximum. The equivalent n/B plus an indicator that n%B is nonzero avoids that addition. Products used in offsets can overflow too; widening after a narrow multiplication has already overflowed is too late. Our examples cast operands to size_t before products and use small fixed sizes whose products are far below their type limits.</p>
+<p>A zero-length domain requires an explicit host decision. The mathematical empty set needs no kernel invocation, whereas a zero grid dimension is not a general-purpose empty-work launch. A reusable driver should return without launching when any domain extent is zero. The examples deliberately use positive extents, making that assumption visible instead of relying on a hidden special case.</p>
+
+<h2 id="enumeration">The general identifier enumerates blocks, then their threads <a class="timestamp" href="https://www.youtube.com/watch?v=e-6zAbvZ5BI&amp;t=406s">W7L3 6:46</a></h2>
+<p>The general lecture formula first flattens the block coordinate, then the local thread coordinate. Use x as the fastest-varying axis and define</p>
+\[
+b_{\rm lin}(b)=b_x+G_x(b_y+G_yb_z),\qquad
+\tau(t)=t_x+B_x(t_y+B_yt_z),\qquad
+s(b,t)=P_bb_{\rm lin}(b)+\tau(t). \tag{19.1}
+\]
+<p>Here b_lin is a serial block number, τ a serial local-thread number, and s the block-major serial identifier of an invocation. “Block-major” means all threads of one block receive a consecutive interval before the next block's interval starts. It says nothing about when those threads actually execute.</p>
+<p>To invert b_lin, take b_x=b_lin mod G_x, divide b_lin by G_x, then take the remainder modulo G_y for b_y and the remaining quotient for b_z. The same procedure with B_x and B_y inverts τ. Finally s divided by P_b gives b_lin as quotient and τ as remainder. Composing these inverse maps proves that s bijects the complete launch onto integers zero through P_bP_g−1. This is a mixed-radix representation: each digit has the range set by its corresponding extent.</p>
+<p>The lecture's G=(4,2,3) example gives b_lin(0,1,1)=0+4(1+2)=12 and b_lin(0,0,1)=8. The plane stride is G_xG_y=8 blocks; the row stride is G_x=4 blocks. For B=(3,2,1), local coordinate (0,1,0) has τ=3, so in serial block b_lin=1 the identifier is 1×6+3=9. The worked explanation explicitly repairs an intermediate value four to three. The final computation follows the same formula, rather than requiring a new rule for each dimensionality.</p>
+<p>A useful boundary follows immediately: s uniquely enumerates invocations, but need not equal the row-major address of the global geometric coordinate. Define \(x=b_xB_x+t_x\), \(y=b_yB_y+t_y\), \(z=b_zB_z+t_z\), and launched extents \(A_a=G_aB_a\). The geometric row-major offset is \(q_A=x+A_x(y+A_yz)\). Both s and q_A are bijections of the launched set, but they order that set differently.</p>
+<p>For G=(3,2,2), B=(4,3,2), each block has 24 threads and A=(12,6,4). The invocation at b=(1,0,0), t=(0,0,0) has s=24 but geometric coordinate (4,0,0), hence q_A=4. The serial block identifier is not a universal array-address formula. Substituting it into a stencil that expects neighboring geometric cells can silently connect the wrong elements even though every written identifier is unique.</p>
+<p>The Python program exhaustively checks both orderings for this 288-invocation launch. Its inputs are the fixed positive extents; it creates no files, changes no device state and checks every identifier for uniqueness and coverage. Its printed unequal-pair count quantifies an ordering difference, not a race or missing work.</p>
+<pre><code class="language-python" data-file="enumeration_model.py" data-run="python3 -B enumeration_model.py">from itertools import product
+G=(3,2,2)
+B=(4,3,2)
+P=B[0]*B[1]*B[2]
+A=tuple(G[k]*B[k] for k in range(3))
+seen_s=set()
+seen_q=set()
+different=0
+for bz,by,bx in product(range(G[2]),range(G[1]),range(G[0])):
+    block=bx+G[0]*(by+G[1]*bz)
+    for tz,ty,tx in product(range(B[2]),range(B[1]),range(B[0])):
+        local=tx+B[0]*(ty+B[1]*tz)
+        s=block*P+local
+        x,y,z=(bx*B[0]+tx,by*B[1]+ty,bz*B[2]+tz)
+        q=x+A[0]*(y+A[1]*z)
+        assert s not in seen_s and q not in seen_q
+        seen_s.add(s);seen_q.add(q)
+        different+=s!=q
+assert seen_s==seen_q==set(range(288))
+print(f"launched IDs: 288 unique; row-major addresses: 288 unique; unequal pairs={different}")
+bx,by,bz,tx,ty,tz=1,0,0,0,0,0
+print("block (1,0,0), local (0,0,0): serial=24 row-major=4")
+# A wrong stride stays hidden if grid width equals block width.
+print("wrong stride example: grid_x=3 block_x=4; (block,thread)=(0,3),(1,0) both map to 3")
+</code></pre>
+<pre><code class="output">launched IDs: 288 unique; row-major addresses: 288 unique; unequal pairs=272
+block (1,0,0), local (0,0,0): serial=24 row-major=4
+wrong stride example: grid_x=3 block_x=4; (block,thread)=(0,3),(1,0) both map to 3
+</code></pre>
+<p>The check strengthens the numerical example but does not replace the inverse proof. It covers one finite launch. The proof establishes the result for all supported positive extents before integer overflow. A test can expose an implementation error in that proof's translation; it cannot establish arbitrary-width arithmetic safety merely because a small set passed.</p>
+
+<h2 id="domains">Map geometric domains and guard their padded boundaries <a class="timestamp" href="https://www.youtube.com/watch?v=e-6zAbvZ5BI&amp;t=1103s">W7L3 18:23</a></h2>
+<p>For a rectangular data domain, apply the one-dimensional quotient-and-remainder construction independently on each axis. Set \(G_a=\lceil n_a/B_a\rceil\) and \(x_a=b_aB_a+t_a\). The Cartesian product of three bijections is a bijection onto the padded rectangular launch domain. Restrict it with all three conditions \(x\lt n_x\), \(y\lt n_y\), \(z\lt n_z\). Every valid coordinate retains its unique preimage, while every padded coordinate fails at least one condition.</p>
+<p>The logical row-major address is \(q_n=x+n_x(y+n_yz)\), using the logical extents n, not the padded extents A. Its inverse is x=q_n mod n_x, y=floor(q_n/n_x) mod n_y, and z=floor(q_n/(n_xn_y)). Thus the guarded ownership map followed by q_n is a bijection onto the allocated logical elements. The proof includes nonmultiple extents; divisibility is a convenience, not a correctness requirement.</p>
+<p>A flattened test q_n&lt;n_xn_yn_z cannot replace coordinate guards. For n_x=13 and y=0, padded coordinate x=13 produces q_n=13, which is a legal flattened index for coordinate (0,1,0). It aliases another cell instead of being rejected. The missing per-axis bound is not repaired by allocating a larger buffer, because the logical update still has a duplicate owner and a missing intended coordinate.</p>
+<p>For Jacobi, let x index columns and y index rows, and set j=x+1, i=y+1 after checking x&lt;N and y&lt;N. Then write unew[i(N+2)+j] from the four neighbors in u. The +1 offset accounts for the halo. The memory row stride remains N+2, even though the interior coordinate width is N and the launch width may be a larger padded multiple. These three widths answer different questions and must remain distinct in the implementation.</p>
+<p>The 16×16 launch for N=37 uses G=(3,3,1), 2,304 invocations and 1,369 valid interior owners. The last block starts at (32,32); only a 5×5 portion is valid there. Checking only x would still allow invalid rows, and checking only the block's origin would allow all 256 threads of that partial block to access the arrays. Bounds belong to individual invocation coordinates.</p>
+<p>The complete CUDA program checks one-, two- and three-dimensional nonmultiple domains. It stores every launched s in a uniquely owned serial slot. For each valid logical element, it increments a hit counter and records the expected block-major owner. Host code independently reconstructs the inverse map, checks exactly one hit, verifies every serial slot and checks sentinels immediately outside the logical arrays. All output is printed by the host in a fixed order; unordered device printf is unnecessary.</p>
+<pre><code class="language-cuda" data-file="index_domains.cu" data-build="nvcc -arch=native -O2 index_domains.cu -o index_domains" data-run="timeout 20 ./index_domains" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+#define CK(call) do {cudaError_t e=(call);if(e!=cudaSuccess){std::fprintf(stderr,"%s: %s\n",#call,cudaGetErrorString(e));std::exit(1);}} while(0)
+
+__global__ void record(unsigned nx,unsigned ny,unsigned nz,unsigned *hits,unsigned *owner,unsigned *serial) {
+    size_t bx=blockIdx.x,by=blockIdx.y,bz=blockIdx.z;
+    size_t tx=threadIdx.x,ty=threadIdx.y,tz=threadIdx.z;
+    size_t block=bx+gridDim.x*(by+(size_t)gridDim.y*bz);
+    size_t local=tx+blockDim.x*(ty+(size_t)blockDim.y*tz);
+    size_t per=(size_t)blockDim.x*blockDim.y*blockDim.z;
+    size_t id=block*per+local;
+    serial[id]=(unsigned)id;
+    size_t x=bx*blockDim.x+tx,y=by*blockDim.y+ty,z=bz*blockDim.z+tz;
+    if(x&lt;nx &amp;&amp; y&lt;ny &amp;&amp; z&lt;nz) {
+        size_t q=x+(size_t)nx*(y+(size_t)ny*z);
+        atomicAdd(&amp;hits[q+1],1u);
+        owner[q+1]=(unsigned)id;
+    }
+}
+static void run(unsigned nx,unsigned ny,unsigned nz,dim3 b){
+    dim3 g((nx+b.x-1)/b.x,(ny+b.y-1)/b.y,(nz+b.z-1)/b.z);
+    size_t n=(size_t)nx*ny*nz,per=(size_t)b.x*b.y*b.z,launched=(size_t)g.x*g.y*g.z*per;
+    std::vector&lt;unsigned&gt;h(n+2,0),o(n+2,0xdeadbeefu),s(launched,0xffffffffu);
+    unsigned *dh,*dout,*ds;CK(cudaMalloc(&amp;dh,h.size()*sizeof(unsigned)));CK(cudaMalloc(&amp;dout,o.size()*sizeof(unsigned)));CK(cudaMalloc(&amp;ds,s.size()*sizeof(unsigned)));
+    CK(cudaMemcpy(dh,h.data(),h.size()*sizeof(unsigned),cudaMemcpyHostToDevice));CK(cudaMemcpy(dout,o.data(),o.size()*sizeof(unsigned),cudaMemcpyHostToDevice));CK(cudaMemcpy(ds,s.data(),s.size()*sizeof(unsigned),cudaMemcpyHostToDevice));
+    record&lt;&lt;&lt;g,b&gt;&gt;&gt;(nx,ny,nz,dh,dout,ds);CK(cudaGetLastError());CK(cudaDeviceSynchronize());
+    CK(cudaMemcpy(h.data(),dh,h.size()*sizeof(unsigned),cudaMemcpyDeviceToHost));CK(cudaMemcpy(o.data(),dout,o.size()*sizeof(unsigned),cudaMemcpyDeviceToHost));CK(cudaMemcpy(s.data(),ds,s.size()*sizeof(unsigned),cudaMemcpyDeviceToHost));
+    if(h.front()!=0||h.back()!=0||o.front()!=0xdeadbeefu||o.back()!=0xdeadbeefu)std::exit(2);
+    for(size_t i=0;i&lt;launched;++i)if(s[i]!=i)std::exit(3);
+    for(unsigned z=0;z&lt;nz;++z)for(unsigned y=0;y&lt;ny;++y)for(unsigned x=0;x&lt;nx;++x){
+        size_t q=x+(size_t)nx*(y+(size_t)ny*z);
+        size_t block=x/b.x+(size_t)g.x*(y/b.y+(size_t)g.y*(z/b.z));
+        size_t local=x%b.x+(size_t)b.x*(y%b.y+(size_t)b.y*(z%b.z));
+        if(h[q+1]!=1||o[q+1]!=block*per+local)std::exit(4);
+    }
+    std::printf("domain=%ux%ux%u block=%ux%ux%u launched=%zu active=%zu guarded=%zu exact\n",nx,ny,nz,b.x,b.y,b.z,launched,n,launched-n);
+    CK(cudaFree(dh));CK(cudaFree(dout));CK(cudaFree(ds));
+}
+int main(){CK(cudaSetDevice(0));run(37,1,1,dim3(8,1,1));run(13,7,1,dim3(4,3,1));run(9,5,3,dim3(4,2,2));return 0;}
+</code></pre>
+<pre><code class="output">domain=37x1x1 block=8x1x1 launched=40 active=37 guarded=3 exact
+domain=13x7x1 block=4x3x1 launched=144 active=91 guarded=53 exact
+domain=9x5x3 block=4x2x2 launched=288 active=135 guarded=153 exact
+</code></pre>
+<p>The guards are therefore exercised, rather than left dormant on divisible examples. Sentinel checks can catch nearby overwrites but are not a general memory-safety proof or a substitute for a sanitizer. In particular, an arbitrary bad address could jump beyond both sentinels. Here the coordinate proof establishes the valid offsets, and the bounded run checks its translation into CUDA and host verification code.</p>
+
+<h2 id="warps">Linear local IDs determine warp membership <a class="timestamp" href="https://www.youtube.com/watch?v=HT20KQf0BQY&amp;t=112s">W7L4 1:52</a></h2>
+<p>Blocks are distributed to SMs with available capacity. Within a block, consecutive linear local IDs τ form warps: warp number \(w=\lfloor\tau/32\rfloor\), lane number \(\ell=\tau\bmod32\). A lane identifies a position inside that warp. The last warp can have fewer than 32 enabled threads when P_b is not divisible by 32. The block therefore consumes \(W_b=\lceil P_b/32\rceil\) warp groups, not P_b/32 rounded downward.</p>
+<p>The mapping follows CUDA's x-fastest local linearization in <a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-programming-guide/index.html#thread-hierarchy">CUDA 13.0 Programming Guide, §5.2</a>. The hierarchy and hardware discussion in §7 distinguish block allocation from warp execution. A block remains the unit of cooperative storage and block barriers; a warp describes a smaller execution group. A warp does not combine the last 16 threads of one block with the first 16 of another to improve packing.</p>
+<p>The W7L4 example with 256 threads per block has eight warps per block. Three such resident blocks give 24 resident warps, conditional on those blocks fitting the SM's resource limits. With 128 threads per block the count is four. These counts describe logical grouping and potential residency. They do not guarantee that all groups issue an instruction in the same clock cycle.</p>
+<p>Multidimensional block rows need not align with warp boundaries. For B=(20,3,1), τ=x+20y. Warp zero contains all twenty threads of row y=0 and the first twelve of row y=1. Warp one starts at (12,1) and ends at (19,2), containing 28 threads. A condition based on row number can therefore select part of a warp. Treating each row as its own warp would give the wrong participants for a warp-level operation.</p>
+<p>The next program writes coordinate, warp and lane records to device memory and checks all sixty records on the host. Its output selects six informative records after the check, including the row and warp boundaries. The result establishes the logical grouping for that launch. It does not recover a physical scheduler assignment, issue order or execution duration.</p>
+<pre><code class="language-cuda" data-file="warp_coordinates.cu" data-build="nvcc -arch=native -O2 warp_coordinates.cu -o warp_coordinates" data-run="timeout 20 ./warp_coordinates" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+#define CK(call) do {cudaError_t e=(call);if(e!=cudaSuccess){std::fprintf(stderr,"%s: %s\n",#call,cudaGetErrorString(e));std::exit(1);}} while(0)
+
+struct Entry{unsigned x,y,z,warp,lane;};
+__global__ void locate(Entry *a){unsigned t=threadIdx.x+blockDim.x*(threadIdx.y+blockDim.y*threadIdx.z);a[t]={threadIdx.x,threadIdx.y,threadIdx.z,t/32,t%32};}
+int main(){CK(cudaSetDevice(0));Entry *d;CK(cudaMalloc(&amp;d,60*sizeof(Entry)));locate&lt;&lt;&lt;1,dim3(20,3)&gt;&gt;&gt;(d);CK(cudaGetLastError());CK(cudaDeviceSynchronize());std::vector&lt;Entry&gt;a(60);CK(cudaMemcpy(a.data(),d,a.size()*sizeof(Entry),cudaMemcpyDeviceToHost));for(unsigned t=0;t&lt;60;++t)if(a[t].x!=t%20||a[t].y!=t/20||a[t].z!=0||a[t].warp!=t/32||a[t].lane!=t%32)std::exit(2);std::puts("block=20x3: warp0 t=0..31; warp1 t=32..59 (28 enabled threads)");for(unsigned t:{0u,19u,20u,31u,32u,59u})std::printf("t=%u coordinate=(%u,%u) warp=%u lane=%u\n",t,a[t].x,a[t].y,a[t].warp,a[t].lane);CK(cudaFree(d));return 0;}
+</code></pre>
+<pre><code class="output">block=20x3: warp0 t=0..31; warp1 t=32..59 (28 enabled threads)
+t=0 coordinate=(0,0) warp=0 lane=0
+t=19 coordinate=(19,0) warp=0 lane=19
+t=20 coordinate=(0,1) warp=0 lane=20
+t=31 coordinate=(11,1) warp=0 lane=31
+t=32 coordinate=(12,1) warp=1 lane=0
+t=59 coordinate=(19,2) warp=1 lane=27
+</code></pre>
+<p>A warp number within a block is also different from a physical warp slot or a scheduler's internal identifier. The program uses τ/32, a stable logical description defined by the launch. It does not read a special hardware register and infer that the same integer identifies one permanent hardware location. This distinction is useful whenever software records ownership for debugging: record the logical IDs needed to reconstruct the work, rather than depending on an unspecified physical placement.</p>
+<p>Warps have enabled lanes because of partial blocks and may have active subsets because of control flow. Neither condition is an error by itself. An invalid-domain thread may simply skip an array update while its neighbors perform it. The correctness question is whether later cooperation names the right participants and establishes the required ordering. A warp's existence alone supplies neither a memory-ordering edge nor a guarantee that all lanes are at the same source statement together.</p>
+
+<h2 id="synchronization">Warp cooperation requires an explicit participant contract</h2>
+<p>This is a research extension needed to use the scheduling picture safely. NVIDIA's <a href="https://docs.nvidia.com/cuda/archive/13.0.0/volta-tuning-guide/index.html#independent-thread-scheduling">CUDA 13.0 Volta Tuning Guide, §1.4.1.2</a>, explains Independent Thread Scheduling and the need to revisit implicit warp-synchronous code. Being in one warp does not make a producer's shared-memory store automatically safe for another thread's unsynchronized read. Such a program needs a defined synchronization operation between the communicating steps.</p>
+<p>A participant mask is a 32-bit set whose bit ℓ names lane ℓ of one warp. A warp synchronization operation with mask M coordinates the named participants and orders the relevant memory exchange. Every nonexited thread named in M must reach the matching operation with the same mask. Passing a mask that names threads which skip the operation is not a harmless request to synchronize whichever lanes happen to arrive.</p>
+<p>The worked exchange uses one 64-thread block and 51 valid data elements. Both warps exist in full: the first has 32 valid elements and the second nineteen. Every lane first calls a ballot with the full-warp mask and its valid predicate. That converged collective constructs the set of valid lanes before the branch. Only named lanes then write their shared slot, synchronize with that mask and read the next participant's slot in a cyclic order.</p>
+<p>For the second warp the valid lanes are zero through eighteen, so their mask is the low nineteen bits set. Counting those bits gives nineteen. Lane eighteen reads lane zero's value; it must not read lane nineteen, whose element is outside the domain. The code's cyclic-neighbor formula deliberately relies on the valid participants being a contiguous prefix. A general sparse participant mask would need a different method for finding the next set bit.</p>
+<p>The shared storage contains sixty-four unsigned integers, one unique write slot per thread. The barrier follows all participating writes and precedes all their reads. No thread overwrites the storage in a later phase, so no second barrier is needed to protect against a subsequent reuse. A repeated producer-consumer loop would require analyzing that next phase as well. Synchronizing only before the read can be insufficient when faster producers can overwrite values still needed by slower consumers.</p>
+<pre><code class="language-cuda" data-file="warp_exchange.cu" data-build="nvcc -arch=native -O2 warp_exchange.cu -o warp_exchange" data-run="timeout 20 ./warp_exchange" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+#define CK(call) do {cudaError_t e=(call);if(e!=cudaSuccess){std::fprintf(stderr,"%s: %s\n",#call,cudaGetErrorString(e));std::exit(1);}} while(0)
+
+__global__ void exchange(unsigned n,unsigned *out){
+    __shared__ unsigned a[64];
+    unsigned t=threadIdx.x,lane=t%32,base=t-lane;
+    bool valid=t&lt;n;
+    unsigned mask=__ballot_sync(0xffffffffu,valid);
+    if(valid){
+        a[t]=t;
+        __syncwarp(mask);
+        unsigned count=__popc(mask);
+        out[t]=a[base+(lane+1)%count];
+    }
+}
+int main(){CK(cudaSetDevice(0));const unsigned n=51;unsigned *d;CK(cudaMalloc(&amp;d,n*sizeof(unsigned)));exchange&lt;&lt;&lt;1,64&gt;&gt;&gt;(n,d);CK(cudaGetLastError());CK(cudaDeviceSynchronize());std::vector&lt;unsigned&gt;a(n);CK(cudaMemcpy(a.data(),d,n*sizeof(unsigned),cudaMemcpyDeviceToHost));unsigned sum=0;for(unsigned t=0;t&lt;n;++t){unsigned base=t-t%32,count=n-base&lt;32?n-base:32,expected=base+(t%32+1)%count;if(a[t]!=expected)std::exit(2);sum+=a[t];}std::printf("participants=32+19; cyclic neighbor exchange exact; checksum=%u\n",sum);CK(cudaFree(d));return 0;}
+</code></pre>
+<pre><code class="output">participants=32+19; cyclic neighbor exchange exact; checksum=1275
+</code></pre>
+<p>The expected result is a permutation of values zero through fifty, with two separate cycles. The checksum 1,275 follows from 50×51/2, but the host checks every neighbor mapping rather than accepting the checksum alone. Two wrong permutations can share a checksum. This run tests a defined synchronization pattern; it never executes an intentionally racy alternative and treats a lucky result as proof.</p>
+<p>A block-wide barrier solves a different scope of cooperation. If two warps exchange shared data, synchronizing each warp separately does not connect their phases. All required block participants must follow a valid block-barrier path. Conversely, replacing every warp barrier with a block barrier inside a branch followed by only one warp can create a participation failure. Scope, mask and control flow belong to the proof of the communication, not to a late performance adjustment.</p>
+
+<h2 id="scheduling">Ready instructions compete for finite pipelines <a class="timestamp" href="https://www.youtube.com/watch?v=HT20KQf0BQY&amp;t=279s">W7L4 4:39</a></h2>
+<p>The scheduling diagrams distinguish a warp scheduler, dispatch and execution pipelines. Operands must be ready before a dependent instruction can use them; the required execution resource must also accept work. If one resident warp waits for a load, another ready warp may issue. This selection does not require an operating-system context save and restore, because resident execution state is already allocated on the SM.</p>
+<p>Instruction latency is the delay before an instruction's dependent result becomes usable. Throughput is the number of instructions or arithmetic results a resource can sustain per cycle. A pipeline can accept independent work before earlier work finishes. A six-cycle latency therefore does not mean that an entire arithmetic pipeline can accept only one instruction every six cycles. Equally, an issue opportunity every cycle does not make a dependent chain's latency one cycle.</p>
+<p>The lecture's load/add/store case exposes a data dependency: the addition needs the loaded operands, and the store needs the sum. Adding an independent multiplication can expose other work, but only if its operands are ready and its target resource can execute concurrently. Source-level independence is necessary information; it does not guarantee a particular compiler schedule or hardware dual-issue pairing.</p>
+<p>The slide shows two dispatch units as an illustrative organization, while the narration explicitly permits one on another architecture. That should not be promoted to a universal rule that every scheduler can issue any two instructions in every cycle. <a href="https://docs.nvidia.com/cuda/archive/13.0.0/volta-tuning-guide/index.html">The Volta Tuning Guide, §1.4.1.1</a>, describes four schedulers, dedicated arithmetic units and architecture-specific instruction timing. The number of schedulers, the allowed instruction mix, operand dependencies and pipeline throughput all constrain a real schedule.</p>
+<p>A simple ready-set model makes those constraints separate. At cycle c, define R(c) as the set of resident warps with an instruction whose dependencies have completed. Each instruction requests a resource class, such as a load/store or arithmetic pipeline. A legal issue set is a subset of R(c) that fits the issue slots and resource-acceptance limits for that cycle. A warp can be resident but absent from R(c), or ready but excluded from the chosen issue set because another instruction uses the same resource.</p>
+<p>W7L4's flow diagram assumes a four-cycle load and one-cycle add, multiply and store stages. W7L5 then uses one cycle per pictured stage to make overlapping paths visible. These are teaching assumptions of the diagrams, not measured latencies on either A100 or this laptop. A stage drawn as one box can represent many machine instructions or a pipelined resource whose completion delay differs from its acceptance interval.</p>
+<p>The three W7L5 expressions make three different dependency graphs. For c=a+b, two loads precede an addition and store; an unused multiplication stage is not a defect in the algorithm. For c=(a+b)×d, multiplication depends on the sum and on d, whose availability is an explicit assumption in the diagram. For c=(a+b)+(e×f), the first add and multiplication can proceed independently after their respective operands arrive, but the final add depends on both partial results.</p>
+<p>The last expression also requests addition twice. Two ready warps can compete for the same addition resource even when there is no data dependence between them. The illustrated stall is therefore a structural conflict, whereas waiting for e and f is an operand-readiness delay. Increasing the number of ready warps cannot create a second resource. It can help fill otherwise idle issue opportunities, but after a bottleneck is saturated more work waits behind that bottleneck.</p>
+<p>FP32 denotes 32-bit single-precision floating-point arithmetic (IEEE 754 binary32, with 24 bits of significand precision), and FP64 denotes 64-bit double-precision arithmetic (binary64, with 53 bits of significand precision). A fused multiply-add (FMA) computes a product plus an addend with one final rounding; its result conventionally counts as two floating-point operations. Compute capability (CC) is NVIDIA's hardware feature-version identifier, distinct from the installed CUDA toolkit version. CC8.6 therefore identifies the device architecture, not CUDA version 8.6.</p>
+<p>The intra-warp diagrams divide thirty-two scalar operations across eight FP64 or sixteen FP32 arithmetic lanes in a pictured partition. Their four-versus-two chunks are a throughput illustration under that partition model. They do not define the actual latency of an FP64 or FP32 instruction, and they do not guarantee a twofold application speed ratio. Loads, dependencies, instruction mix and the target architecture remain relevant. The local CC8.6 GPU also has a different FP64/FP32 resource balance from the Volta partition illustration.</p>
+<p>The diagrams' note about different arithmetic types operating concurrently is a capability discussion, not a promise that three arbitrary source operations issue together. Integer address calculation can overlap some floating-point work on appropriate resources; finite issue bandwidth and shared execution paths can still limit the mix. The safe programming lesson is to expose independent work while preserving its data dependencies, then inspect the compiled implementation and measurements before assigning a causal performance explanation.</p>
+
+<h2 id="latency">Little's law counts in-flight work at a specified boundary <a class="timestamp" href="https://www.youtube.com/watch?v=cNV8UdrEPQo&amp;t=1010s">W7L5 16:50</a></h2>
+<p>Let L be the mean time an operation spends between a specified issue and completion boundary, X its mean completion rate, and λ the mean number of such operations in flight. Over a sufficiently long, stable observation interval with matching arrival and departure counts, Little's law gives \(\lambda=LX\). If L is in seconds and X in operations/second, λ is operations. If L is in cycles and X in operations/cycle, the same cancellation holds. The word “operation” must name the same object in both factors.</p>
+<p>A derivation helps expose the assumptions. Count the area under the in-flight population over an interval of length H. Each completed operation contributes approximately its residence time to that area; operations crossing the interval endpoints contribute boundary terms. When those terms are negligible relative to H, dividing by H gives average population equal to completed-count/H times average residence time. The relation is accounting, not a new physical source of issue bandwidth.</p>
+<p><a href="https://www.nvidia.com/content/GTC-2010/pdfs/2238_GTC2010.pdf">Vasily Volkov, <em>Better Performance at Lower Occupancy</em>, September 22, 2010, slides 7–14</a>, uses this distinction to explain GPU latency hiding. Independent operations can come from different threads or from separate instruction chains within one thread. Instruction-level parallelism, ILP, means that several operations have no dependency preventing overlap. Thread-level parallelism supplies other chains through additional threads. Those are two ways to populate the same finite execution resources.</p>
+<p>Suppose a hypothetical arithmetic pipeline has L=6 cycles and X=4 warp-instructions/cycle. Then λ=24 in-flight warp-instructions. If every warp supplies only one eligible dependent chain and can have only one such instruction in flight, this suggests at least 24 independent warp chains. With k independent eligible instructions available per warp, a crude lower bound becomes ceil(24/k) warps. Operand availability, scheduler partitioning and other resources can require more; the arithmetic does not guarantee sufficiency.</p>
+<p>The W7L5 A100 slide multiplies its assumed six-cycle arithmetic latency by four warps/cycle, obtaining 24 warps per SM and 2,592 over 108 SMs. The product is arithmetically correct, but the interpretation needs both assumptions just stated. Four schedulers do not establish a throughput of four full FP32 warp-FMA instructions per cycle. A100's 64 scalar FP32 lanes yield 64 scalar FMA results per cycle in the peak model, equivalent to two complete 32-lane warp-FMA instructions per cycle. A scheduler can also issue other instruction types, so total issue capacity and this arithmetic-path throughput are different numerators.</p>
+<p>Using X=2 warp-FMA instructions/cycle and the same explicitly hypothetical L=6 gives twelve in-flight warp-FMA instructions. This is a unit-consistent teaching calculation, not a claim that A100's actual FMA dependency latency is six cycles. The hardware configuration comes from the <a href="https://images.nvidia.com/aem-dam/en-zz/Solutions/data-center/nvidia-ampere-architecture-whitepaper.pdf">2020 A100 architecture white paper, SM hardware section</a>; actual latency requires the relevant instruction and architecture evidence.</p>
+<p>The memory slide's analogous 600×4=2,400 cannot mean 2,400 resident warps per SM. <a href="https://docs.nvidia.com/cuda/archive/13.0.0/ampere-tuning-guide/index.html#occupancy">The Ampere Tuning Guide, §1.4.1.1</a>, gives a maximum of 64 resident warps for CC8.0 and 48 for CC8.6. The assumed memory latency and an arithmetic/scheduler issue rate also do not automatically refer to the same service boundary. Multiplying by 108 gives 259,200 hypothetical in-flight instruction objects under that model, not an A100 capacity to hold that many resident warps.</p>
+<p>A memory calculation should name transactions instead. If L=400 ns, a desired B=200 GB/s and each transaction carries m=32 bytes, the transaction completion rate is X=B/m=6.25×10⁹ transactions/s, so λ=2,500 transactions in flight. All three numerical parameters are hypothetical. Multiple transactions can arise from one warp instruction, and multiple independent requests may be outstanding from a warp. The result is not a thread count, nor is it a measurement of the laptop's memory latency.</p>
+<p>The bounded Python simulator isolates the dependent-chain issue question. Each warp has eight instructions, each instruction makes that same warp wait six cycles, and the machine accepts one issue per cycle. Round-robin selection chooses among ready warps. There are no caches, arithmetic classes, register limits, compiler transformations or memory transactions in this model. Its output reports total completions divided by a finite completion interval, including filling and draining the modeled pipeline.</p>
+<pre><code class="language-python" data-file="latency_model.py" data-run="python3 -B latency_model.py">def simulate(warps, latency=6, slots=1, instructions=8):
+    ready=[0]*warps
+    left=[instructions]*warps
+    t=0
+    cursor=0
+    issued=0
+    finish=0
+    while any(left):
+        used=set()
+        for _ in range(slots):
+            choices=[(cursor+k)%warps for k in range(warps)]
+            w=next((w for w in choices if w not in used and left[w] and ready[w]&lt;=t),None)
+            if w is None:
+                break
+            left[w]-=1
+            ready[w]=t+latency
+            finish=max(finish,ready[w])
+            issued+=1
+            used.add(w)
+            cursor=(w+1)%warps
+        t+=1
+        assert t&lt;10000
+    return issued,finish
+for w in (1,2,4,6,12):
+    issued,finish=simulate(w)
+    print(f"warps={w:2d} issued={issued:2d} completion_cycles={finish:2d} average={issued/finish:.3f} warp-instructions/cycle")
+print("hypothetical arithmetic: L=6 cycles X=4 warp-instructions/cycle -&gt; 24 in-flight warp-instructions")
+print("hypothetical transactions: L=400 ns B=200 GB/s m=32 bytes -&gt; 2500 transactions in flight")
+print("600 cycles * 4 warp-instructions/cycle = 2400 in-flight instructions; not a resident-warp count")
+</code></pre>
+<pre><code class="output">warps= 1 issued= 8 completion_cycles=48 average=0.167 warp-instructions/cycle
+warps= 2 issued=16 completion_cycles=49 average=0.327 warp-instructions/cycle
+warps= 4 issued=32 completion_cycles=51 average=0.627 warp-instructions/cycle
+warps= 6 issued=48 completion_cycles=53 average=0.906 warp-instructions/cycle
+warps=12 issued=96 completion_cycles=101 average=0.950 warp-instructions/cycle
+hypothetical arithmetic: L=6 cycles X=4 warp-instructions/cycle -&gt; 24 in-flight warp-instructions
+hypothetical transactions: L=400 ns B=200 GB/s m=32 bytes -&gt; 2500 transactions in flight
+600 cycles * 4 warp-instructions/cycle = 2400 in-flight instructions; not a resident-warp count
+</code></pre>
+<p>As more independent warp chains become available, idle issue cycles can shrink until the one-slot issue limit dominates. The initial and final pipeline phases keep a short run's average below the steady-state ceiling. Adding more chains after reaching that ceiling cannot raise the ceiling itself. No displayed simulator cycle is a measured GPU cycle, and no fit to the device is implied.</p>
+
+<h2 id="occupancy">Block granularity and resource limits bound residency <a class="timestamp" href="https://www.youtube.com/watch?v=cNV8UdrEPQo&amp;t=1430s">W7L5 23:50</a></h2>
+<p>Occupancy is the resident warp count divided by the maximum resident warp count per SM. For a given kernel and launch, a static occupancy calculation predicts a capacity under resource constraints. Achieved occupancy is a time-dependent execution statistic and can be lower, for example during the tail of a small grid. Neither is the fraction of peak arithmetic actually delivered. A resident warp can be stalled, contain disabled lanes or execute address calculations rather than the arithmetic being counted.</p>
+<p>Let H_b be the device's maximum resident blocks per SM, H_t its maximum resident threads, H_w its maximum resident warps, R its number of 32-bit register slots and S its available shared-memory bytes. A block contains P_b threads and W_b warps, its compiled code uses r registers per thread, and its requested shared storage totals s_b bytes. An idealized capacity bound ignoring allocation granularity is</p>
+\[
+a_{\rm simple}=\min\left(H_b,\left\lfloor\frac{H_t}{P_b}\right\rfloor,
+\left\lfloor\frac{H_w}{W_b}\right\rfloor,
+\left\lfloor\frac{R}{rP_b}\right\rfloor,
+\left\lfloor\frac{S}{s_b}\right\rfloor\right). \tag{19.2}
+\]
+<p>A term for a zero resource request imposes no limit and is omitted rather than divided by zero. Predicted warp occupancy is aW_b/H_w if a blocks can reside. When P_b is a multiple of 32, the warp and thread fractions agree; otherwise allocated partial warps mean the fractions differ. This model also needs the kernel's per-block limits and architecture-specific register/shared allocation rules. Its floors are upper bounds before those additional constraints, not a replacement for the occupancy API.</p>
+<p>The lecture's illustrative device has H_t=1,536 and H_b=8, with other resource limits assumed nonbinding. For 8×8 blocks, P_b=64: the thread bound permits 24 blocks but the block bound permits eight, giving 512 resident threads and one-third of the thread capacity. For 16×16 blocks, six blocks fit the thread bound and are below eight, giving full thread capacity. For 32×32 blocks, one block fits, yielding 1,024/1,536=two-thirds. The nonmonotonic result follows from integer packing, not from a rule that larger blocks always improve occupancy.</p>
+<p>Those parameters are an example, not the current laptop's complete configuration. The CC8.6 limits documented in the Ampere guide are 48 warps, sixteen blocks, 65,536 register slots and 100 KiB shared memory per SM. Forty-eight 32-thread warps give 1,536 threads. If registers and shared storage do not bind, changing H_b from eight to sixteen makes the 64-thread example reach 1,024 resident threads, or two-thirds rather than one-third. Reusing the slide's block cap would therefore give a wrong local prediction.</p>
+<p>Resources can reverse the shape comparison again. At 256 threads and 64 registers per thread, a block uses at least 16,384 register slots, permitting four blocks in the simple register model. That limits thread residency to 1,024 even though six blocks would fit the thread count alone. If shared storage were 40 KiB per block under a 100 KiB budget, the simple shared bound would be two blocks, or 512 threads. A capacity claim must include the compiled kernel and its per-block resource requests.</p>
+<p><a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-best-practices-guide/index.html#occupancy">CUDA 13.0 Best Practices Guide, §11.1–11.4</a>, discusses occupancy, register-allocation granularity and changing dynamic shared memory to vary residency. Its architecture-specific allocation examples must not be copied as universal rounding constants. Register partitions, granularity and reserved shared storage can make a simple aggregate floor optimistic. The runtime calculator incorporates supported device/kernel constraints that the classroom floor model deliberately leaves out.</p>
+<p>The next program queries the actual device, obtains the compiled kernel's register count, static shared bytes and local-memory bytes through <a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-runtime-api/structcudaFuncAttributes.html">cudaFuncAttributes</a>, and requests predicted active blocks from <a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-runtime-api/group__CUDART__OCCUPANCY.html">cudaOccupancyMaxActiveBlocksPerMultiprocessor, runtime §6.9</a>. Dynamic shared memory is supplied in bytes per block. The program varies five thread counts and three shared requests, checks every result entry after each bounded launch, and prints both the simple bound and API prediction.</p>
+<p>The kernel writes q+floor(q/P_b) to output element q, so the host can verify both global ownership and the block's contribution. Shared-memory configurations have thread zero publish the block number, a block barrier, then reads by the block. The zero-byte configuration uses the block index directly. These variants preserve the output but alter the requested storage. They are resource checks, not a timed controlled experiment establishing a performance cause.</p>
+<pre><code class="language-cuda" data-file="occupancy_report.cu" data-build="nvcc -arch=native -O2 occupancy_report.cu -o occupancy_report" data-run="timeout 20 ./occupancy_report" data-needs="gpu" data-check="returncode">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+#define CK(call) do {cudaError_t e=(call);if(e!=cudaSuccess){std::fprintf(stderr,"%s: %s\n",#call,cudaGetErrorString(e));std::exit(1);}} while(0)
+
+#include &lt;algorithm&gt;
+__global__ void tag(unsigned n,unsigned *out,bool use_shared){
+    extern __shared__ unsigned tile[];
+    if(threadIdx.x==0 &amp;&amp; use_shared)tile[0]=blockIdx.x;
+    __syncthreads();
+    unsigned i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i&lt;n)out[i]=i+(use_shared?tile[0]:blockIdx.x);
+}
+int main(){
+    CK(cudaSetDevice(0));cudaDeviceProp p{};CK(cudaGetDeviceProperties(&amp;p,0));int maxBlocks;CK(cudaDeviceGetAttribute(&amp;maxBlocks,cudaDevAttrMaxBlocksPerMultiprocessor,0));
+    cudaFuncAttributes a{};CK(cudaFuncGetAttributes(&amp;a,tag));
+    std::printf("CC=%d.%d SMs=%d threads/SM=%d warp=%d blocks/SM=%d registers/SM=%d shared/SM=%zu\n",p.major,p.minor,p.multiProcessorCount,p.maxThreadsPerMultiProcessor,p.warpSize,maxBlocks,p.regsPerMultiprocessor,p.sharedMemPerMultiprocessor);
+    std::printf("compiled tag: registers/thread=%d static_shared=%zu local_bytes/thread=%zu max_threads/block=%d\n",a.numRegs,a.sharedSizeBytes,a.localSizeBytes,a.maxThreadsPerBlock);
+    const unsigned n=65536;unsigned *d;CK(cudaMalloc(&amp;d,n*sizeof(unsigned)));std::vector&lt;unsigned&gt;h(n);
+    for(int b:{64,128,256,512,1024})for(size_t dynamic:{size_t(0),size_t(20480),size_t(40960)}){
+        if(b&gt;p.maxThreadsPerBlock||b&gt;a.maxThreadsPerBlock||dynamic&gt;(size_t)a.maxDynamicSharedSizeBytes)continue;
+        int active;CK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&amp;active,tag,b,dynamic));
+        if(active&lt;1)std::exit(2);
+        int simple=std::min(maxBlocks,p.maxThreadsPerMultiProcessor/b);
+        if(a.numRegs) simple=std::min(simple,p.regsPerMultiprocessor/(b*a.numRegs));
+        size_t shared=dynamic+a.sharedSizeBytes;if(shared)simple=std::min(simple,(int)(p.sharedMemPerMultiprocessor/shared));
+        unsigned warps=(b+p.warpSize-1)/p.warpSize;
+        double fraction=(double)(active*warps)/(p.maxThreadsPerMultiProcessor/p.warpSize);
+        tag&lt;&lt;&lt;(n+b-1)/b,b,dynamic&gt;&gt;&gt;(n,d,dynamic!=0);CK(cudaGetLastError());CK(cudaDeviceSynchronize());CK(cudaMemcpy(h.data(),d,n*sizeof(unsigned),cudaMemcpyDeviceToHost));
+        for(unsigned i=0;i&lt;n;++i)if(h[i]!=i+i/(unsigned)b)std::exit(3);
+        std::printf("threads=%4d dynamic=%5zu simple_bound=%2d API_blocks=%2d API_warps=%2u fraction=%.3f exact\n",b,dynamic,simple,active,active*warps,fraction);
+    }
+    CK(cudaFree(d));return 0;
+}
+</code></pre>
+<pre><code class="output">CC=8.6 SMs=16 threads/SM=1536 warp=32 blocks/SM=16 registers/SM=65536 shared/SM=102400
+compiled tag: registers/thread=8 static_shared=0 local_bytes/thread=0 max_threads/block=1024
+threads=  64 dynamic=    0 simple_bound=16 API_blocks=16 API_warps=32 fraction=0.667 exact
+threads=  64 dynamic=20480 simple_bound= 5 API_blocks= 4 API_warps= 8 fraction=0.167 exact
+threads=  64 dynamic=40960 simple_bound= 2 API_blocks= 2 API_warps= 4 fraction=0.083 exact
+threads= 128 dynamic=    0 simple_bound=12 API_blocks=12 API_warps=48 fraction=1.000 exact
+threads= 128 dynamic=20480 simple_bound= 5 API_blocks= 4 API_warps=16 fraction=0.333 exact
+threads= 128 dynamic=40960 simple_bound= 2 API_blocks= 2 API_warps= 8 fraction=0.167 exact
+threads= 256 dynamic=    0 simple_bound= 6 API_blocks= 6 API_warps=48 fraction=1.000 exact
+threads= 256 dynamic=20480 simple_bound= 5 API_blocks= 4 API_warps=32 fraction=0.667 exact
+threads= 256 dynamic=40960 simple_bound= 2 API_blocks= 2 API_warps=16 fraction=0.333 exact
+threads= 512 dynamic=    0 simple_bound= 3 API_blocks= 3 API_warps=48 fraction=1.000 exact
+threads= 512 dynamic=20480 simple_bound= 3 API_blocks= 3 API_warps=48 fraction=1.000 exact
+threads= 512 dynamic=40960 simple_bound= 2 API_blocks= 2 API_warps=32 fraction=0.667 exact
+threads=1024 dynamic=    0 simple_bound= 1 API_blocks= 1 API_warps=32 fraction=0.667 exact
+threads=1024 dynamic=20480 simple_bound= 1 API_blocks= 1 API_warps=32 fraction=0.667 exact
+threads=1024 dynamic=40960 simple_bound= 1 API_blocks= 1 API_warps=32 fraction=0.667 exact
+</code></pre>
+<p>The actual query reports 16 SMs, a 1,536-thread/48-warp resident limit, sixteen blocks per SM, 65,536 register slots and 102,400 shared-memory bytes. The compiled tag kernel uses eight register slots per thread and reports no static shared or per-thread local allocation. With no dynamic request, 128-, 256- and 512-thread blocks each reach the API's 48-warp capacity prediction, while 64- and 1,024-thread blocks predict 32 warps.</p><p>For a 20 KiB dynamic request, the simple shared-memory floor is five blocks, but the API returns four for the 64-, 128- and 256-thread cases. That observed difference shows that the aggregate floor omits constraints; it does not identify one particular internal cause. The implementation would need additional allocation-rule evidence to attribute it specifically to a reservation or rounding rule. No timing result is attached to these percentages.</p><p>The displayed output is one actual run on the queried GPU, using CUDA 13.3.1 with a native architecture target. Register counts and calculator results can change when the source, compiler, target or options change. The program checks its own launch outputs and successful API returns; it does not assert that the simplified floor must equal the API, nor that the API percentage was achieved throughout execution. A difference is a prompt to inspect the omitted constraints.</p>
+<p>Grid size is a separate limit. Nine blocks from the 37×37, 16×16 example cannot simultaneously populate all sixteen SMs with even one block each. A kernel's potential six-block residency per SM would not conjure the missing blocks. Conversely, a large grid supplies many waiting blocks without making all of them resident. Tail effects appear when only a few blocks remain, and unequal block durations can make the tail longer than a simple block count predicts.</p>
+<p>The occupancy API also receives a scalar threads-per-block count. Two legal shapes with equal products can have the same static resource prediction while having different address patterns, boundary waste or control flow. The 32×8 and 16×16 shapes both contain 256 threads; neither the product nor predicted occupancy proves their memory accesses perform identically. Later memory-layout analysis adds the transaction and locality questions.</p>
+<p>A useful tuning decision records correctness first, then the complete launch, compiled resources, predicted occupancy and a timer with a declared scope. If a change improves time while lowering occupancy, there is no contradiction. It may reduce instructions, spills, memory traffic or synchronization. Volkov's historical examples demonstrate why higher occupancy is not an objective by itself; they are not quantitative predictions for this laptop. A hardware-causal explanation needs additional observations that distinguish those competing mechanisms.</p>
+
+<h2 id="limits">What the proofs and bounded runs establish</h2>
+<p>The index proofs cover positive rectangular extents within supported launch dimensions and without integer overflow. They establish unique ownership and complete guarded coverage, then connect that ownership to the chosen memory layout. They do not prove an arbitrary indirect access safe, fix a missing halo or provide synchronization between dependent updates. The CUDA checks exercise fixed nonmultiple domains and explicit cooperation; they do not enumerate every legal launch.</p>
+<p>The scheduling diagrams and simulator explain possible overlap under stated dependencies and service capacities. Their cycles are hypothetical. No timing experiment here identifies an instruction's hardware latency or a scheduler's internal policy. The occupancy output is a runtime resource prediction for one compiled kernel on one NVIDIA GPU, plus checked execution. No measured performance or energy ranking follows from its percentages.</p>
+<div class="table-wrap"><table><caption>Lecture examples and their usable boundaries.</caption><thead><tr><th>Example or claim</th><th>Interpretation retained here</th></tr></thead><tbody>
+<tr><td>Global thread ID formula</td><td>A block-major enumeration of the launch; not automatically a geometric array address.</td></tr>
+<tr><td>Three resident 256-thread blocks</td><td>Eight warps per block and 24 in total, conditional on resource feasibility.</td></tr>
+<tr><td>Four-cycle loads or one-cycle pipeline stages</td><td>Explicit simplifying assumptions of the diagrams, not measured device timing.</td></tr>
+<tr><td>Four schedulers imply four warps/cycle</td><td>Issue opportunities and the throughput of a particular arithmetic path require separate accounting.</td></tr>
+<tr><td>600×4=2,400 memory-hiding warps per SM</td><td>A hypothetical in-flight-instruction product cannot be treated as resident warp capacity; memory transactions need matching units.</td></tr>
+<tr><td>1,536 threads and eight blocks per SM</td><td>The slide's example parameters; local CC8.6 supports sixteen blocks per SM before other kernel constraints.</td></tr>
+<tr><td>100% occupancy means full resource utilization</td><td>It fills the resident-warp denominator; it does not establish instruction readiness, lane activity or peak throughput.</td></tr>
+</tbody></table></div>
+
+<h2 id="exercises">Six worked exercises</h2>
+<h3>1. Invert a launch identifier</h3>
+<p>For G=(4,2,3), B=(3,2,1), find the serial identifier of block b=(2,1,1), thread t=(1,1,0), then invert it. Explain why the inverse proves more than a forward numerical calculation.</p>
+<details><summary>Solution</summary><p>The block number is b_lin=2+4(1+2×1)=14. The local number is τ=1+3(1+2×0)=4. Each block has six threads, so s=14×6+4=88. Dividing 88 by six gives quotient 14 and remainder four. For b_lin, 14 mod 4 gives b_x=2; floor(14/4)=3, whose remainder modulo two is b_y=1 and quotient is b_z=1. For τ, four mod three gives t_x=1; the remaining quotient one gives t_y=1 and t_z=0. This unique reconstruction establishes injectivity and coverage over the bounded mixed-radix ranges; one forward example alone checks neither property generally.</p></details>
+<h3>2. Guard a nonmultiple three-dimensional domain</h3>
+<p>A volume has n=(9,5,3) and block B=(4,2,2). Compute grid dimensions, launched and valid counts, padding count, and the owner/address of coordinate (8,4,2). Which widths enter its logical row-major address?</p>
+<details><summary>Solution</summary><p>Ceiling division gives G=(3,3,2), or 18 blocks. Each block has sixteen threads, so there are 288 invocations, 135 valid coordinates and 153 padded coordinates. The owner is b=(2,2,1), t=(0,0,0). Its b_lin=2+3(2+3×1)=17, τ=0, and serial launch ID is 272. Its logical address is 8+9(4+5×2)=134, the last of 135 elements. The logical widths nine and five belong in that address; the padded widths twelve and six belong only to the padded geometric launch layout. All three guards are needed before the address is used.</p></details>
+<h3>3. Exhibit an alias hidden by a flat bounds test</h3>
+<p>A 13×7 array uses 4×3 blocks. An implementation computes x,y correctly but checks only q=x+13y&lt;91. Give two distinct invocations with the same accepted q and explain the repair.</p>
+<details><summary>Solution</summary><p>The padded coordinate (13,0) is produced by b=(3,0), t=(1,0); it gives q=13 and passes the flat check. The valid coordinate (0,1), produced by b=(0,0), t=(0,1), also gives q=13. The first invocation should own no logical element, but it aliases the next row. Check x&lt;13 and y&lt;7 before computing or using the logical address. The rectangular quotient-and-remainder proof then gives each valid coordinate exactly one owner. Enlarging the allocation would not remove the duplicate update or restore the intended domain semantics.</p></details>
+<h3>4. Diagnose the latency-to-warps conversion</h3>
+<p>A model assumes six-cycle instruction latency and two completed warp-instructions per cycle. How many instructions must be in flight? Under what conditions does that become a warp count? Repeat for four independent chains per warp, and identify why 600×4 cannot directly specify memory-latency-hiding resident warps.</p>
+<details><summary>Solution</summary><p>Little's law gives twelve in-flight warp-instructions. It suggests twelve warps only if each warp supplies at most one independent outstanding instruction of the relevant type, issue distribution is feasible and the named latency/throughput refer to the same boundary. Four eligible independent chains per warp reduce the crude count to ceil(12/4)=three warps, before other constraints. The product 600 cycles×4 warp-instructions/cycle counts 2,400 instruction objects under its assumptions. It does not count memory transactions or establish resident capacity. A finite resident-warp cap can invalidate that interpretation immediately; multiple requests per warp and the actual memory service rate must instead be modeled.</p></details>
+<h3>5. Compare occupancy bounds without inventing a speedup</h3>
+<p>An illustrative CC8.6 SM has H_b=16, H_t=1,536, H_w=48, R=65,536 register slots and S=100 KiB. Compare 64-, 256- and 1,024-thread blocks with 32 registers per thread and no shared request. Then give the simple bound for 256 threads and 40 KiB shared memory. What can be concluded about timing?</p>
+<details><summary>Solution</summary><p>For 64 threads, W_b=2; block, thread, warp and register bounds are 16,24,24,32, so sixteen blocks give 32 warps and two-thirds occupancy. For 256 threads, W_b=8; the bounds are 16,6,6,8, so six blocks give 48 warps and full occupancy. For 1,024 threads, W_b=32; the bounds are 16,1,1,2, so one block gives 32 warps and two-thirds. A 40 KiB request limits the 256-thread case to floor(100/40)=two blocks, sixteen warps and one-third. Allocation granularity or reserved resources may lower these simple upper bounds. None establishes the fastest kernel: instruction count, traffic, readiness, grid size and measured timing remain missing.</p></details>
+<h3>6. Design and verify a boundary-inclusive Jacobi mapping</h3>
+<p>Specify a 37×37 interior sweep with B=(16,8,1), including the grid, coordinate/guard/address rules, ownership proof and a complete validation plan. Explain why a block barrier cannot order all blocks between two sweeps.</p>
+<details><summary>Solution</summary><p>Use G=(ceil(37/16),ceil(37/8),1)=(3,5,1), with 15 blocks of 128 threads: 1,920 invocations and 551 padded invocations. Set x=16b_x+t_x and y=8b_y+t_y. Only if x&lt;37 and y&lt;37 set j=x+1 and i=y+1, then write unew[i×39+j] from u's four neighbors. The independent per-axis quotient/remainder inverses give one invocation for each interior pair; adding one maps to the interior of the 39×39 allocation. The neighbor indices stay between zero and 38 on each axis.</p><p>Initialize u with the book's top boundary one, other boundaries zero and interior zero. Initialize unew's boundary identically and give its interior a sentinel. After one sweep verify every interior against a serial reference and check every boundary cell; the first interior row is one-quarter and other interior rows remain zero. Also test an input with varied exactly representable values so that an index permutation cannot hide behind a uniform field. Check CUDA launch and completion errors and compare every entry, not only a checksum.</p><p>Successive sweeps require all previous outputs before the next reads them. A block barrier only orders participants inside one block and cannot synchronize a whole ordinary grid. A straightforward implementation uses separate kernel launches in the same ordered stream, swaps u/unew between sweeps and waits at the declared host completion point when inspecting results. The device need not send all fields to the host between sweeps. This is a mapping and validation design; no full iterative CUDA solver or convergence timing is claimed by the programs above.</p></details>
+
+<h2 id="primary-sources">Recordings and primary sources</h2>
+<ol>
+<li><a href="https://www.youtube.com/watch?v=BY_4cdGuFsg">NPTEL W7L2</a> — dimensional arrangements, built-in indices and one-dimensional global coordinates.</li>
+<li><a href="https://www.youtube.com/watch?v=e-6zAbvZ5BI">NPTEL W7L3</a> — general block-major enumeration and scheduling levels.</li>
+<li><a href="https://www.youtube.com/watch?v=HT20KQf0BQY">NPTEL W7L4</a> — block/warp mapping, dispatch, dependencies and illustrative pipelines.</li>
+<li><a href="https://www.youtube.com/watch?v=cNV8UdrEPQo">NPTEL W7L5</a> — overlapping examples, latency arithmetic and block granularity.</li>
+<li><a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-programming-guide/index.html#thread-hierarchy">CUDA 13.0 Programming Guide, §§5.2,7.1–7.2</a> — multidimensional local linearization, block execution and warp grouping; inverse proofs here are original derivations.</li>
+<li><a href="https://docs.nvidia.com/cuda/archive/13.0.0/volta-tuning-guide/index.html">CUDA 13.0 Volta Tuning Guide, §§1.4.1.1–1.4.1.2</a> — instruction scheduling and Independent Thread Scheduling; explicit synchronization replaces implicit warp-synchronous assumptions.</li>
+<li><a href="https://docs.nvidia.com/cuda/archive/13.0.0/ampere-tuning-guide/index.html#occupancy">CUDA 13.0 Ampere Tuning Guide, §1.4.1.1</a> — distinct CC8.0/CC8.6 resident-warp/block and register/shared-memory limits.</li>
+<li><a href="https://images.nvidia.com/aem-dam/en-zz/Solutions/data-center/nvidia-ampere-architecture-whitepaper.pdf">NVIDIA A100 architecture white paper, v1.0,2020</a> — 64 scalar FP32 lanes per SM and enabled 108-SM configuration; scheduler count is not arbitrary instruction throughput.</li>
+<li><a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-runtime-api/group__CUDART__OCCUPANCY.html">CUDA 13.0 runtime §6.9</a> — maximum-active-block occupancy calculator and per-block dynamic shared-memory argument.</li>
+<li><a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-runtime-api/structcudaFuncAttributes.html">CUDA 13.0 cudaFuncAttributes</a> and <a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-runtime-api/group__CUDART__EXECUTION.html">execution-control APIs</a> — compiled resource fields and function-attribute query. Installed CUDA13.3 headers were independently read before compilation.</li>
+<li><a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-best-practices-guide/index.html#occupancy">CUDA 13.0 Best Practices Guide, §§11.1–11.4</a> — occupancy definition, allocation granularity and the difference between occupancy and performance.</li>
+<li><a href="https://www.nvidia.com/content/GTC-2010/pdfs/2238_GTC2010.pdf">Volkov, Better Performance at Lower Occupancy, September22,2010, slides7–14</a> — latency versus throughput, Little's-law concurrency and instruction-level versus thread-level parallelism. Historical device measurements are not reused as local results.</li>
+</ol>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-18-gpu-throughput-arithmetic-flops-bandwidth-simd-simt.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-20-cuda-programming-tools-kernels-and-launch-configuration.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

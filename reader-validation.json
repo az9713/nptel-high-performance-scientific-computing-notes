@@ -1,12 +1,12 @@
 {
   "course": "High Performance Scientific Computing",
-  "checked_at_utc": "2026-10-28T06:35:41.456175+00:00",
+  "checked_at_utc": "2026-10-28T07:51:58.004663+00:00",
   "scope": "Reader mechanics only; does not certify chapter or course completion",
   "static": {
     "status": "passed",
-    "html_files": 21,
-    "local_links_checked": 264,
-    "timestamps_checked": 175,
+    "html_files": 25,
+    "local_links_checked": 320,
+    "timestamps_checked": 205,
     "chapter_pages_with_dollar_math": 0,
     "failures": [],
     "warnings": []
@@ -300,6 +300,78 @@
         "controls": true,
         "emptyToc": false,
         "file": "chapter-16-domain-decomposition-mpi-solver-and-performance-analysis.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 45,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-17-gpu-stack-and-architectures.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 45,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-17-gpu-stack-and-architectures.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 155,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-18-gpu-throughput-arithmetic-flops-bandwidth-simd-simt.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 155,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-18-gpu-throughput-arithmetic-flops-bandwidth-simd-simt.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 38,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-19-thread-hierarchy-warp-scheduling.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 38,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-19-thread-hierarchy-warp-scheduling.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 92,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-20-cuda-programming-tools-kernels-and-launch-configuration.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 92,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-20-cuda-programming-tools-kernels-and-launch-configuration.html",
         "viewport": 390
       },
       {

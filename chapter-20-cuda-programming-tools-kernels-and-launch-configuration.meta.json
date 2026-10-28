@@ -1,0 +1,434 @@
+{
+  "chapter": 20,
+  "title": "CUDA programming: tools, kernels, and launch configuration",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "vKUl3M0e9pU",
+      "label": "W8L1",
+      "playlist_index": 44,
+      "duration_seconds": 1958
+    },
+    {
+      "video_id": "OmkTAFlVllg",
+      "label": "W8L2",
+      "playlist_index": 45,
+      "duration_seconds": 1572
+    }
+  ],
+  "frames_viewed": {
+    "vKUl3M0e9pU": [
+      "f0002",
+      "f0016",
+      "f0024",
+      "f0029",
+      "f0034",
+      "f0038",
+      "f0043",
+      "f0048",
+      "f0054",
+      "f0058",
+      "f0062"
+    ],
+    "OmkTAFlVllg": [
+      "f0002",
+      "f0007",
+      "f0012",
+      "f0015",
+      "f0016",
+      "f0018",
+      "f0022",
+      "f0025",
+      "f0034",
+      "f0038",
+      "f0042",
+      "f0046",
+      "f0049",
+      "f0052"
+    ]
+  },
+  "source_uncertainties": [
+    "Both assigned transcripts read completely;25 selected frames inspected. No complete independent audio review. The second lecture memory-function slide f0016 was added after the initial24-frame inventory.",
+    "The actual lectures present CUDA interfaces and flags but no complete pi/Jacobi implementation. Vector-add protocol, storage test, pi reduction and diagnostic are original teaching constructions. Jacobi appears only as a lifetime/ordering connection, not a reproduced solver.",
+    "The current web CUDA guide/API/compiler docs were served as newer13.4 documentation; installed13.3 headers and compiler help establish executable names and flags. No version identity is claimed.",
+    "An initial current AMD HIP page returned429, while the explicitly dated6.4.1 porting guide opened successfully. A subsequent deeper open returned429 again; the successful Porting a CUDA Project passage supports the stated NVIDIA-to-AMD workflow. No exhaustive current vendor/package support matrix was validated.",
+    "Classic atomicFetchAdd-style names listed on the slide are absent from the nine inspected installed atomic headers and absent from the documented classic family; the chapter does not claim that newer __nv_atomic_fetch_add or other atomic interfaces do not exist.",
+    "cudaErrorOutOfMemory is absent from the installed runtime enum, while cudaErrorMemoryAllocation is present. cudaErrorPriorLaunchFailure and cudaErrorInvalidDevicePointer are retained with deprecation comments; the chapter does not present them as modern diagnostic recommendations.",
+    "The safe negative example requests maxThreadsPerBlock+1 and recognizes only cudaErrorInvalidConfiguration or the actually observed cudaErrorInvalidValue as recoverable submission rejections. It does not execute an invalid memory access, divergent barrier, deliberate watchdog timeout or a hang. No general fault-recovery guarantee is inferred from clearing last-error state.",
+    "Floating reduction checks compare every block partial and total with a long-double numerical reference and use5e-12 floating allowance plus exact-arithmetic quadrature bound. This tolerance is validated for listed cases, not proved universal rounding accuracy. No bitwise serial/GPU identity is demanded.",
+    "Vector/type example exact comparisons are justified by bounded binary-exact input values. Float3 representation and dim3 defaults are checked on installed ABI; grouping values alone establishes neither SIMD instructions nor coalescing.",
+    "Four captures were serialized in the exclusive slot. Each printed kernel time is one event interval, not a steady-state minimum-of-many benchmark. Power/clocks/background services are uncontrolled; observed ranges are not confidence intervals.",
+    "The allocation-to-free host interval includes transfers, allocations and API overhead, but excludes device initialization/query, input/reference construction and post-copy validation. Vector output initialization deliberately adds a diagnostic host-to-device copy. No device-memory/link peak or whole-application speedup is inferred.",
+    "ComputeSanitizer/Nsight table describes possible diagnostic scopes from primary tool manuals. Those tools were not executed and no profiler/sanitizer finding is claimed. No installation or global configuration change was performed.",
+    "The initial diagnostic expected only InvalidConfiguration and exited2 on actual InvalidValue. Its raw failure, source snapshot and two repair stages are retained. Final program validates a healthy baseline, resets the output, recognizes the bounded rejection, clears error bookkeeping and validates a fresh legal result. No cause for enum variation was isolated. Observed stack runtime13030/driverAPI13010/driverpackage592.82; no identical enum across all versions is promised.",
+    "Cold first-launch event intervals ranged607.104-15837.184us for one addition. The output field kernel_us is explicitly interpreted as elapsed time between event markers, possibly including device-idle submission gaps, not isolated GPU busy time/arithmetic latency. Runtime/startup/scheduling cause was not isolated.",
+    "The final parsed checker reran complete contracts separately and passed all four; its variable timing output is excluded from the four-capture ranges."
+  ],
+  "lecture_corrections": [
+    "HIP portability qualified by actual AMD6.4.1 porting guide",
+    "vector grouping does not automatically coalesce accesses or produce SIMD operations",
+    "classic atomicAdd returns old; atomicFetchAdd-style names not present in installed atomic headers",
+    "runtime versus driver query names/enums must not be mixed",
+    "cudaErrorOutOfMemory absent from runtime enum; cudaErrorMemoryAllocation correct, old names deprecated",
+    "nvcc -g host versus -G device; device optimization defaults rather than interpreting -Ohost as device unoptimized",
+    "The second launch slide declares myKernel but uses kernel in its invocation; name and signature must match.",
+    "dim3 omitted components default1; dimension counts multiply, while thread/block indices are zero-based.",
+    "An event host wait represents completion of captured stream work, not a new all-thread rendezvous; host device synchronization does not replace an in-kernel block barrier.",
+    "Classic atomics protect one read-modify-write at their scope, not arbitrary surrounding code, a deterministic thread order or one update per clock."
+  ],
+  "sections": [
+    {
+      "id": "model",
+      "section": "Objects, owners, and completion form the CUDA program",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Host/device, vector addition and launch vocabulary.",
+      "research_extension": "CUDA stream/API completion semantics.",
+      "teaching_construction": "Host/device object model, positive-size launch coverage, guards and two timer scopes.",
+      "evidence_class": "definition"
+    },
+    {
+      "id": "approaches",
+      "section": "Choose an expression of parallel work, then check its implementation W8L1 0:06",
+      "video_id": "vKUl3M0e9pU",
+      "start": 6,
+      "end": 424,
+      "lecture_material": "Standard language, directive, kernel, portable abstraction and high-level-language approaches.",
+      "research_extension": "Actual AMD6.4.1 HIP porting workflow, Kokkos backends and SYCL2020rev12.",
+      "teaching_construction": "Source/binary/performance portability distinction and qualified HIP classification.",
+      "evidence_class": "definition"
+    },
+    {
+      "id": "flow",
+      "section": "The explicit-copy protocol has a dependency at every transition W8L1 7:04",
+      "video_id": "vKUl3M0e9pU",
+      "start": 424,
+      "end": 633,
+      "lecture_material": "Host allocation/init, device allocation, transfers, kernel and release.",
+      "research_extension": "CUDA memory API and nuanced copy completion.",
+      "teaching_construction": "Resource/dependency protocol, pointer versus object, live storage and checked operations.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "id": "qualifiers",
+      "section": "Function placement and storage lifetime are separate declarations W8L1 10:33",
+      "video_id": "vKUl3M0e9pU",
+      "start": 633,
+      "end": 1256,
+      "lecture_material": "Function qualifiers and device/constant/shared/restrict/managed variable annotations.",
+      "research_extension": "Language reference and installed runtime/vector headers.",
+      "teaching_construction": "Execution space versus object accessibility, context lifetime, managed access ordering and sufficient nonaliasing condition.",
+      "evidence_class": "definition"
+    },
+    {
+      "id": "vectors",
+      "section": "Vector types group components; launch dimensions count threads W8L1 20:56",
+      "video_id": "vKUl3M0e9pU",
+      "start": 1256,
+      "end": 1958,
+      "lecture_material": "One-to-four-component vector types, coordinates/RGBA examples and dim3.",
+      "research_extension": "Actual type sizes/alignment/defaults from docs and installed vector_types.h.",
+      "teaching_construction": "No automatic SIMD/coalescing inference; two-launch counter/shared/constant/managed example with exact results.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "id": "launch",
+      "section": "A launch specifies a set of indices, not just a thread count W8L2 0:06",
+      "video_id": "OmkTAFlVllg",
+      "start": 6,
+      "end": 448,
+      "lecture_material": "Built-in counts/indices, kernel launch syntax, argument list, dynamic shared memory and stream.",
+      "research_extension": "CUDA kernel-configuration and device-limit semantics.",
+      "teaching_construction": "Ceiling without addition overflow, unique/in-bounds ownership proof, tail threads, empty skip and name-mismatch correction.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "memory-api",
+      "section": "Byte counts, copy directions, and timing boundaries belong in the interface W8L2 7:28",
+      "video_id": "OmkTAFlVllg",
+      "start": 448,
+      "end": 526,
+      "lecture_material": "malloc/memcpy/memset/free versus CUDA functions.",
+      "research_extension": "Runtime memory/event APIs and API synchronization behavior.",
+      "teaching_construction": "21size/block cases with18actual vector kernels and3empty skips, all payloads/two guards; event versus allocation-to-free timing; Jacobi lifetime connection only.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "id": "synchronization",
+      "section": "Atomicity protects an update; synchronization orders cooperating work W8L2 8:46",
+      "video_id": "OmkTAFlVllg",
+      "start": 526,
+      "end": 996,
+      "lecture_material": "Atomic families, sharing a location, block/warp/device/event synchronization and atomics versus barriers.",
+      "research_extension": "Classic atomic old-value/relaxed/device-scope semantics; installed names; block/event completion rules.",
+      "teaching_construction": "Bounded pi reduction, identity for idle threads, full block-partial reference, midpoint truncation bound and floating tolerance.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "queries",
+      "section": "Device queries establish limits; errors identify failed operations W8L2 16:36",
+      "video_id": "OmkTAFlVllg",
+      "start": 996,
+      "end": 1267,
+      "lecture_material": "Runtime/driver device queries, attributes, error codes and handling.",
+      "research_extension": "Actual installed runtime/driver enum families and error declarations; error API.",
+      "teaching_construction": "Safe invalid-configuration recognition/clearing and successful follow-up kernel; no actual invalid access/hang.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "id": "tools",
+      "section": "Compiler options select distinct stages and numerical contracts W8L2 21:07",
+      "video_id": "OmkTAFlVllg",
+      "start": 1267,
+      "end": 1572,
+      "lecture_material": "Debug/register/fast-math/optimization/PTXAS/FMAD options and host versus device stages.",
+      "research_extension": "NVCC flag documentation, installed-tool help; ComputeSanitizer and Nsight tool scopes.",
+      "teaching_construction": "Case-sensitive-g/-G correction; device default optimization; resources/numerical tradeoffs and distinct diagnostic evidence.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "id": "limits",
+      "section": "Claims, evidence and limits",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Claim sequence from both lectures.",
+      "research_extension": "Previously cited sources.",
+      "teaching_construction": "Recorded claim boundaries and exact scope of tests/timings.",
+      "evidence_class": "definition"
+    },
+    {
+      "id": "exercises",
+      "section": "Exercises",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "All core concepts in both lectures.",
+      "research_extension": "Previously established API semantics.",
+      "teaching_construction": "Six full solutions: indexing/flattening, byte counts, FP32 atomic counterexample, barrier-tail diagnosis, resident-data model and implementation/measurement plan.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "primary-sources",
+      "section": "Primary sources",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Recordings first.",
+      "research_extension": "All cited primary references.",
+      "teaching_construction": "Version/date/access distinctions.",
+      "evidence_class": "definition"
+    }
+  ],
+  "references": [
+    {
+      "title": "NVIDIA CUDA Programming Guide, C/C++ Language Extensions",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html",
+      "supports": "Function/storage qualifiers, restrict promise, vector size/alignment, dim3/launch configuration, classic atomic old-value and relaxed/device-scope semantics.",
+      "page_checked": "Opened \u00a7\u00a75.4.1-5.4.3 and5.4.5.1; vector Table43, atomicAdd/Inc/Dec passages. Installed13.3 headers independently read."
+    },
+    {
+      "title": "NVIDIA CUDA Programming Guide, Writing SIMT Kernels",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html",
+      "supports": "Shared-memory communication and block barrier requirements.",
+      "page_checked": "Opened shared-memory synchronization discussion and example with barrier outside guarded memory access."
+    },
+    {
+      "title": "NVIDIA CUDA Runtime API, Memory Management",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY.html",
+      "supports": "cudaMalloc/cudaMemcpy/cudaMemset/cudaFree and symbol-copy interfaces; allocation and byte-count semantics.",
+      "page_checked": "Opened memory function declarations and referenced sections; installed cuda_runtime_api.h inspected."
+    },
+    {
+      "title": "NVIDIA CUDA Runtime API, API Synchronization Behavior",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html",
+      "supports": "Pageable H2D staging can return before device transfer completes, D2H returns after completion, memset/launch host-asynchrony and argument-dependent synchronization.",
+      "page_checked": "Read complete40-line page, synchronous cases1-5 and kernel launch paragraph."
+    },
+    {
+      "title": "NVIDIA CUDA Runtime API, Device Management",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html",
+      "supports": "Runtime attribute family and host cudaDeviceSynchronize completion/error behavior.",
+      "page_checked": "Opened cudaDeviceGetAttribute declarations and cudaDeviceSynchronize detailed description."
+    },
+    {
+      "title": "NVIDIA CUDA Runtime API, Event Management",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html",
+      "supports": "Event recording captures prior stream work, elapsed milliseconds and synchronization waits for captured work.",
+      "page_checked": "Opened event creation/record/elapsed and detailed cudaEventSynchronize passage."
+    },
+    {
+      "title": "NVIDIA CUDA Runtime API, Error Handling",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__ERROR.html",
+      "supports": "cudaGetLastError host-thread state/reset, peek without reset, error string/name functions and possibility of earlier asynchronous errors.",
+      "page_checked": "Read function details, especially cudaGetLastError and asynchronous-error notes."
+    },
+    {
+      "title": "NVIDIA CUDA Compiler Driver NVCC, online13.4; installed13.3 help separately checked",
+      "url": "https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html",
+      "supports": "-g host versus-G device debug; host-O; device optimization default3; native GPU targeting; maxrregcount ABI minimum, fast-math options and FMAD contraction.",
+      "page_checked": "Opened \u00a7\u00a74.2.3.5-4.2.3.16,4.2.7 and4.2.9.1.18; native-target paragraph. Actual nvcc13.3 --help captured and relevant flag descriptions read."
+    },
+    {
+      "title": "AMD HIP Porting Guide, ROCm6.4.1",
+      "url": "https://rocm.docs.amd.com/projects/HIP/en/docs-6.4.1/how-to/hip_porting_guide.html",
+      "supports": "Porting workflow explicitly tests HIP-converted source on NVIDIA before compiling for AMD, qualifying an absolute AMD-only source claim.",
+      "page_checked": "Successful open: Porting a CUDA Project and General Tips; repeated deeper open429 distinguished."
+    },
+    {
+      "title": "Kokkos Execution Spaces",
+      "url": "https://kokkos.org/kokkos-core-wiki/API/core/execution_spaces.html",
+      "supports": "CUDA/HIP/SYCL execution spaces as implementation/backend choices.",
+      "page_checked": "Opened execution-space documentation; supported execution-space definitions."
+    },
+    {
+      "title": "Khronos SYCL2020 specification revision12,6August2026",
+      "url": "https://registry.khronos.org/SYCL/specs/sycl-2020/html/sycl-2020.html",
+      "supports": "Cross-platform single-source heterogeneous C++ and implementation-defined backend mapping, not unconditional device support.",
+      "page_checked": "Opened Introduction\u00a72 and architecture/backend outline\u00a73; primary specification revision/date visible."
+    },
+    {
+      "title": "NVIDIA Compute Sanitizer documentation",
+      "url": "https://docs.nvidia.com/compute-sanitizer/ComputeSanitizer/index.html",
+      "supports": "memcheck/racecheck/initcheck/synccheck scopes, especially shared-memory focus of racecheck.",
+      "page_checked": "Read introduction and tool list. Tool not executed."
+    },
+    {
+      "title": "NVIDIA Nsight Compute user guide",
+      "url": "https://docs.nvidia.com/nsight-compute/NsightCompute/index.html",
+      "supports": "Kernel-level performance metrics and profiling purpose.",
+      "page_checked": "Read Overview and quickstart. Tool not executed."
+    },
+    {
+      "title": "NVIDIA Nsight Systems user guide",
+      "url": "https://docs.nvidia.com/nsight-systems/UserGuide/index.html",
+      "supports": "CPU/GPU timeline and focused collection scope.",
+      "page_checked": "Read preparing application/focused profiling/timeline discussion. Tool not executed."
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "n,a^(H),b^(H),c^(H),a^(G),b^(G),c^(G)",
+      "first_section": "model",
+      "definition": "Array length and distinct host/device role arrays."
+    },
+    {
+      "symbol": "u,g,b,r,i,p",
+      "first_section": "model",
+      "definition": "Threads/block; blocks; block index; local thread index; candidate array index; total logical threadsgu."
+    },
+    {
+      "symbol": "s,T_dev,T_alloc-free",
+      "first_section": "model",
+      "definition": "Bytes/FP32 element4; device-event and host allocation-through-free intervals."
+    },
+    {
+      "symbol": "indicator1",
+      "first_section": "launch",
+      "definition": "One if condition true, zero otherwise, in quotient/remainder ceiling."
+    },
+    {
+      "symbol": "f(x),h,x_i,pi_n,q",
+      "first_section": "synchronization",
+      "definition": "Midpoint integrand4/(1+x\u00b2),spacing1/n,sample position,quadrature estimate and grid-stride iteration index."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B tools/check_chapter_code.py --file ../work/ch20-sol/chapter-20-cuda-programming-tools-kernels-and-launch-configuration.html --report ../work/ch20-sol/code-validation.json",
+    "listings": 4,
+    "all_passed": true,
+    "checks": {
+      "exact": 1,
+      "returncode": 3
+    },
+    "checked_at_utc": "2026-10-28T07:19:49.834606+00:00",
+    "fingerprint_sha256": "d2272683e32a0f4d23a4679b45393b89166b27c899fd3c884856aeae8d365972",
+    "notes": "Complete parsed source/build/run/check/printed-output contracts rerun once. Exact layout/storage output; varying vector/pi timing and diagnostic environment use returncode after internal payload and expected-rejection checks. Initial failed diagnostic expectation retained separately."
+  },
+  "measurement_provenance": {
+    "exclusive_agent_slot": true,
+    "device_allocation_max_bytes": 12582884,
+    "manual_captures_requested": 4,
+    "programs": [
+      "cuda_types.cu",
+      "vector_add.cu",
+      "pi_partials.cu",
+      "launch_diagnostic.cu"
+    ],
+    "capture_date_utc": "2026-10-28",
+    "capture_utc_start": "2026-10-28T07:06:56.743345+00:00",
+    "capture_utc_end": "2026-10-28T07:12:49.799912+00:00",
+    "manual_ledger_entries": 23,
+    "manual_zero_exits": 22,
+    "initial_expected_enum_test_failures": 1,
+    "final_programs_passed": 4,
+    "original_builds": 4,
+    "changed_diagnostic_rebuilds": 2,
+    "queries": [
+      "nvcc-version",
+      "nvcc-help",
+      "nvidia-smi"
+    ],
+    "timing_captures": 4,
+    "timing_processes": 8,
+    "displayed_capture": 4,
+    "vector_cases_per_process": 21,
+    "vector_actual_kernels": 18,
+    "pi_cases_per_process": 9,
+    "pi_checked_partials_per_process": 243,
+    "claim_scope": "One RTX3050Laptop CC8.6/native SASS, single default stream. Event intervals and allocation-to-free host intervals; no busy-time/peak/memory-link/network/profiler inference.",
+    "evidence": "captures/capture-index.json retains command arrays/source SHA256/UTC+monotonic endpoints/returncode and workspace temp/cache environment; separate raw stdout/stderr. benchmark-summary.json retains four-capture ranges.",
+    "numerical_error_maxima_four_captures": {
+      "block_partial": 4.111e-16,
+      "total_vs_long_double": 4.81e-16
+    },
+    "diagnostic_observation": "runtime=13030 driver=13010 limit=1024 requested=1025 recognized=cudaErrorInvalidValue cleared=yes before=1 after=1"
+  },
+  "installed_header_evidence": {
+    "header_root": "//wsl.localhost/Ubuntu/usr/local/cuda-13.3/targets/x86_64-linux/include",
+    "records": [
+      "work/ch20-sol/installed-header-audit.json",
+      "work/ch20-sol/installed-atomic-header-audit.json"
+    ],
+    "readonly": true
+  },
+  "author_validation": {
+    "prose_words": 7902,
+    "content_sections": 10,
+    "total_h2": 13,
+    "exercises": 6,
+    "listings": 4,
+    "static_issues": [],
+    "structured_listing_checks_passed": 4,
+    "source_sha256_matches_captured_code": true,
+    "initial_failed_attempt_preserved": true
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT WITH FIXES",
+      "blocking": 0,
+      "major": 1,
+      "minor": 0,
+      "report": "work/reviews/ch20-r1.md",
+      "reviewed_html_sha256": "3edd6207ead9b38a391d253a485d89932fa3e46c2d958a604aa6bfec5f15ee46",
+      "reviewed_meta_sha256": "32fed5f01d6a9798db458fa0ef55a31635596ec55a836d05de94ca4d46851c30",
+      "author_repairs": [
+        "M1: define FP32, FP64, SIMD, SM, ABI and spilling at first substantive use"
+      ],
+      "post_repair_status": "pending independent round 2"
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch20-r2.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    }
+  ]
+}

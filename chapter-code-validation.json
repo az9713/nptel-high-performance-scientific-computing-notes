@@ -2142,7 +2142,287 @@
           "output_diff": []
         }
       ]
+    },
+    "chapter-17-gpu-stack-and-architectures.html": {
+      "status": "passed",
+      "checked_at_utc": "2026-10-28T06:33:33.518557+00:00",
+      "fingerprint_sha256": "3aaedd3a9eba6e3a10193bd0c444ce369ad39dfbe0f0675cfb0e1bd41d2c4fb8",
+      "execution_profile": "Workspace-contained execution; MPI self,tcp transport.",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "stack_check.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "244f18150af1d5873935d587e062716759bca89db5023c92515837faa4896905",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "fma_rounding.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "ebcbbc473058ab7ca06f27643902cec3bd6203cd9914e7175117790099dda528",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "architecture_model.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "24e764337a2b26fa414413e523980b9abd404646c86f860c1d6d971a333584d4",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "device_query.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "15ad6ff24389e8a0998966c7fcd04fbf25574b92a068503a49738e386735f3b5",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "offload_cost.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "a004b629f5f878182357a4f2d02de581d3dd80fa4442576e86bd3f605099f5ad",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-18-gpu-throughput-arithmetic-flops-bandwidth-simd-simt.html": {
+      "status": "passed",
+      "checked_at_utc": "2026-10-28T06:31:33.470152+00:00",
+      "fingerprint_sha256": "db6d24d647bdff44f1a12c12e74a8f7e7ecab06db04ce504d06e3e3b2b3583fb",
+      "execution_profile": "Workspace-contained execution; MPI self,tcp transport.",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "peak_arithmetic.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "51da467f7e16735f675dedf1840412d486d9746ce142dee72514f4cbe01b65e4",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "gpu_properties.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "2302c58ee07091d227b4addb6bc2ed0fd62142c7026c7efa9ce15605d492ab15",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "memory_rates.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "d408cb5ecf8541daa3d02b9c8588886c9d4df21cdae6088c12bcae443aa9b59d",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "pipeline_model.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "58fba5a6783a87bd88976f1019f570373e2886fc0f49b757c599b745a15a5329",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "fma_rates.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "9a66261c194f9dba5681b44cda8113f3a52b42baeea587823822a739903726f8",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-19-thread-hierarchy-warp-scheduling.html": {
+      "status": "passed",
+      "checked_at_utc": "2026-10-28T07:03:03.133235+00:00",
+      "fingerprint_sha256": "1d5ec8f11e6e7e6918cc224899ec22a4a0b9defd3a10cc55845b8fcaf7d6cace",
+      "execution_profile": "Workspace-contained execution; MPI self,tcp transport.",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "enumeration_model.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "fe49a46866fceff58d9291b7a6c584de2fa5e9c7ab2a6393be94f9a09865455c",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "index_domains.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "529ef531f810fabff4638f2f85222a63b2375cc7f43348381a07976d03ed4f68",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "warp_coordinates.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "d1212a54e1783bc1b022685069b70d048e9c740622296cd3d1b24ac33a317d63",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "warp_exchange.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "fdfde54ecbd3e5448194b253e433256497c34f012f48ac30205a4c48eff9178b",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "latency_model.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "86b406ed7a85d667d22b42d175a42fda59b18af20b7a0573bf6a9029e5fefc74",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "occupancy_report.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "0d4c676f88cdcc1349226ecc2b83b06efec83208fdf852b531e4b92fd0a7c381",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-20-cuda-programming-tools-kernels-and-launch-configuration.html": {
+      "status": "passed",
+      "checked_at_utc": "2026-10-28T07:19:49.834606+00:00",
+      "fingerprint_sha256": "d2272683e32a0f4d23a4679b45393b89166b27c899fd3c884856aeae8d365972",
+      "execution_profile": "Workspace-contained execution; MPI self,tcp transport.",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "cuda_types.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "9a3da516e3bc8928186a799ce35441bd248baaf8f52ab2c0f0312dc7015c5c91",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "vector_add.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "c57614bd6de6f5271399d3a96f18df1577ed6bd6f7f010db04a09c2f7629e020",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "pi_partials.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "60c2f043ea81b56679967aac4fb6dfa50797373e196267dca5f4079de9b49f48",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "launch_diagnostic.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "e43f24f41f8e507789a2929d1dacaa045a8dc7ca7fe80de007f9bcb25173d2e1",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
     }
   },
-  "updated_at_utc": "2026-10-28T06:32:39.925858+00:00"
+  "updated_at_utc": "2026-10-28T07:49:58.474626+00:00"
 }

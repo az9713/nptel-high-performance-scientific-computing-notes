@@ -7,10 +7,10 @@
   "playlist": "PLOzRYVm0a65fSrgx3kroerFJtFjGGIcXm",
   "format": "HTML",
   "publication": "GitHub Pages",
-  "status": "partial edition: chapters 1\u201316 of 31 written; every written chapter has an independent zero-blocking review verdict",
+  "status": "partial edition: chapters 1\u201320 of 31 written; every written chapter has an independent zero-blocking review verdict",
   "scope_note": "75 recordings (playlist items 2-76) are grouped into 31 chapters. Week 12 revision lectures (items 71-74) supply practice material. The 2-minute course trailer (item 1) is out of scope.",
   "final_review_pending_chapters": [],
-  "edition_note": "16 reviewed chapters cover 33 source recordings. Chapters 17\u201331 remain pending.",
+  "edition_note": "20 reviewed chapters cover 44 source recordings. Chapters 21\u201331 remain pending.",
   "chapters": [
     {
       "order": 1,
@@ -159,33 +159,33 @@
     },
     {
       "order": 17,
-      "title": "GPU computing: motivation, software stack, NVIDIA and Intel architectures",
+      "title": "GPU computing: the software stack, architectural units and the cost of offloading",
       "recordings": [
         35,
         36,
         37
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     },
     {
       "order": 18,
-      "title": "GPU throughput arithmetic: FLOPS, bandwidth, SIMD and SIMT",
+      "title": "GPU throughput arithmetic: FLOPS, memory bandwidth, SIMD and SIMT",
       "recordings": [
         38,
         39
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     },
     {
       "order": 19,
-      "title": "The thread hierarchy: grids, blocks, warps, and warp scheduling",
+      "title": "The thread hierarchy: index maps, warps, scheduling and occupancy",
       "recordings": [
         40,
         41,
         42,
         43
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     },
     {
       "order": 20,
@@ -194,7 +194,7 @@
         44,
         45
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     },
     {
       "order": 21,

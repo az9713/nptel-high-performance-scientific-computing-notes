@@ -1,0 +1,346 @@
+{
+  "chapter": 19,
+  "title": "The thread hierarchy: index maps, warps, scheduling and occupancy",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "BY_4cdGuFsg",
+      "label": "W7L2",
+      "playlist_index": 40,
+      "duration_seconds": 1780.4596875
+    },
+    {
+      "video_id": "e-6zAbvZ5BI",
+      "label": "W7L3",
+      "playlist_index": 41,
+      "duration_seconds": 1681.6588125
+    },
+    {
+      "video_id": "HT20KQf0BQY",
+      "label": "W7L4",
+      "playlist_index": 42,
+      "duration_seconds": 1883.509875
+    },
+    {
+      "video_id": "cNV8UdrEPQo",
+      "label": "W7L5",
+      "playlist_index": 43,
+      "duration_seconds": 1927.140125
+    }
+  ],
+  "frames_viewed": {
+    "BY_4cdGuFsg": [
+      "f0017",
+      "f0025",
+      "f0037",
+      "f0049"
+    ],
+    "e-6zAbvZ5BI": [
+      "f0015",
+      "f0028",
+      "f0047"
+    ],
+    "HT20KQf0BQY": [
+      "f0005",
+      "f0015",
+      "f0025",
+      "f0033",
+      "f0049",
+      "f0057"
+    ],
+    "cNV8UdrEPQo": [
+      "f0012",
+      "f0026",
+      "f0039",
+      "f0044",
+      "f0051",
+      "f0057",
+      "f0061"
+    ]
+  },
+  "source_uncertainties": [
+    "No A100 hardware is available. A100configuration facts use the retained actual official PDF;fresh webfetch timed out,not silently treated as new fetchsuccess.",
+    "The lecture6cycle/600cyclelatencies andone/fourcyclepipeline stages are teaching assumptions,not confirmedhardwarelatencies.",
+    "No hardwareinstructionlatency/schedulerpolicy/achievedoccupancy/performance causality is measured.",
+    "CUDA13.0archived docs provide context;actualinstalledCUDA13.3headers were read for useddeclarations.",
+    "Simple aggregatefloors omit allocationgranularity/partitions/reservedresources;APIpredictionis not achievedoccupancy."
+  ],
+  "lecture_corrections": [
+    {
+      "recording": "W7L2",
+      "claim": "Slide repeats threadIdx.y forz andlabelsblockDim.x asy count.",
+      "correction": "Use threadIdx.z forz andblockDim.x forx extent;explanationcorrectszlabel."
+    },
+    {
+      "recording": "W7L5",
+      "claim": "Fourwarpschedulers implyfourfullFP32warp arithmetic completions/cycle.",
+      "correction": "Issuecapacityandparticularinstructionpaththroughputmustdistinguish;64FP32lanes/SMgive2full32laneFMAinstructions/cycleinthepeakmodel."
+    },
+    {
+      "recording": "W7L5",
+      "claim": "600×4requires2400residentwarps/SMtohidememorylatency.",
+      "correction": "Productcounts hypotheticalinflightinstructionobjects underadditionalassumptions;A100cap64residentwarps,CC8.6cap48;memorytransactionsneedmatchingserviceboundary."
+    },
+    {
+      "recording": "W7L5",
+      "claim": "100%occupancy meansfullresourceutilization.",
+      "correction": "Occupancyfills residentwarpdenominator;readiness/laneactivity/throughputnotguaranteed."
+    }
+  ],
+  "sections": [
+    {
+      "section": "model",
+      "video_id": null,
+      "start": 0,
+      "end": 0,
+      "lecture_material": "Formalsoftware/hardwareobjects andJacobi37×37case.",
+      "research_extension": "CUDA13.0namedarchitecture/programming documentation.",
+      "teaching_construction": "Definitions andindependentownershipmodel.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "dimensions",
+      "video_id": "BY_4cdGuFsg",
+      "start": 491,
+      "end": 1406,
+      "lecture_material": "Grid/blockdimensions andbuilt-incoordinates.",
+      "research_extension": "CUDA13.0namedarchitecture/programming documentation.",
+      "teaching_construction": "Axislimits/notationcorrections andhaloownership.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "one-d",
+      "video_id": "BY_4cdGuFsg",
+      "start": 1406,
+      "end": 1780.4596875,
+      "lecture_material": "1DglobalID calculation andarrayupdate.",
+      "research_extension": "CUDA13.0namedarchitecture/programming documentation.",
+      "teaching_construction": "Quotient/remainderbijection,wrongstridecounterexample,nonmultipleguard.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "enumeration",
+      "video_id": "e-6zAbvZ5BI",
+      "start": 406,
+      "end": 1103,
+      "lecture_material": "Generalglobalblock/threadformula andexamples.",
+      "research_extension": "CUDA13.0namedarchitecture/programming documentation.",
+      "teaching_construction": "Mixedradixinverseproof andblockmajor-vs-geometricordercheck.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "domains",
+      "video_id": "e-6zAbvZ5BI",
+      "start": 1103,
+      "end": 1468,
+      "lecture_material": "Generalglobalthreadformula fordimensionalarrangements.",
+      "research_extension": "CUDA13.0namedarchitecture/programming documentation.",
+      "teaching_construction": "Coordinateproductbijection/guards,logicalrowstride and3DexactIDprogram.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "warps",
+      "video_id": "HT20KQf0BQY",
+      "start": 112,
+      "end": 279,
+      "lecture_material": "Warpgrouping andcounts.",
+      "research_extension": "CUDA13.0namedarchitecture/programming documentation.",
+      "teaching_construction": "LocalIDwarpmap,60thread2Dcheck.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "synchronization",
+      "video_id": null,
+      "start": 0,
+      "end": 0,
+      "lecture_material": "Notalecturecodetranscription.",
+      "research_extension": "Volta/Programming Guide synchronization contracts.",
+      "teaching_construction": "IndependentThreadScheduling,explicitballotmaskandsharedmemoryexchange.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "scheduling",
+      "video_id": "HT20KQf0BQY",
+      "start": 279,
+      "end": 1883.509875,
+      "lecture_material": "Dispatch/dependency/readiness,pipelinediagrams,FP32/FP64chunkillustration.",
+      "research_extension": "CUDA13.0namedarchitecture/programming documentation.",
+      "teaching_construction": "Readinessvsresourcecapacity;stageassumptions andarchitectureboundaries.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "latency",
+      "video_id": "cNV8UdrEPQo",
+      "start": 6,
+      "end": 1430,
+      "lecture_material": "Threeoverlapexpressions,arithmetic/memorylatencycalculations.",
+      "research_extension": "Volkov2010Littlelaw/ILP andAmperelimits.",
+      "teaching_construction": "Littlelawderivation/matchingunits,2,400warpresidencycorrection,boundedchainsimulator.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "occupancy",
+      "video_id": "cNV8UdrEPQo",
+      "start": 1430,
+      "end": 1927.140125,
+      "lecture_material": "8×8/16×16/32×32blockgranularityexample.",
+      "research_extension": "CUDAoccupancy/runtime/functionresource APIs.",
+      "teaching_construction": "Resourcefloorbound,actualCC8.6query/compiledresource/APIchecksandperformanceboundaries.",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "CUDA 13.0 Programming Guide",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-programming-guide/index.html#thread-hierarchy",
+      "supports": "Multidimensional local linearization, block/warp execution, synchronization and warp vote contracts.",
+      "page_checked": "§5.2;§7.1–7.2;§10.6 syncwarp;§10.19 ballot;§20.6.2 Independent Thread Scheduling.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA 13.0 Volta Tuning Guide",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/volta-tuning-guide/index.html",
+      "supports": "Architecture-specific issue/latency discussion and explicit synchronization under Independent Thread Scheduling.",
+      "page_checked": "§1.4.1.1–1.4.1.2 full text opened.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA 13.0 Ampere Tuning Guide",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/ampere-tuning-guide/index.html#occupancy",
+      "supports": "CC8.0 maximum64 resident warps;CC8.6 maximum48 warps/16blocks,64K register slots/100KiB shared.",
+      "page_checked": "§1.4.1.1 full occupancy text opened.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "NVIDIA A100 architecture white paper v1.0,2020",
+      "url": "https://images.nvidia.com/aem-dam/en-zz/Solutions/data-center/nvidia-ampere-architecture-whitepaper.pdf",
+      "supports": "Enabled108SM configuration and64FP32lanes/SM;derive two full32-lane FMA instructions/cycle in scalar peak model.",
+      "page_checked": "Previously downloaded official PDF reused read-only from work/ch17-sol/a100-whitepaper.pdf SHA2563a800ad7668ec37037fa5870a8e3bb681b75f19668b3d11492ab9b0da0d58815;local extracted hardware text checked again. Fresh web fetch timed out.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA 13.0 runtime occupancy API",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-runtime-api/group__CUDART__OCCUPANCY.html",
+      "supports": "Maximumactiveblocks perSM for compiledfunction/blocksize/dynamicsharedbytes.",
+      "page_checked": "§6.9 API definition/parameter descriptions opened.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA 13.0 cudaFuncAttributes",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-runtime-api/structcudaFuncAttributes.html",
+      "supports": "Compiled register slots/thread,static shared bytes,local bytes/thread,maxblock limit fields.",
+      "page_checked": "Variable numRegs description and full field listing opened.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA 13.0 runtime executioncontrol",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-runtime-api/group__CUDART__EXECUTION.html",
+      "supports": "Functionattribute query interface.",
+      "page_checked": "§6.7 API page opened;actual13.3declarations read separately.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA 13.0 Best Practices Guide",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-best-practices-guide/index.html#occupancy",
+      "supports": "Occupancy definition,allocationgranularity and performanceboundaries;dynamicsharedrequest experiments.",
+      "page_checked": "§11.1–11.4 opened;CC7.0granularity example not extrapolated asCC8.6constant.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "Vasily Volkov,Better Performance at Lower Occupancy,September22,2010",
+      "url": "https://www.nvidia.com/content/GTC-2010/pdfs/2238_GTC2010.pdf",
+      "supports": "Latency-vs-throughput unit distinction,Littlelaw concurrentwork,ILP/TLP alternatives;historicaldevice results not reused as currentmeasurements.",
+      "page_checked": "Slides7–14(webPDFindices6–13),fulltext opened.",
+      "checked_utc_date": "2026-10-28"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "G,B,b,t",
+      "first_section": "model",
+      "definition": "Grid/blockextentvectors andblock/localthreadcoordinates."
+    },
+    {
+      "symbol": "P_b,P_g,n,N",
+      "first_section": "model",
+      "definition": "Threads/block,blocks/grid,logicaldomainextents,Jacobiinteriorside."
+    },
+    {
+      "symbol": "b_lin,tau,s",
+      "first_section": "enumeration",
+      "definition": "Flattenedblock,localthread andblockmajorlaunchidentifiers."
+    },
+    {
+      "symbol": "A,q_A,q_n",
+      "first_section": "enumeration",
+      "definition": "Paddedextents,paddedgeometric andlogicalrowmajoroffsets."
+    },
+    {
+      "symbol": "w,ell,W_b",
+      "first_section": "warps",
+      "definition": "Logicalwarpid,laneid,warps/block."
+    },
+    {
+      "symbol": "M",
+      "first_section": "synchronization",
+      "definition": "Warp participantbitmask."
+    },
+    {
+      "symbol": "R(c)",
+      "first_section": "scheduling",
+      "definition": "Readywarp set atcyclec."
+    },
+    {
+      "symbol": "L,X,lambda",
+      "first_section": "latency",
+      "definition": "Matchedoperationlatency,throughput andmeaninflightcount."
+    },
+    {
+      "symbol": "H_b,H_t,H_w,R,S,r,s_b,a_simple",
+      "first_section": "occupancy",
+      "definition": "SMblock/thread/warpcaps,register/sharedbudgets,compiledregisters/thread,sharedbytes/block,simplifiedresidentblockbound."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B tools/check_chapter_code.py --file work/ch19-sol/chapter-19-thread-hierarchy-warp-scheduling.html --report work/ch19-sol/code-validation.json",
+    "listings": 6,
+    "all_passed": true,
+    "status": "Formal extracted validation passed 6/6; five exact-output comparisons and one successful-return check.",
+    "fingerprint_sha256": "1d5ec8f11e6e7e6918cc224899ec22a4a0b9defd3a10cc55845b8fcaf7d6cace",
+    "checked_at_utc": "2026-10-28T07:03:03.133235+00:00",
+    "execution_profile": "Workspace-contained execution; MPI self,tcp transport."
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT WITH FIXES",
+      "blocking": 0,
+      "major": 1,
+      "minor": 0,
+      "report": "work/reviews/ch19-r1.md",
+      "repairs": "Defined FP32/binary32, FP64/binary64, FMA and compute capability before their first substantive use; all six runnable contracts and outputs unchanged."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch19-r2.md",
+      "changes": "Fresh full independent source, mathematical, six-listing/raw-capture and six-solution review; R1 definitions repair verified, no findings."
+    }
+  ],
+  "measurement_provenance": {
+    "utc_start": "2026-10-28T07:01:05.513Z",
+    "utc_end": "2026-10-28T07:02:02.702Z",
+    "exclusive_agent_slot": true,
+    "programs": 6,
+    "maximum_user_device_allocation_bytes": 262144,
+    "scope": "Untimed correctness checks and occupancy-resource predictions;no measured throughput/latency/achievedoccupancy claim.",
+    "records": "Private captures retain exact sourceSHA256,argv,stdout/stderr,returncodes,UTC andmonotonic endpoints.",
+    "environment": "CUDA13.3.1/nvcc13.3.73,NVIDIA GeForce RTX3050Laptop4GB,CC8.6,16SMs,Windows11/WSLUbuntu24.04.",
+    "warnings": "FirstWSL invocation emitted pre-existing unknown.wslconfigkeywarning;configurationnotmodified. Runtimehelper paths retained privately."
+  }
+}
