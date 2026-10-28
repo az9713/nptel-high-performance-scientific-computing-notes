@@ -1,10 +1,10 @@
 {
-  "checked_at_utc": "2026-10-27T19:11:18.791008+00:00",
+  "checked_at_utc": "2026-10-28T05:18:24.683060+00:00",
   "status": "passed",
-  "tested_commit": "6aef1c5e75690d9e210184a197ac0e9a9ab1e640",
+  "tested_commit": "210eae141bda1b9a0fc82ccb933c7156381a36d2",
   "live_url": "https://az9713.github.io/nptel-high-performance-scientific-computing-notes/",
   "scope": "Actual served-file byte agreement and focused live reader controls; not a scientific review",
-  "public_files_checked": 54,
+  "public_files_checked": 56,
   "all_served_bytes_match_git": true,
   "mismatched_files": [],
   "browser": [
@@ -61,6 +61,24 @@
       "file": "code-lab.html",
       "viewport": 390,
       "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 385,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-12-openmp-synchronization-loops-data-sharing.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 385,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-12-openmp-synchronization-loops-data-sharing.html",
+      "viewport": 390,
+      "status": "passed"
     }
   ],
   "served_files": [
@@ -82,12 +100,12 @@
     {
       "file": "README.md",
       "bytes_match_git": true,
-      "sha256": "d4aa8e9cbc6580c5b7d5504f2e6571bd7d7005df0e0e59d4fcea1d8fc390c745"
+      "sha256": "a7897b75a2e554c33fb30ab83432a1a068b84ec1a5d2d3d57d70234085e6ee70"
     },
     {
       "file": "WORKFLOW.md",
       "bytes_match_git": true,
-      "sha256": "d29b93f61fa68897cb752b756c70e9520189fee8c1279e8e1bf0eba06fd6c867"
+      "sha256": "6c9bf681263756c8f9a13b7dfc916ac1691989420a104e3931a7667b7a35872d"
     },
     {
       "file": "assets/book.css",
@@ -112,12 +130,12 @@
     {
       "file": "assets/preview-mobile.png",
       "bytes_match_git": true,
-      "sha256": "1512f38aa9e30c534f89ead21ffb3b4a8fb159da9085841ad8aaf1d09f89ff18"
+      "sha256": "3d5feda54fdf98724536b2b97f4228cb30bfe1e4041d8eff78a5a89469a497f5"
     },
     {
       "file": "assets/preview.png",
       "bytes_match_git": true,
-      "sha256": "a10915d963aac19a21466bdf60b1305f396f24551cbafda6b95a1254cc4902a2"
+      "sha256": "e48b0936898ce5cf7a6d26d7efb92a273964b1dfa89050172231d4bf40dd0b3c"
     },
     {
       "file": "assets/site-preview.png",
@@ -232,7 +250,7 @@
     {
       "file": "chapter-11-openmp-threads-and-work-distribution.html",
       "bytes_match_git": true,
-      "sha256": "6df24192f016801fcb3eeca4ee816d01a742626a953483ad31143ad3df79b517"
+      "sha256": "6651e1ab88ccaba1b4e5e1d54ad1e0b408882bf8beff26baeab75a287e033689"
     },
     {
       "file": "chapter-11-openmp-threads-and-work-distribution.meta.json",
@@ -240,14 +258,24 @@
       "sha256": "4a3c9914440aaba5d5428bfb5c3d4d235bf0ec98d4b6289131b2995dd65017c5"
     },
     {
+      "file": "chapter-12-openmp-synchronization-loops-data-sharing.html",
+      "bytes_match_git": true,
+      "sha256": "36cf9cdb267f6499098fadcc1d2cc5de9a1dedb1dbc7877e51432eab08684813"
+    },
+    {
+      "file": "chapter-12-openmp-synchronization-loops-data-sharing.meta.json",
+      "bytes_match_git": true,
+      "sha256": "2af5e7a32045b68d1eedfcbb25f67f5fd07c024c42b38adcca45b8d711c621a3"
+    },
+    {
       "file": "chapter-code-validation.json",
       "bytes_match_git": true,
-      "sha256": "4e80dff049d14520915c3489e8d6f3f98ae9f94c3f229e175352001ab9714c5d"
+      "sha256": "b94096b7c9729104231a2e3d160b60101c34d49c96576325abd3aca49e2d3510"
     },
     {
       "file": "code-lab.html",
       "bytes_match_git": true,
-      "sha256": "0a79e1b800d6bd430d0866732ccea32acc1406215b4a3e0fb245b697ec40f116"
+      "sha256": "b02fe831e3fb37c17e4522fd4a7190dc9269ca9941bd046e58449432e68a8216"
     },
     {
       "file": "code_lab.py",
@@ -257,62 +285,62 @@
     {
       "file": "completion.json",
       "bytes_match_git": true,
-      "sha256": "e57f9b8fb126cbedfbf8ab9e528b510210ad31ecda0003fc36e78c9daa4f2aec"
+      "sha256": "e25044ca81f6979302114e7f4f1634e11bb817b25b344b1bbf116539f7ab6e59"
     },
     {
       "file": "editorial-review-summary.json",
       "bytes_match_git": true,
-      "sha256": "a272448cd7d32610e4928d10b628be6cfbfdf81ee7ab27ebe476e79b17f1eac1"
+      "sha256": "573e4627878f6eb4f468b6ecac3abb696bf782472c09d95d5da7010bf9e60c07"
     },
     {
       "file": "index.html",
       "bytes_match_git": true,
-      "sha256": "f5ecb20f9b0c37f4fce226064c1a1f255bd53bd11c69fac8df304bc352084782"
+      "sha256": "0cfecd1cb4e43f0eef719725a067b1f1d332e7438e8a0ed0fed7bd5a89f1b407"
     },
     {
       "file": "package-validation.json",
       "bytes_match_git": true,
-      "sha256": "7e7ef8646d442c7d2afcab2cb8cbffe6e505a352d26c7b8fefde418994decf48"
+      "sha256": "4e7b015f3e347bae4ca70fcac3b8995a6dabb09abe93295546a93fa9f41c3bef"
     },
     {
       "file": "publication-validation.json",
       "bytes_match_git": true,
-      "sha256": "f5673c70fbd7979ab26823a6041f1a645c0c328662b400b082ea51e98f394d78"
+      "sha256": "ba93079611b7dcb58dac1e11e3f6951bb6e8cf98148596e133e2ac024f369997"
     },
     {
       "file": "reader-validation.json",
       "bytes_match_git": true,
-      "sha256": "942d7afb7aee7b37eeb7dfbe6c0f66cadafa1c6f6ab52ef62c2afd38e935c66f"
+      "sha256": "7440f4ea40a0a3d6ca259eacf722838b9a711b77b44530efcf96fccc0de4ce07"
     },
     {
       "file": "references.html",
       "bytes_match_git": true,
-      "sha256": "a8a68b1a82ee61f095421088edf718bf6ff55ea7f44f0417bd38fc209cdea52c"
+      "sha256": "70433b43bba6afb56e8cafdb5abee2b086f1782e68e6a3cb24e6266cba1377c8"
     },
     {
       "file": "source-free-validation.json",
       "bytes_match_git": true,
-      "sha256": "600594cb70b3e164e986a99f39ef6d72024319c8d8e0cce62e07be3a3b380d72"
+      "sha256": "33c9cf924b2706601474bb0736ddfcedadc5af08eb9d6bac94855d6555e51bf2"
     },
     {
       "file": "source-manifest.json",
       "bytes_match_git": true,
-      "sha256": "c9ddbdc93c79038539a40dcc0f96292b3d1918cbde9b2e7bb770e4573182fa6e"
+      "sha256": "1e62b06cbad9a9371e1c66bed90c7119956c6182e6db2795c9d6766df8bd750e"
     },
     {
       "file": "source-map.html",
       "bytes_match_git": true,
-      "sha256": "8a07cabdc861b2f17904efc5225bcab07ef9e305b4cb6a07a56a16b6f8fa4744"
+      "sha256": "33cd64d14849bf8f48a541dffacba4515b0388b86b9295b7b70d73eae773b1e8"
     },
     {
       "file": "source-map.json",
       "bytes_match_git": true,
-      "sha256": "1332b2817f3038e8bafe72706058c239d1a56f47e1659c5a53ee0f3a592ef938"
+      "sha256": "bc60fc13db36010198c1a6d2b8b37f48d40d1b3b45b8095113cd880f407052ea"
     },
     {
       "file": "source-validation-summary.json",
       "bytes_match_git": true,
-      "sha256": "505d990314165cbb4a0d0e2d95868b70f9b1768e40dbbaec22f0d18551f8fea1"
+      "sha256": "4fe9f7cdd5933aef409dfca919b2543a29f6fd50a20a6787ac0df249f60fc797"
     },
     {
       "file": "tools/build_book.py",
