@@ -1,10 +1,10 @@
 {
-  "checked_at_utc": "2026-10-28T05:18:24.683060+00:00",
+  "checked_at_utc": "2026-10-28T06:57:39.454728+00:00",
   "status": "passed",
-  "tested_commit": "210eae141bda1b9a0fc82ccb933c7156381a36d2",
+  "tested_commit": "fbefc5fcf11353f7313bd2b313efcbad6d3bcf1e",
   "live_url": "https://az9713.github.io/nptel-high-performance-scientific-computing-notes/",
   "scope": "Actual served-file byte agreement and focused live reader controls; not a scientific review",
-  "public_files_checked": 56,
+  "public_files_checked": 64,
   "all_served_bytes_match_git": true,
   "mismatched_files": [],
   "browser": [
@@ -79,6 +79,78 @@
       "file": "chapter-12-openmp-synchronization-loops-data-sharing.html",
       "viewport": 390,
       "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 123,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-13-openmp-memory-tasks-numerical-codes.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 123,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-13-openmp-memory-tasks-numerical-codes.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 137,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-14-mpi-processes-and-point-to-point-messages.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 137,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-14-mpi-processes-and-point-to-point-messages.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 70,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-15-mpi-collective-communication.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 70,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-15-mpi-collective-communication.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 269,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-16-domain-decomposition-mpi-solver-and-performance-analysis.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 269,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-16-domain-decomposition-mpi-solver-and-performance-analysis.html",
+      "viewport": 390,
+      "status": "passed"
     }
   ],
   "served_files": [
@@ -100,12 +172,12 @@
     {
       "file": "README.md",
       "bytes_match_git": true,
-      "sha256": "a7897b75a2e554c33fb30ab83432a1a068b84ec1a5d2d3d57d70234085e6ee70"
+      "sha256": "00b0ee77a2838192b0d8d54cc2ded2fee150f1f6b215ffdd6096d60cfb79d524"
     },
     {
       "file": "WORKFLOW.md",
       "bytes_match_git": true,
-      "sha256": "6c9bf681263756c8f9a13b7dfc916ac1691989420a104e3931a7667b7a35872d"
+      "sha256": "178f1b091d4a52ae799db27200d8c8e7a67a4d1e2162e748f1fb64d72dc56e9d"
     },
     {
       "file": "assets/book.css",
@@ -130,12 +202,12 @@
     {
       "file": "assets/preview-mobile.png",
       "bytes_match_git": true,
-      "sha256": "3d5feda54fdf98724536b2b97f4228cb30bfe1e4041d8eff78a5a89469a497f5"
+      "sha256": "ba97c679bc3540850f5c2d23628c1d69ddf497e5438c8c7360d5d37cf0352c73"
     },
     {
       "file": "assets/preview.png",
       "bytes_match_git": true,
-      "sha256": "e48b0936898ce5cf7a6d26d7efb92a273964b1dfa89050172231d4bf40dd0b3c"
+      "sha256": "a7a95eace6a8aa16cc0d542954cc1b70a5ea78dd681cd057b70a6ed262341349"
     },
     {
       "file": "assets/site-preview.png",
@@ -260,7 +332,7 @@
     {
       "file": "chapter-12-openmp-synchronization-loops-data-sharing.html",
       "bytes_match_git": true,
-      "sha256": "36cf9cdb267f6499098fadcc1d2cc5de9a1dedb1dbc7877e51432eab08684813"
+      "sha256": "81089fda09763643e7ab74931735e1edf17e154fe27eec18392693862f80741b"
     },
     {
       "file": "chapter-12-openmp-synchronization-loops-data-sharing.meta.json",
@@ -268,79 +340,119 @@
       "sha256": "2af5e7a32045b68d1eedfcbb25f67f5fd07c024c42b38adcca45b8d711c621a3"
     },
     {
+      "file": "chapter-13-openmp-memory-tasks-numerical-codes.html",
+      "bytes_match_git": true,
+      "sha256": "6e4541211e1637b536e38d8a4a0b15049bcefbe9ca9284738fd4510fafe7c31f"
+    },
+    {
+      "file": "chapter-13-openmp-memory-tasks-numerical-codes.meta.json",
+      "bytes_match_git": true,
+      "sha256": "02f2c4323dfcf6daff227a646be7fbd2223214dae15e01b63d083b9822b1fcaf"
+    },
+    {
+      "file": "chapter-14-mpi-processes-and-point-to-point-messages.html",
+      "bytes_match_git": true,
+      "sha256": "a22017808b579a74ac01f722a7a3d236d24c274e0430d542cba261c27dfd0a5a"
+    },
+    {
+      "file": "chapter-14-mpi-processes-and-point-to-point-messages.meta.json",
+      "bytes_match_git": true,
+      "sha256": "b813c55a08df668b57c417ef1286cc900baaac8d9af02a7f2dfa68378cbbb7af"
+    },
+    {
+      "file": "chapter-15-mpi-collective-communication.html",
+      "bytes_match_git": true,
+      "sha256": "4fc7bd07f3d855dc63e3ce7496691b1637464a1d3eb2306903de36b7f006cc53"
+    },
+    {
+      "file": "chapter-15-mpi-collective-communication.meta.json",
+      "bytes_match_git": true,
+      "sha256": "a429e71f455416df8fc2c4604db6ff3a089599aafda2888d36ca806799a327d3"
+    },
+    {
+      "file": "chapter-16-domain-decomposition-mpi-solver-and-performance-analysis.html",
+      "bytes_match_git": true,
+      "sha256": "5762cddcec38b327de32e30dbb5e7545a6b0dd0175cfc866aec0265cb30e3b1c"
+    },
+    {
+      "file": "chapter-16-domain-decomposition-mpi-solver-and-performance-analysis.meta.json",
+      "bytes_match_git": true,
+      "sha256": "73e5f0eb83b0c76c41d89695c3b9f25e5c2c4040e9f530f65573586586a962ae"
+    },
+    {
       "file": "chapter-code-validation.json",
       "bytes_match_git": true,
-      "sha256": "b94096b7c9729104231a2e3d160b60101c34d49c96576325abd3aca49e2d3510"
+      "sha256": "07a5959d3861df4847b4572ad11b2970ab70ca4b12fe8acb1b90f207918c41fa"
     },
     {
       "file": "code-lab.html",
       "bytes_match_git": true,
-      "sha256": "b02fe831e3fb37c17e4522fd4a7190dc9269ca9941bd046e58449432e68a8216"
+      "sha256": "aee065916d143aff04aaeb116acd596d6a198b3fafb5714c8bdf6867382437e9"
     },
     {
       "file": "code_lab.py",
       "bytes_match_git": true,
-      "sha256": "f02e1519d9898f5f85e0c7729f9d9f11bf57a3999dc1d05571c21967ae929e94"
+      "sha256": "fe60f2feebb3c4e09500a7d77fca844eb5922a969e0d7ee79beb66342b731f68"
     },
     {
       "file": "completion.json",
       "bytes_match_git": true,
-      "sha256": "e25044ca81f6979302114e7f4f1634e11bb817b25b344b1bbf116539f7ab6e59"
+      "sha256": "ed099576ca430d1257097f13726b23c68f9b00b7f51400d212a56463f0e82f35"
     },
     {
       "file": "editorial-review-summary.json",
       "bytes_match_git": true,
-      "sha256": "573e4627878f6eb4f468b6ecac3abb696bf782472c09d95d5da7010bf9e60c07"
+      "sha256": "14a2dfca33b110c8436c3d5b1dfeb507e1db0c252bc5408b2b87a8ae42742ac7"
     },
     {
       "file": "index.html",
       "bytes_match_git": true,
-      "sha256": "0cfecd1cb4e43f0eef719725a067b1f1d332e7438e8a0ed0fed7bd5a89f1b407"
+      "sha256": "3e5e3162cba1e7d3198cffe00f91dd2900059f9214cee1216eca9bbbc7d034ca"
     },
     {
       "file": "package-validation.json",
       "bytes_match_git": true,
-      "sha256": "4e7b015f3e347bae4ca70fcac3b8995a6dabb09abe93295546a93fa9f41c3bef"
+      "sha256": "3f04d6a39ca64e8d038ec4db8eeebdba61173a91087bcbb469f2a22e1d07deaa"
     },
     {
       "file": "publication-validation.json",
       "bytes_match_git": true,
-      "sha256": "ba93079611b7dcb58dac1e11e3f6951bb6e8cf98148596e133e2ac024f369997"
+      "sha256": "de290b2dc5c254898f1fcb5c901cec5cae3becd17bf413348c440ac1a3285065"
     },
     {
       "file": "reader-validation.json",
       "bytes_match_git": true,
-      "sha256": "7440f4ea40a0a3d6ca259eacf722838b9a711b77b44530efcf96fccc0de4ce07"
+      "sha256": "e61e3f03761607c145409cd4a368da953d87ac2c48ad49cf36c801fb5faa74cc"
     },
     {
       "file": "references.html",
       "bytes_match_git": true,
-      "sha256": "70433b43bba6afb56e8cafdb5abee2b086f1782e68e6a3cb24e6266cba1377c8"
+      "sha256": "0224555d2f697c3e0b48046d9902cc596ddd76952bc14b7bbd4058d8521ec425"
     },
     {
       "file": "source-free-validation.json",
       "bytes_match_git": true,
-      "sha256": "33c9cf924b2706601474bb0736ddfcedadc5af08eb9d6bac94855d6555e51bf2"
+      "sha256": "649f4d9d7d4b765b963611bece4ac78e84f0ad7be06ccdefce970f1d344f672a"
     },
     {
       "file": "source-manifest.json",
       "bytes_match_git": true,
-      "sha256": "1e62b06cbad9a9371e1c66bed90c7119956c6182e6db2795c9d6766df8bd750e"
+      "sha256": "b6a40dfd9f565a7813c29879d66929ecf9ffffb8b4fdc0b4d094a7752af84763"
     },
     {
       "file": "source-map.html",
       "bytes_match_git": true,
-      "sha256": "33cd64d14849bf8f48a541dffacba4515b0388b86b9295b7b70d73eae773b1e8"
+      "sha256": "e8011b4234548282b10859894833334fcd220722eefbe724efb2f5d46c867503"
     },
     {
       "file": "source-map.json",
       "bytes_match_git": true,
-      "sha256": "bc60fc13db36010198c1a6d2b8b37f48d40d1b3b45b8095113cd880f407052ea"
+      "sha256": "17864d0d587f448e8575a6685165bf94abbd0ae99792f96fc17b4ad9f6a9d678"
     },
     {
       "file": "source-validation-summary.json",
       "bytes_match_git": true,
-      "sha256": "4fe9f7cdd5933aef409dfca919b2543a29f6fd50a20a6787ac0df249f60fc797"
+      "sha256": "b7b1daef857afe58211ccc46b7b14807f0e488365dd392621491c55dbc6f9c0b"
     },
     {
       "file": "tools/build_book.py",
@@ -350,7 +462,7 @@
     {
       "file": "tools/check_chapter_code.py",
       "bytes_match_git": true,
-      "sha256": "f94367f4891a02a27689749d7fc091c785cbf7a8cf2e32735f9c39da465728d9"
+      "sha256": "f0ab4111694db1226ad1175164afd4199da831abb4f1e65d4b3e1d668958a751"
     },
     {
       "file": "tools/check_package.py",
