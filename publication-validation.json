@@ -1,10 +1,11 @@
 {
-  "checked_at_utc": "2026-10-28T06:57:39.454728+00:00",
+  "checked_at_utc": "2026-10-28T08:09:31.730203+00:00",
   "status": "passed",
-  "tested_commit": "fbefc5fcf11353f7313bd2b313efcbad6d3bcf1e",
+  "tested_commit": "68e939f2d83180837929b87bbd60fe8aab4e8db4",
   "live_url": "https://az9713.github.io/nptel-high-performance-scientific-computing-notes/",
   "scope": "Actual served-file byte agreement and focused live reader controls; not a scientific review",
-  "public_files_checked": 64,
+  "byte_reference": "Canonical blobs from the pinned commit via git cat-file --batch; no archive line-ending conversion",
+  "public_files_checked": 72,
   "all_served_bytes_match_git": true,
   "mismatched_files": [],
   "browser": [
@@ -151,6 +152,78 @@
       "file": "chapter-16-domain-decomposition-mpi-solver-and-performance-analysis.html",
       "viewport": 390,
       "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 45,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-17-gpu-stack-and-architectures.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 45,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-17-gpu-stack-and-architectures.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 155,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-18-gpu-throughput-arithmetic-flops-bandwidth-simd-simt.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 155,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-18-gpu-throughput-arithmetic-flops-bandwidth-simd-simt.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 38,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-19-thread-hierarchy-warp-scheduling.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 38,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-19-thread-hierarchy-warp-scheduling.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 92,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-20-cuda-programming-tools-kernels-and-launch-configuration.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 92,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-20-cuda-programming-tools-kernels-and-launch-configuration.html",
+      "viewport": 390,
+      "status": "passed"
     }
   ],
   "served_files": [
@@ -172,12 +245,12 @@
     {
       "file": "README.md",
       "bytes_match_git": true,
-      "sha256": "00b0ee77a2838192b0d8d54cc2ded2fee150f1f6b215ffdd6096d60cfb79d524"
+      "sha256": "e46c847d4de13eeba4313281ee7fc44217fa88d273ced59a6ba24dc0fad9d21a"
     },
     {
       "file": "WORKFLOW.md",
       "bytes_match_git": true,
-      "sha256": "178f1b091d4a52ae799db27200d8c8e7a67a4d1e2162e748f1fb64d72dc56e9d"
+      "sha256": "4a0ce5a1cd48d0e830c2c5d442f7e470664e88c20df8b0cb07287893d90aee19"
     },
     {
       "file": "assets/book.css",
@@ -202,12 +275,12 @@
     {
       "file": "assets/preview-mobile.png",
       "bytes_match_git": true,
-      "sha256": "ba97c679bc3540850f5c2d23628c1d69ddf497e5438c8c7360d5d37cf0352c73"
+      "sha256": "212cc62deb5fd50694009e7b041aafa557443abe47b2e9e334cc5bf972ac6a36"
     },
     {
       "file": "assets/preview.png",
       "bytes_match_git": true,
-      "sha256": "a7a95eace6a8aa16cc0d542954cc1b70a5ea78dd681cd057b70a6ed262341349"
+      "sha256": "d44cc182ef69dae0f7bc439ea1d6dd18cb27d8736b89cf7a0bae25e42c4f13d0"
     },
     {
       "file": "assets/site-preview.png",
@@ -372,7 +445,7 @@
     {
       "file": "chapter-16-domain-decomposition-mpi-solver-and-performance-analysis.html",
       "bytes_match_git": true,
-      "sha256": "5762cddcec38b327de32e30dbb5e7545a6b0dd0175cfc866aec0265cb30e3b1c"
+      "sha256": "d6f3f4abdaf2dc5afb09bb31bda245b6c391442eadc91e07d05e47408a5d5033"
     },
     {
       "file": "chapter-16-domain-decomposition-mpi-solver-and-performance-analysis.meta.json",
@@ -380,14 +453,54 @@
       "sha256": "73e5f0eb83b0c76c41d89695c3b9f25e5c2c4040e9f530f65573586586a962ae"
     },
     {
+      "file": "chapter-17-gpu-stack-and-architectures.html",
+      "bytes_match_git": true,
+      "sha256": "5e1264301b840012e477075be55402903eceb3ceb74b8b0399ca95ef6bc08e92"
+    },
+    {
+      "file": "chapter-17-gpu-stack-and-architectures.meta.json",
+      "bytes_match_git": true,
+      "sha256": "065e86bfdad287c93364d735c970afc7438f2ef85c9c2f437a8f741c9a0ad5b6"
+    },
+    {
+      "file": "chapter-18-gpu-throughput-arithmetic-flops-bandwidth-simd-simt.html",
+      "bytes_match_git": true,
+      "sha256": "572fb80854726f4d93733627ac483fd5f4fa40d7d5bd77405708a25e80c3ba2a"
+    },
+    {
+      "file": "chapter-18-gpu-throughput-arithmetic-flops-bandwidth-simd-simt.meta.json",
+      "bytes_match_git": true,
+      "sha256": "29db29f7db8816a26b210ba07f71f62c7fda362c6d9a76de6035a5f69f7490d8"
+    },
+    {
+      "file": "chapter-19-thread-hierarchy-warp-scheduling.html",
+      "bytes_match_git": true,
+      "sha256": "caca24058b53987dd19155ce08568c5a37a9a55f6b051dd1af332f11c7acc879"
+    },
+    {
+      "file": "chapter-19-thread-hierarchy-warp-scheduling.meta.json",
+      "bytes_match_git": true,
+      "sha256": "ee652f2a993f530c5a2ee86471c01c116d78463086b9fa08b648e128accd339a"
+    },
+    {
+      "file": "chapter-20-cuda-programming-tools-kernels-and-launch-configuration.html",
+      "bytes_match_git": true,
+      "sha256": "033b7d08702c08cc9155e504b0fdfcbcb1fd4b095f8eed5c3a69c33bdca6c8ae"
+    },
+    {
+      "file": "chapter-20-cuda-programming-tools-kernels-and-launch-configuration.meta.json",
+      "bytes_match_git": true,
+      "sha256": "f75abea443e9bc1ad7f3bb3a86ec2116b7cc8b3780c0f4bee069364fe5e22359"
+    },
+    {
       "file": "chapter-code-validation.json",
       "bytes_match_git": true,
-      "sha256": "07a5959d3861df4847b4572ad11b2970ab70ca4b12fe8acb1b90f207918c41fa"
+      "sha256": "5f87f1a6746aa273166669746594f5872cf0d47f09e19b32c86ca4b35b63a5fb"
     },
     {
       "file": "code-lab.html",
       "bytes_match_git": true,
-      "sha256": "aee065916d143aff04aaeb116acd596d6a198b3fafb5714c8bdf6867382437e9"
+      "sha256": "a49f554fc87452ec353d2855ebd6442ab89937ae9b71f0905f3a783d633fbb99"
     },
     {
       "file": "code_lab.py",
@@ -397,62 +510,62 @@
     {
       "file": "completion.json",
       "bytes_match_git": true,
-      "sha256": "ed099576ca430d1257097f13726b23c68f9b00b7f51400d212a56463f0e82f35"
+      "sha256": "5f3312182c6be655ccfc7e3f44e601af034fd282b0e831eac06cde99f1c17a1e"
     },
     {
       "file": "editorial-review-summary.json",
       "bytes_match_git": true,
-      "sha256": "14a2dfca33b110c8436c3d5b1dfeb507e1db0c252bc5408b2b87a8ae42742ac7"
+      "sha256": "2d6901b285505c3f386245218f35c3f6b72c96e94727eb7ed182b14163b6902e"
     },
     {
       "file": "index.html",
       "bytes_match_git": true,
-      "sha256": "3e5e3162cba1e7d3198cffe00f91dd2900059f9214cee1216eca9bbbc7d034ca"
+      "sha256": "58535bf598e8bb839c26a8176aead1d8907bf59560bf8d31c8722bd20ae6384b"
     },
     {
       "file": "package-validation.json",
       "bytes_match_git": true,
-      "sha256": "3f04d6a39ca64e8d038ec4db8eeebdba61173a91087bcbb469f2a22e1d07deaa"
+      "sha256": "b24238187f2a03a0639771b9abcf8a6c3cf22d09d51580922b68547b6f0363f2"
     },
     {
       "file": "publication-validation.json",
       "bytes_match_git": true,
-      "sha256": "de290b2dc5c254898f1fcb5c901cec5cae3becd17bf413348c440ac1a3285065"
+      "sha256": "42337db5392827ff02edfeead402901f36c5501879a0f9c753979981c7f4c7ce"
     },
     {
       "file": "reader-validation.json",
       "bytes_match_git": true,
-      "sha256": "e61e3f03761607c145409cd4a368da953d87ac2c48ad49cf36c801fb5faa74cc"
+      "sha256": "f6b2a1ebc45f348e0778aa8d5fededafb7a819a979a8600c8d2104bd16f74f9f"
     },
     {
       "file": "references.html",
       "bytes_match_git": true,
-      "sha256": "0224555d2f697c3e0b48046d9902cc596ddd76952bc14b7bbd4058d8521ec425"
+      "sha256": "3af042ed5acdaac8064bd828d63106da2561a56244fbbf44b1b51408891d5f67"
     },
     {
       "file": "source-free-validation.json",
       "bytes_match_git": true,
-      "sha256": "649f4d9d7d4b765b963611bece4ac78e84f0ad7be06ccdefce970f1d344f672a"
+      "sha256": "3fdf071ee837b86f4ce97f046f876c9aca8aa4d09db5349a813686cffbc1cd4d"
     },
     {
       "file": "source-manifest.json",
       "bytes_match_git": true,
-      "sha256": "b6a40dfd9f565a7813c29879d66929ecf9ffffb8b4fdc0b4d094a7752af84763"
+      "sha256": "88fd0e82e27401b97cada4aa79b52a1fe170d816ca5db5186245af22893e6d6a"
     },
     {
       "file": "source-map.html",
       "bytes_match_git": true,
-      "sha256": "e8011b4234548282b10859894833334fcd220722eefbe724efb2f5d46c867503"
+      "sha256": "980e386317ae4423920b7f040948afa1619897ccceefc6a80798f18c34ff55c3"
     },
     {
       "file": "source-map.json",
       "bytes_match_git": true,
-      "sha256": "17864d0d587f448e8575a6685165bf94abbd0ae99792f96fc17b4ad9f6a9d678"
+      "sha256": "627f70c5e4fa9312c400d1900c8e5a139e471daafc2661452a0895384cdceb4b"
     },
     {
       "file": "source-validation-summary.json",
       "bytes_match_git": true,
-      "sha256": "b7b1daef857afe58211ccc46b7b14807f0e488365dd392621491c55dbc6f9c0b"
+      "sha256": "36c33d3355e90aa8f94ffa10020f7ab656f62577165362135d96ee0179a6f49a"
     },
     {
       "file": "tools/build_book.py",
