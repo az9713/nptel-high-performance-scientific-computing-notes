@@ -1,0 +1,441 @@
+{
+  "chapter": 15,
+  "title": "MPI II: collective communication and global numerical decisions",
+  "status": "reviewed and locally validated; independent round 3 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "pKlPIwdGSbE",
+      "label": "W5L3",
+      "playlist_index": 29,
+      "duration_seconds": 1580.7913125
+    },
+    {
+      "video_id": "6bXLTaJjg_U",
+      "label": "W6L1",
+      "playlist_index": 33,
+      "duration_seconds": 1229.218
+    },
+    {
+      "video_id": "gG3oMdoBZbM",
+      "label": "W6L2",
+      "playlist_index": 34,
+      "duration_seconds": 1188.327625
+    }
+  ],
+  "frames_viewed": {
+    "pKlPIwdGSbE": [
+      "f0007",
+      "f0027",
+      "f0031",
+      "f0050"
+    ],
+    "6bXLTaJjg_U": [
+      "f0012",
+      "f0023",
+      "f0034"
+    ],
+    "gG3oMdoBZbM": [
+      "f0011",
+      "f0019",
+      "f0033",
+      "f0036"
+    ]
+  },
+  "source_uncertainties": [
+    "The installed default collective algorithms were not traced. Versioned Open MPI 4.1.6 source statements are conditional on that component and fixed policy being used; they are not inferred from timings.",
+    "All captures use TCP loopback plus self transport on one hybrid laptop, rather than shared-memory message transport or inter-node links. No measured latency/bandwidth fit or algorithm crossover is claimed.",
+    "The large trial variation is retained. Its allocation among scheduling, TCP processing and memory copies was not measured.",
+    "Historical parked-draft timing claims with incomplete raw evidence are excluded. Only the new retained captures supply empirical claims.",
+    "The lecture six-rank normalization program has an out-of-bounds gathered array. Arithmetic explains the visible partial values, but invalid C output is not promised or rerun.",
+    "The official MPI4.1 PDF prints collective chapter6, while the Forum explicitly unofficial HTML rendering uses chapter7. Inline HTML section labels identify that source format. A fresh local PDF download and PyMuPDF extraction checked title/version,printedpp189–190(chapter6/localcompletion),p196(barrier),pp250–252(nonblocking). Other routine details were checked through the individually linked HTML sections; the PDF did not confirm HTML chapter7 numbering. Programs use established pre4.1 APIs; large-count/persistent APIs are not demonstrated."
+  ],
+  "lecture_corrections": [
+    {
+      "recording": "W5L3/W6L1",
+      "claim": "Blocking broadcast waits for all receivers; collectives universally use fewer buffers; four broadcast pairs for four ranks.",
+      "correction": "Completion is generally local; internal buffer allocation is not prescribed; a direct off-root schedule uses p-1 pairs."
+    },
+    {
+      "recording": "W6L1",
+      "claim": "The fixed N=8 dot-product run at six ranks prints 182.",
+      "correction": "Integer N/p includes the first six elements, giving twice the sum of their squares,182. The N/4 local allocation would overflow at p=1 or2. The new Scatterv program includes all eight elements."
+    },
+    {
+      "recording": "W6L2",
+      "claim": "Allgather of all partial sums is needed for normalization; six-rank terminal output.",
+      "correction": "An Allreduce of the combined scalar is sufficient. The fixed gathered_sums[4] overflows at six ranks and the integer partition omits the tail. The new program uses variable counts."
+    },
+    {
+      "recording": "W6L2",
+      "claim": "transposed[i][rank]=recv_buf[i] stores the matrix transpose.",
+      "correction": "The receive vector is a correct transpose row, but the shown storage assignment writes original A_i,r back at position(i,r). The new block program transposes within received blocks."
+    },
+    {
+      "recording": "W5L3/W6L2",
+      "claim": "Allgather memory expands by p.",
+      "correction": "The lecture states per-rank scaling to p*m bytes. Whole-job p^2*m result storage is the author-derived sum over replicas."
+    }
+  ],
+  "sections": [
+    {
+      "section": "model",
+      "video_id": "pKlPIwdGSbE",
+      "start": 36,
+      "end": 182,
+      "lecture_material": "Collective group operations and root notion.",
+      "research_extension": "MPI4.1 intracommunicator semantics.",
+      "teaching_construction": "Distributed-tuple model and global Jacobi update norm.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "semantics",
+      "video_id": "pKlPIwdGSbE",
+      "start": 182,
+      "end": 242,
+      "lecture_material": "Communicators,no tags,three categories; later blocking-broadcast claim at918s.",
+      "research_extension": "Local completion,barrier entry,matching order and buffer rules.",
+      "teaching_construction": "Delayed-entry probe and conditional dataflow argument.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "movement",
+      "video_id": "pKlPIwdGSbE",
+      "start": 242,
+      "end": 683,
+      "lecture_material": "Broadcast,scatter,gather,allgather,alltoall and vector variants.",
+      "research_extension": "Datatype counts/signatures and rank-block placement.",
+      "teaching_construction": "Exact layout checks,replicated storage counts and partition-coverage proof.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "reduction",
+      "video_id": "pKlPIwdGSbE",
+      "start": 683,
+      "end": 857,
+      "lecture_material": "Reduce,scan,built-in operator families and location operators.",
+      "research_extension": "MAXLOC ties,Exscan rank0,associativity and Allreduce agreement.",
+      "teaching_construction": "Binary64 counterexample,scan/MAXLOC assertions and midpoint pi.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "residual",
+      "video_id": "pKlPIwdGSbE",
+      "start": 857,
+      "end": 1580.7913125,
+      "lecture_material": "Nonblocking collectives,then stencil/domain partition with physical/internal boundaries.",
+      "research_extension": "Request completion and buffer ownership.",
+      "teaching_construction": "Safe Iallreduce demonstration,replicated-grid serial parity and local/global stopping counterexample.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "dot",
+      "video_id": "6bXLTaJjg_U",
+      "start": 144,
+      "end": 1229.218,
+      "lecture_material": "Scatter/reduce dot product with N8,four-rank allocation,six-rank terminal182 and C99 mode.",
+      "research_extension": "Variable-count partition and reduction semantics.",
+      "teaching_construction": "Closed form408,omitted-tail diagnosis and p1/3/6/9 checked program.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "norm",
+      "video_id": "gG3oMdoBZbM",
+      "start": 38,
+      "end": 663,
+      "lecture_material": "Allgather normalization,four-rank assumption and six-rank partial-normalization output.",
+      "research_extension": "Allreduce result requirements.",
+      "teaching_construction": "Replace replicated partials by global scalar;uneven partition and unit-norm/component checks.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "transpose",
+      "video_id": "gG3oMdoBZbM",
+      "start": 663,
+      "end": 1188.327625,
+      "lecture_material": "Alltoall row exchange,four-by-four example and displayed column assignment.",
+      "research_extension": "Source/destination block layout.",
+      "teaching_construction": "q2 block packing/mapping proof and p3/4 checks.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "algorithms",
+      "video_id": null,
+      "start": 0,
+      "end": 0,
+      "lecture_material": "Communication-volume/heaviness motivation from W5L3/W6L2.",
+      "research_extension": "Thakur cost assumptions and versioned OpenMPI selection/fallback source.",
+      "teaching_construction": "Dual doubling bounds;round/byte/combine derivations;hypothetical crossover and fresh five-trial TCP-loopback capture.",
+      "evidence_class": "derivation"
+    }
+  ],
+  "references": [
+    {
+      "title": "MPI4.1 unofficial HTML §7.1, Collective introduction and overview",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node114.htm",
+      "supports": "Local completion, matching and data-type signature rules.",
+      "page_checked": "Full linked Forum unofficial HTML section read. Its chapter7 numbering differs from official PDF chapter6; no claim that PDF confirmed the HTML numbers.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "MPI4.1 unofficial HTML §7.3, Barrier",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node119.htm",
+      "supports": "All communicator members enter before an intracommunicator barrier returns.",
+      "page_checked": "Full linked Forum unofficial HTML section read. Its chapter7 numbering differs from official PDF chapter6; no claim that PDF confirmed the HTML numbers.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "MPI4.1 unofficial HTML §7.6, Scatter and Scatterv",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node124.htm",
+      "supports": "Per-destination block counts, matching signature and vector layouts.",
+      "page_checked": "Full linked Forum unofficial HTML section read. Its chapter7 numbering differs from official PDF chapter6; no claim that PDF confirmed the HTML numbers.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "MPI4.1 unofficial HTML §7.5, Gather and Gatherv",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node122.htm",
+      "supports": "Root rank-order block concatenation and vector counts/displacements.",
+      "page_checked": "Full linked Forum unofficial HTML section read. Its chapter7 numbering differs from official PDF chapter6; no claim that PDF confirmed the HTML numbers.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "MPI4.1 unofficial HTML §7.7, Allgather",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node126.htm",
+      "supports": "Rank-ordered source blocks replicated at every rank.",
+      "page_checked": "Full linked Forum unofficial HTML section read. Its chapter7 numbering differs from official PDF chapter6; no claim that PDF confirmed the HTML numbers.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "MPI4.1 unofficial HTML §7.8, Alltoall",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node128.htm",
+      "supports": "Block from source i for destination j arrives in source-i receive block.",
+      "page_checked": "Full linked Forum unofficial HTML section read. Its chapter7 numbering differs from official PDF chapter6; no claim that PDF confirmed the HTML numbers.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "MPI4.1 unofficial HTML §7.9.1, Reduce",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node130.htm",
+      "supports": "Elementwise operation, root-only result, reduction associativity and ordering.",
+      "page_checked": "Full linked Forum unofficial HTML section read. Its chapter7 numbering differs from official PDF chapter6; no claim that PDF confirmed the HTML numbers.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "MPI4.1 unofficial HTML §7.9.6, Allreduce",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node136.htm",
+      "supports": "Combined result returned identically to every rank in a group.",
+      "page_checked": "Full linked Forum unofficial HTML section read. Its chapter7 numbering differs from official PDF chapter6; no claim that PDF confirmed the HTML numbers.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "MPI4.1 unofficial HTML §7.9.2, Predefined reduction operators",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node131.htm",
+      "supports": "Allowed operator/datatype combinations.",
+      "page_checked": "Full linked Forum unofficial HTML section read. Its chapter7 numbering differs from official PDF chapter6; no claim that PDF confirmed the HTML numbers.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "MPI4.1 unofficial HTML §7.11.1, Scan",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node142.htm",
+      "supports": "Inclusive rank-prefix reduction.",
+      "page_checked": "Full linked Forum unofficial HTML section read. Its chapter7 numbering differs from official PDF chapter6; no claim that PDF confirmed the HTML numbers.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "MPI4.1 unofficial HTML §7.11.2, Exscan",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node143.htm",
+      "supports": "Exclusive rank-prefix reduction; rank0 receive output undefined.",
+      "page_checked": "Full linked Forum unofficial HTML section read. Its chapter7 numbering differs from official PDF chapter6; no claim that PDF confirmed the HTML numbers.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "MPI4.1 unofficial HTML §7.9.4, MINLOC and MAXLOC",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node133.htm",
+      "supports": "Global extremum with smaller-index tie rule.",
+      "page_checked": "Full linked Forum unofficial HTML section read. Its chapter7 numbering differs from official PDF chapter6; no claim that PDF confirmed the HTML numbers.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "MPI4.1 unofficial HTML §7.10.1, Reduce_scatter_block",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node139.htm",
+      "supports": "Reduce complete input vector, distribute equal blocks of result.",
+      "page_checked": "Full linked Forum unofficial HTML section read. Its chapter7 numbering differs from official PDF chapter6; no claim that PDF confirmed the HTML numbers.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "MPI4.1 unofficial HTML §7.12, Nonblocking collectives",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node145.htm",
+      "supports": "Initiation/completion split, preserved buffers/arguments, matching sequence and no blocking/nonblocking match.",
+      "page_checked": "Full linked Forum unofficial HTML section read. Its chapter7 numbering differs from official PDF chapter6; no claim that PDF confirmed the HTML numbers.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "Thakur, Rabenseifner and Gropp (2005), Optimization of Collective Communication Operations in MPICH",
+      "url": "https://www.mcs.anl.gov/~thakur/papers/ijhpca-coll.pdf",
+      "supports": "Single-port alpha-beta-gamma model; choosing short/long message collective algorithms.",
+      "page_checked": "Author PDF17pages, §§3–4.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenMPI v4.1.6 tuned fixed decision source",
+      "url": "https://raw.githubusercontent.com/open-mpi/ompi/v4.1.6/ompi/mca/coll/tuned/coll_tuned_decision_fixed.c",
+      "supports": "Conditional commutative Allreduce8–15rank branch: below8192bytes algorithm3;8192andabove algorithm6.",
+      "page_checked": "ompi_coll_tuned_allreduce_intra_dec_fixed, commutative branch for communicator_size<16.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenMPI v4.1.6 Allreduce algorithm enumeration",
+      "url": "https://raw.githubusercontent.com/open-mpi/ompi/v4.1.6/ompi/mca/coll/tuned/coll_tuned_allreduce_decision.c",
+      "supports": "Algorithm6isRabenseifner; helpstring omitsit.",
+      "page_checked": "allreduce_algorithms enum and help text.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenMPI v4.1.6 Allreduce implementations",
+      "url": "https://raw.githubusercontent.com/open-mpi/ompi/v4.1.6/ompi/mca/coll/base/coll_base_allreduce.c",
+      "supports": "Ring implementation calls recursive doubling when count<size.",
+      "page_checked": "ompi_coll_base_allreduce_intra_ring, count<size fallback.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "MPI4.1 official PDF,2November2023",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report.pdf",
+      "supports": "Official edition; printed collective chapter6,local completion§6.1p190,barrier§6.3p196,nonblocking§6.12pp250–252. The unofficial HTML uses chapter7 instead.",
+      "page_checked": "Fresh local download:5,493,750bytes,SHA256f32920662645ed9e51ce7ba266f10b4832d5f612ea14be698169cd6a81f1fee5. PyMuPDF extracted title and PDFindices230,231,237,291–293; visually inspected rendered index230(printedp189).",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "GCC manual,Options for Linking",
+      "url": "https://gcc.gnu.org/onlinedocs/gcc/Link-Options.html",
+      "supports": "The -l option is processed in command-line order; libraries placed before referring object files may fail to resolve symbols.",
+      "page_checked": "§3.16,-l library entry,paragraph on object/library order.",
+      "checked_utc_date": "2026-10-28"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "p,r,ρ",
+      "first_section": "model",
+      "definition": "Communicator size,process rank and consistently chosen root."
+    },
+    {
+      "symbol": "x_r,x_i,j,∘",
+      "first_section": "model",
+      "definition": "Rank input block,source/destination block and associative combining operation."
+    },
+    {
+      "symbol": "N,h_g,u,unew",
+      "first_section": "model",
+      "definition": "Interior grid length,spacing1/(N+1),old and new arrays."
+    },
+    {
+      "symbol": "k,r_k,Ω_r,r_k,r",
+      "first_section": "model",
+      "definition": "Sweep index,global update norm,owned cell set and local update norm."
+    },
+    {
+      "symbol": "α,β,γ,m",
+      "first_section": "model",
+      "definition": "Latency in seconds,inverse bandwidth in s/byte,combine cost in s/byte and block byte size."
+    },
+    {
+      "symbol": "q,n_rem,c_r,d_r",
+      "first_section": "movement",
+      "definition": "Quotient N/p,remainder N mod p,element counts and element displacements."
+    },
+    {
+      "symbol": "n,Δ,x_i",
+      "first_section": "reduction",
+      "definition": "Midpoint sample count,interval width1/n and sample location."
+    },
+    {
+      "symbol": "b,T_c,T_s,C,H",
+      "first_section": "residual",
+      "definition": "Check period,reduction time,sweep time,communication time and independent computation time."
+    },
+    {
+      "symbol": "a_i,b_i",
+      "first_section": "dot",
+      "definition": "Corresponding vector components."
+    },
+    {
+      "symbol": "v,||v||_2",
+      "first_section": "norm",
+      "definition": "Input vector and Euclidean norm."
+    },
+    {
+      "symbol": "A,B,q",
+      "first_section": "transpose",
+      "definition": "Input matrix,transpose and rows per rank N/p."
+    },
+    {
+      "symbol": "ℓ,s,s_*",
+      "first_section": "algorithms",
+      "definition": "Binary logarithm log2p,full-vector byte size and hypothetical crossover size."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B tools/check_chapter_code.py --file work/ch15-sol/chapter-15-mpi-collective-communication.html --report work/ch15-sol/code-validation.json",
+    "listings": 10,
+    "all_passed": true,
+    "manual_programs_passed": 10,
+    "mpi_launches": 16,
+    "checked_at_utc": "2026-10-28T05:59:10.578609+00:00",
+    "input_fingerprint_sha256": "ba0e9b7017046033967d8453072bf3e2934b4ef9733777913caa74a8461d6d93",
+    "status": "Selected-chapter structured report passed:10/10;8exact stdout checks and2returncode timing checks."
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT WITH FIXES",
+      "blocking": 7,
+      "major": 5,
+      "minor": 14,
+      "report": "ch15-r1.md",
+      "scope": "Historical unfinished parked draft; this verdict is not acceptance of the new rewrite.",
+      "author_disposition": "All historical findings were addressed by rewritten counted claims,actual versioned sources,new captures,and removal of unverifiable timing inferences. A new independent full review remains required."
+    },
+    {
+      "round": 2,
+      "verdict": "REVISE",
+      "blocking": 1,
+      "major": 0,
+      "minor": 0,
+      "report": "ch15-r2.md",
+      "scope": "Fresh full independent scientific/code/source review of the rewritten private draft.",
+      "author_repairs": "Distinguished official PDF chapter6 from explicitly unofficial HTML chapter7 in source note,inline labels,primary-source list and reference provenance. Actual local PDF extraction/render retained. All code,build/run/check arguments and outputs unchanged."
+    },
+    {
+      "round": 3,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch15-r3.md",
+      "changes": "Verified the PDF-versus-unofficial-HTML citation and provenance repairs; all ten program/output contracts remain unchanged from the full round-2 review and structured execution check."
+    }
+  ],
+  "measurement_provenance": {
+    "utc_start": "2026-10-28T05:46:38.760Z",
+    "utc_end": "2026-10-28T05:47:18.625Z",
+    "exclusive_agent_slot": true,
+    "transport": "TCP loopback plus self transport; no shared-memory BTL transport. MPI runtime directories remain inside the workspace.",
+    "capture_contents": "Exact argv,source SHA-256,stdout,stderr,return code,UTC endpoints and monotonic endpoints are retained privately.",
+    "warnings": "Manual runtime captures include expected debugger_attach_fifo errno95 on the Windows-mounted filesystem and one existing WSL configuration warning; all programs returned0. No outside configuration was changed.",
+    "checks": "Eight deterministic stdout listings; late.c and collective_timing.c use returncode checks. Every timed case has five internal trials.",
+    "formal_extracted_check": {
+      "utc_start": "2026-10-28T05:56:24.416Z",
+      "utc_end": "2026-10-28T05:59:11.716Z",
+      "returncode": 0,
+      "status": "Passed10/10 with workspace-contained runtime profile."
+    }
+  },
+  "source_format_verification": {
+    "pdf_url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report.pdf",
+    "pdf_bytes": 5493750,
+    "pdf_sha256": "f32920662645ed9e51ce7ba266f10b4832d5f612ea14be698169cd6a81f1fee5",
+    "official_pdf_numbering": "Chapter6,CollectiveCommunication;§6.1 starts printedp189.",
+    "unofficial_html_numbering": "Chapter7,CollectiveCommunication;§7.1 atnode114.htm.",
+    "method": "Fresh direct fetch into private workspace; installed PyMuPDF-B extracted selected pages and rendered PDFindex230; actual PNG visually inspected. Semantic HTML references were opened independently."
+  }
+}

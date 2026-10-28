@@ -1,12 +1,12 @@
 {
   "course": "High Performance Scientific Computing",
-  "checked_at_utc": "2026-10-28T05:05:54.922946+00:00",
+  "checked_at_utc": "2026-10-28T06:35:41.456175+00:00",
   "scope": "Reader mechanics only; does not certify chapter or course completion",
   "static": {
     "status": "passed",
-    "html_files": 17,
-    "local_links_checked": 208,
-    "timestamps_checked": 145,
+    "html_files": 21,
+    "local_links_checked": 264,
+    "timestamps_checked": 175,
     "chapter_pages_with_dollar_math": 0,
     "failures": [],
     "warnings": []
@@ -228,6 +228,78 @@
         "controls": true,
         "emptyToc": false,
         "file": "chapter-12-openmp-synchronization-loops-data-sharing.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 123,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-13-openmp-memory-tasks-numerical-codes.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 123,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-13-openmp-memory-tasks-numerical-codes.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 137,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-14-mpi-processes-and-point-to-point-messages.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 137,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-14-mpi-processes-and-point-to-point-messages.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 70,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-15-mpi-collective-communication.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 70,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-15-mpi-collective-communication.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 269,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-16-domain-decomposition-mpi-solver-and-performance-analysis.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 269,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-16-domain-decomposition-mpi-solver-and-performance-analysis.html",
         "viewport": 390
       },
       {

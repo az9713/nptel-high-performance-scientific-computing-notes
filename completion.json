@@ -1,13 +1,9 @@
 {
-  "checked_at_utc": "2026-10-28T05:05:53.320896+00:00",
-  "status": "partial edition: chapters 1-12 written; chapters 13-31 not written; 22 recordings assigned to written chapters; every written chapter has an independent zero-blocking verdict",
+  "checked_at_utc": "2026-10-28T06:35:03.473674+00:00",
+  "status": "partial edition: chapters 1-16 written; chapters 17-31 not written; 33 recordings assigned to written chapters; every written chapter has an independent zero-blocking verdict",
   "chapter_count": 31,
-  "written_chapters": 12,
+  "written_chapters": 16,
   "unwritten_chapters": [
-    13,
-    14,
-    15,
-    16,
     17,
     18,
     19,
@@ -37,7 +33,11 @@
     "chapter-09-parallel-computing-numerical-models-and-cost.html": "c14817b6c35bb3f14d6d57881dba34590e46413ee8376dbf9ba9934364dfb746",
     "chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.html": "32fb15f302a95f837a8c23c1042d658461743966876f0e9d3aad3654197e6e88",
     "chapter-11-openmp-threads-and-work-distribution.html": "d2eec49972640afcc355d00dc1060262cc552ee9971eeebb6e6992191b9978f8",
-    "chapter-12-openmp-synchronization-loops-data-sharing.html": "b6bc5bcb598b97faf477cbe98f1533ff8104e1f3dde48e13c14c390d6ea57d69"
+    "chapter-12-openmp-synchronization-loops-data-sharing.html": "b6bc5bcb598b97faf477cbe98f1533ff8104e1f3dde48e13c14c390d6ea57d69",
+    "chapter-13-openmp-memory-tasks-numerical-codes.html": "6923b132e27ce120949dab3e8e4629d8e4060d60b943eb8a55e29f83b9beffa5",
+    "chapter-14-mpi-processes-and-point-to-point-messages.html": "67375098308717f72df0aca19a25320c6890c8a3dbdf9829d882399e917a9b0f",
+    "chapter-15-mpi-collective-communication.html": "23d83db25ec14dd116eaac5d9b9153dc693723994d22c23e6802519fc27c344a",
+    "chapter-16-domain-decomposition-mpi-solver-and-performance-analysis.html": "3aae0153d517514740d8737b95cb801f2cc43a63c1a907c8647410ddb1f98a10"
   },
   "scope": "Content inventory and exact body preservation; does not certify full scientific acceptance"
 }

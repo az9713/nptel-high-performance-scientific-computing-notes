@@ -1,0 +1,408 @@
+{
+  "chapter": 13,
+  "title": "OpenMP III: memory ordering, tasks, and trustworthy numerical parallelism",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "Ognjz7DdsPk",
+      "label": "W4L4",
+      "playlist_index": 24,
+      "duration_seconds": 1675
+    },
+    {
+      "video_id": "vCgmyD4gh5M",
+      "label": "W4L5",
+      "playlist_index": 25,
+      "duration_seconds": 1650
+    },
+    {
+      "video_id": "pGqmaj4pLvM",
+      "label": "W4L6",
+      "playlist_index": 26,
+      "duration_seconds": 1672
+    }
+  ],
+  "frames_viewed": {
+    "Ognjz7DdsPk": [
+      "f0008",
+      "f0019",
+      "f0039",
+      "f0047",
+      "f0052",
+      "f0053",
+      "f0054"
+    ],
+    "vCgmyD4gh5M": [
+      "f0009",
+      "f0015",
+      "f0023",
+      "f0025",
+      "f0048"
+    ],
+    "pGqmaj4pLvM": [
+      "f0014",
+      "f0024",
+      "f0029",
+      "f0038",
+      "f0045",
+      "f0053"
+    ]
+  },
+  "source_uncertainties": [
+    "Historical lecture timings retained as lecture evidence; absolute values not reproduced on a different laptop.",
+    "W4L5 attributes timing differences to program loading; available intervals/builds do not isolate that mechanism.",
+    "OpenMP 5.2 HTML dependence page returned 404; authoritative PDF §15.9.5 opened and checked instead.",
+    "Indexed SplitMix teaching sequence is deterministic and not proved IID; variance/standard error statements are explicitly ideal IID-model results.",
+    "Counter-based Random123 source supports design architecture, not statistical validation of this different SplitMix teaching construction."
+  ],
+  "lecture_corrections": [
+    {
+      "recording": "W4L4",
+      "claim": "Flush alone gives every reader the latest value.",
+      "correction": "Visibility must be combined with correctly ordered synchronization; no automatic reader rendezvous."
+    },
+    {
+      "recording": "W4L4",
+      "claim": "Large recursive Fibonacci input.",
+      "correction": "Bounded n30/cutoff20; slide n5000 is unsuitable. Task-π slide already uses strict upper bounds and disjoint half-open intervals; our independently written code preserves them."
+    },
+    {
+      "recording": "W4L5",
+      "claim": "Displayed Laplacian and SOR identification.",
+      "correction": "Each second difference needs -2 center coefficient; shown old-array four-neighbor code is Jacobi."
+    },
+    {
+      "recording": "W4L5",
+      "claim": "Linear boundary ending at 100.",
+      "correction": "Shown /NR slope over index NR+1 reaches 100.1 for NR1000; canonical code uses book unit-top boundary instead, explicitly disclosed."
+    },
+    {
+      "recording": "W4L6",
+      "claim": "Physical thread creation/destruction for every region.",
+      "correction": "Region activation and synchronization required; workers may be reused."
+    },
+    {
+      "recording": "W4L6",
+      "claim": "Reduction gives identical answers and fixes Monte Carlo parallelism.",
+      "correction": "Floating sums can differ in low bits; RNG hidden state/stream mapping are separate."
+    },
+    {
+      "recording": "W4L6",
+      "claim": "Exact two-phase region activation count.",
+      "correction": "Visible update traverses N rows, copy traverses N+2; inner count K[N+(N+2)], outer2K. ForK=N1000,2,002,000 versus2000."
+    }
+  ],
+  "sections": [
+    {
+      "section": "model",
+      "video_id": null,
+      "start": 0,
+      "end": 0,
+      "lecture_material": "Formal event/task graphs and shared running cases.",
+      "research_extension": "Work-span lower bound and explicit memory-event ownership.",
+      "teaching_construction": "Original formal model and precise definitions.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "memory",
+      "video_id": "Ognjz7DdsPk",
+      "start": 78,
+      "end": 398,
+      "lecture_material": "Temporary views, relaxed consistency, flush, implicit synchronization.",
+      "research_extension": "OpenMP 5.2 §§1.4.1,1.4.4,1.4.6; flush does not itself establish meeting order.",
+      "teaching_construction": "Publication proof and complete program.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "tasks",
+      "video_id": "Ognjz7DdsPk",
+      "start": 398,
+      "end": 1024,
+      "lecture_material": "Irregular list, indexed conversion, tasks, single, output ordering.",
+      "research_extension": "Task/single semantics and firstprivate pointer initialization.",
+      "teaching_construction": "Bounded linked-list Fibonacci program and generation lower bounds.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "completion",
+      "video_id": "Ognjz7DdsPk",
+      "start": 1024,
+      "end": 1355,
+      "lecture_material": "Task data environments, firstprivate cursor, barriers, taskwait and nowait.",
+      "research_extension": "Taskgroup, descendant lifetime proof and sibling dependence locators.",
+      "teaching_construction": "Counterexample, group-completion program and dependency analysis.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "recursion",
+      "video_id": "Ognjz7DdsPk",
+      "start": 1355,
+      "end": 1675,
+      "lecture_material": "Recursive Fibonacci, taskwait, divide-and-conquer π, granularity warning and timing table.",
+      "research_extension": "Specification-grounded lifetime and completion semantics.",
+      "teaching_construction": "Exact exponential recurrence, work/span derivation, bounded cutoff code, independently implemented half-open task π.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "heat",
+      "video_id": "vCgmyD4gh5M",
+      "start": 40,
+      "end": 1650,
+      "lecture_material": "Plate, grid, four-neighbor two-array code, private indices, serial/parallel comparison.",
+      "research_extension": "Netlib method distinction; finite-difference correction and boundary convention.",
+      "teaching_construction": "Complete canonical grid comparison, every cell/norm tested, explicit tol and max_iter.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "placement",
+      "video_id": "pGqmaj4pLvM",
+      "start": 142,
+      "end": 935,
+      "lecture_material": "Timing spreadsheet, speedup, inner-loop placement and overhead explanation.",
+      "research_extension": "Logical fork/join distinguished from physical worker creation.",
+      "teaching_construction": "Exact activation count, cost model, five-trial placement comparison.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "quadrature",
+      "video_id": "pGqmaj4pLvM",
+      "start": 935,
+      "end": 1360,
+      "lecture_material": "Trapezoidal x² integral, local index, reduction repair.",
+      "research_extension": "Floating addition-order and reproducibility distinction.",
+      "teaching_construction": "Finite-n exact error derivation and tolerance verification.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "monte-carlo",
+      "video_id": "pGqmaj4pLvM",
+      "start": 1360,
+      "end": 1672,
+      "lecture_material": "Random integration, x², time seeding, private sample/reduction.",
+      "research_extension": "Linux rand manual, Salmon counter design, Vigna SplitMix transformation.",
+      "teaching_construction": "IID-model variance derivation, indexed sample mapping and deterministic fixed blocks.",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "OpenMP 5.2 §1.4.1",
+      "url": "https://www.openmp.org/spec-html/5.2/openmpsu9.html",
+      "supports": "Temporary views, unordered conflicting accesses, shared-storage lifetimes.",
+      "page_checked": "§1.4.1 full HTML",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenMP 5.2 §1.4.4",
+      "url": "https://www.openmp.org/spec-html/5.2/openmpsu12.html",
+      "supports": "Strong flush set, visibility and reordering; separate synchronization order.",
+      "page_checked": "§1.4.4 full HTML",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenMP 5.2 §1.4.6",
+      "url": "https://www.openmp.org/spec-html/5.2/openmpsu14.html",
+      "supports": "Race-free ordinary synchronized programs need no extra explicit flush.",
+      "page_checked": "§1.4.6 full HTML",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenMP 5.2 §5.1.1",
+      "url": "https://www.openmp.org/spec-html/5.2/openmpsu33.html",
+      "supports": "Task defaults and loop/local variable ownership rules.",
+      "page_checked": "§5.1.1 full HTML; C/Fortran scope distinguished",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenMP 5.2 §5.4.4",
+      "url": "https://www.openmp.org/spec-html/5.2/openmpsu38.html",
+      "supports": "firstprivate initialization at encounter; a pointer copy is not a deep copy.",
+      "page_checked": "§5.4.4 full HTML",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenMP 5.2 §11.1",
+      "url": "https://www.openmp.org/spec-html/5.2/openmpse62.html",
+      "supports": "Single selects a team thread, not necessarily primary, and has implicit ending barrier without nowait.",
+      "page_checked": "§11.1 full HTML",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenMP 5.2 §12.5",
+      "url": "https://www.openmp.org/spec-html/5.2/openmpse73.html",
+      "supports": "Explicit task creation and immediate/deferred team execution; shared lifetime obligation.",
+      "page_checked": "§12.5 full HTML",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenMP 5.2 §15.4",
+      "url": "https://www.openmp.org/spec-html/5.2/openmpse92.html",
+      "supports": "Taskgroup completion set.",
+      "page_checked": "§15.4 full HTML",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenMP 5.2 §15.5",
+      "url": "https://www.openmp.org/spec-html/5.2/openmpse93.html",
+      "supports": "Plain taskwait waits prior immediate children, not arbitrary descendants.",
+      "page_checked": "§15.5 full HTML",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenMP 5.2 PDF §15.9.5",
+      "url": "https://www.openmp.org/wp-content/uploads/OpenMP-API-Specification-5-2.pdf",
+      "supports": "Sibling task dependence storage matching and access synchronization.",
+      "page_checked": "printed pp323–324, PDF pp342–343",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "Netlib Templates, Jacobi",
+      "url": "https://netlib.org/linalg/html_templates/node12.html",
+      "supports": "Jacobi independent simultaneous old-iterate updates use auxiliary storage.",
+      "page_checked": "Jacobi method full HTML",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "Netlib Templates, SOR",
+      "url": "https://netlib.org/linalg/html_templates/node15.html",
+      "supports": "SOR extrapolates successive Gauss–Seidel updates.",
+      "page_checked": "SOR method full HTML",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "Linux manual rand(3)",
+      "url": "https://man7.org/linux/man-pages/man3/rand.3.html",
+      "supports": "Seeded sequence and hidden generator state; Linux documented MT-Safe does not imply independent scalable streams.",
+      "page_checked": "DESCRIPTION and ATTRIBUTES",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "Salmon et al. 2011, Parallel Random Numbers: As Easy as 1, 2, 3",
+      "url": "https://www.thesalmons.org/john/random123/papers/random123sc11.pdf",
+      "supports": "Counter/key transformation design for parallel generation; not evidence for our different generator.",
+      "page_checked": "§2, PDF p2; abstract checked",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "Vigna, SplitMix source",
+      "url": "https://prng.di.unimi.it/splitmix.c",
+      "supports": "Public-domain increment and mixing operations adapted to direct indexed evaluation.",
+      "page_checked": "full source lines0–40",
+      "checked_utc_date": "2026-10-28"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "p",
+      "first_section": "model",
+      "definition": "OpenMP team thread count"
+    },
+    {
+      "symbol": "G=(V,E)",
+      "first_section": "model",
+      "definition": "Task dependency directed acyclic graph"
+    },
+    {
+      "symbol": "W,D",
+      "first_section": "model",
+      "definition": "Operation-count work and span"
+    },
+    {
+      "symbol": "a≺b",
+      "first_section": "model",
+      "definition": "Required memory event ordering including transitive synchronization"
+    },
+    {
+      "symbol": "u,unew,N,h_g",
+      "first_section": "model",
+      "definition": "Old/new grid arrays, interior count per direction, unit-grid spacing1/(N+1)"
+    },
+    {
+      "symbol": "T_1,T_p,S_p,E_p",
+      "first_section": "model",
+      "definition": "Wall-clock times, speedup and efficiency"
+    },
+    {
+      "symbol": "b_n",
+      "first_section": "tasks",
+      "definition": "nth Fibonacci value"
+    },
+    {
+      "symbol": "m,c_r,C,c_max,g",
+      "first_section": "tasks",
+      "definition": "Node count, payload service time, total service time, largest payload time, discovery/generation time per node"
+    },
+    {
+      "symbol": "φ",
+      "first_section": "recursion",
+      "definition": "Dominant Fibonacci characteristic root(1+sqrt5)/2"
+    },
+    {
+      "symbol": "M,t_g,T_useful,ε",
+      "first_section": "recursion",
+      "definition": "Task count, task overhead, reference useful service time, allowed overhead fraction"
+    },
+    {
+      "symbol": "n,Δ,x_i",
+      "first_section": "recursion",
+      "definition": "Integration sample count, width1/n, midpoint location"
+    },
+    {
+      "symbol": "k,r_k",
+      "first_section": "heat",
+      "definition": "Jacobi iteration number and maximum update norm"
+    },
+    {
+      "symbol": "K,t_a,T_cell,T_other",
+      "first_section": "placement",
+      "definition": "Sweep count, effective team activation cost, useful cell service time and other elapsed cost"
+    },
+    {
+      "symbol": "g(x),a,b,Tcal_n",
+      "first_section": "quadrature",
+      "definition": "Integrand, endpoints and composite trapezoidal estimate"
+    },
+    {
+      "symbol": "X_i,Y_i,mu_hat_n,SE",
+      "first_section": "monte-carlo",
+      "definition": "Ideal uniform IID sample, its square, sample mean, estimator standard error"
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B tools/check_chapter_code.py --chapter 13 --merge-report",
+    "listings": 9,
+    "all_passed": true,
+    "status": "Formal extracted-listing validation exited 0; all 9 listings passed. Review repairs changed prose and source metadata only.",
+    "manual_runs_passed": 9
+  },
+  "measurement_provenance": {
+    "captured_utc_start": "2026-10-28T05:32:40.135Z",
+    "captured_utc_end": "2026-10-28T05:33:21.942Z",
+    "exclusive_agent_slot": true,
+    "listing_checks": "Eight deterministic stdout checks; placement sample uses returncode with five internal trials per p and placement.",
+    "environment": "GCC13.3, WSL Ubuntu24.04; Intel Core i5-12450H hybrid laptop; workspace-contained runtime directories.",
+    "private_capture_ledger": "Author retained nine per-program command/hash/stdout/stderr/returncode/UTC/monotonic records outside public repository."
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "REVISE",
+      "blocking": 2,
+      "major": 0,
+      "minor": 0,
+      "report": "ch13-r1.md",
+      "author_repairs": "Corrected false inclusive task-π attribution and exact lecture two-phase region count; runnable code and outputs unchanged."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch13-r2.md",
+      "changes": "Independent whole-chapter re-read verified both source-attribution repairs, all eight timestamps, unchanged program/output blocks, and the nine formal execution records."
+    }
+  ]
+}

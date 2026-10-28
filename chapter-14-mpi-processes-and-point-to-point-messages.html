@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="67375098308717f72df0aca19a25320c6890c8a3dbdf9829d882399e917a9b0f"><title>MPI I: processes and point-to-point messages · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>MPI I: processes and point-to-point messages</h1>
+<p class="lead">Seven workers each send one integer to rank 0. Rank 0 receives one integer, prints 42 and enters finalization. Six messages remain unmatched. The visible answer is correct, but the distributed program is erroneous: making a message larger can expose a dependency that a small buffered message concealed. The running problem is to sum 10 000 integers correctly, then exchange a row of 1000 doubles between two processes without relying on hidden buffers. Correctness requires matching every message; performance requires separating the fixed cost of a message from its cost per byte. A two-process ping-pong experiment supplies those costs for this chapter's explicitly selected TCP loopback transport.</p>
+<p class="source-note">Grounded in NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay: <a href="https://www.youtube.com/watch?v=ekz3AGb4ebY">W5L1, Introduction to Message Passing Interface (MPI)</a> and <a href="https://www.youtube.com/watch?v=ZT5BqjCqcNk">W5L2, Sending and Receiving the messages using MPI</a>. <strong>Lecture material:</strong> distributed memory, MPI as a library, C and Fortran hello world, compilation and launching, output order and oversubscription, initialization and finalization, branching by rank, the bag-of-integers sum, and the arguments and demonstration of send and receive. <strong>Research extensions:</strong> MPI 4.1 supplies normative matching, completion, ordering and finalization rules; Open MPI's launcher manual supplies slots and execution options; its TCP documentation distinguishes loopback from shared-memory communication; Thakur, Rabenseifner and Gropp supply the latency–bandwidth cost model. <strong>Original teaching constructions:</strong> the formal event and ownership model, partition proof, checked programs, repaired many-to-one protocol, deadlock arguments, bounded synchronous-send demonstration, ping-pong measurements and fits, and six worked exercises.</p>
+
+<h2 id="model">Processes, ownership and the running problem</h2>
+<p>A <em>process</em> is an executing program with its own address space: the collection of memory locations that its instructions can name. Two processes can run the same executable and declare a variable with the same spelling while owning different storage. An integer called <code>local</code> in rank 1 is not the integer called <code>local</code> in rank 0. Sending copies values between these address spaces; it does not turn an ordinary pointer into an address that another process can dereference.</p>
+<p>Let \(p\) denote the number of cooperating processes. A <em>communicator</em> identifies an ordered group of processes and a communication context that separates its messages from messages in other contexts. The <em>rank</em> \(k\), an integer satisfying \(0\le k\lt p\), identifies a process within that communicator. A rank is not an operating-system process identifier, a core number or a physical machine address. A process can belong to several communicators and have different ranks in them. This chapter uses <code>MPI_COMM_WORLD</code>, the communicator of the initial processes in the ordinary MPI World Model, without spawning or connecting additional processes.</p>
+<p>Each process executes <em>events</em>, such as writing a buffer, initiating a send or completing a receive. <em>Program order</em> orders the events executed sequentially by one process. A completed receive also establishes a causal constraint: its matching send must already have started. There is no general total order between the instructions of different processes. An <em>execution schedule</em> is an interleaving consistent with these constraints. A correct protocol must work for every permitted schedule, rather than only the schedule selected by one test.</p>
+<p>A <em>buffer</em> is memory that a communication operation reads or writes. The examples use contiguous arrays of one predefined datatype. A <em>message</em> has a data part and an <em>envelope</em>: source rank, destination rank, tag and communication context. The <em>tag</em> is a nonnegative integer selected by the program to distinguish logical kinds of message. It is neither a memory address nor an automatic priority. The receiver selects the destination buffer when it posts its receive. These objects and their distinction follow <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report.pdf">MPI 4.1, §§2.7 and 3.2</a>.</p>
+<p><em>Completion</em> means that the operation's local buffer can safely be used again in the prescribed way. Send completion allows the sender to modify its buffer; receive completion allows the receiver to access the received values. A <em>blocking</em> call waits for its local completion condition before returning. A <em>nonblocking</em> call initiates an operation and returns a request that a later completion call checks or waits for. Neither word states whether data use a network or shared memory. A blocking send need not mean that the receiver has finished, and a nonblocking send need not make background progress during arbitrary computation.</p>
+<p>The running arithmetic problem sums the integers \(1,\ldots,n_{\mathrm{items}}\), where \(n_{\mathrm{items}}=10\,000\). This name leaves the book-wide \(N\) available for the number of interior grid points per side in the Jacobi problem. The known answer is \(n_{\mathrm{items}}(n_{\mathrm{items}}+1)/2=50\,005\,000\). Every worker owns a disjoint block; rank 0 combines their partial sums. Later, two ranks exchange a row of \(N=1000\) doubles. On the measured machine a double occupies 8 bytes, so this row has \(m=8000\) bytes. A <em>halo</em> is a local copy of a neighbour's boundary data, needed to update cells next to a subdomain boundary.</p>
+<p>The performance model assigns an isolated message the time \(T_{\mathrm{msg}}(m)=\alpha+\beta m\). Here \(m\) is its length in bytes, \(\alpha\) is the fixed startup cost in seconds, and \(\beta\) is the transfer cost in seconds per byte. These parameters describe a specified transport, placement and measurement procedure. They are not universal constants of MPI. Their derivation, estimation and limitations follow the correctness discussion, because timing an erroneous protocol cannot establish a useful communication model.</p>
+<p>The programs run under WSL 2 Ubuntu 24.04 on the Intel Core i5-12450H machine used in earlier chapters, with gcc 13.3 through <code>mpicc</code> and Open MPI. The CPU has four performance cores with two hardware threads each and four efficient cores: twelve logical processors of unequal capability. MPI commands here explicitly select <code>ob1</code> with <code>tcp,self</code>, restrict TCP to the loopback interface <code>lo</code>, and use <code>--bind-to none</code>. Thus communication between distinct ranks uses the local TCP stack. These are single-machine loopback measurements, neither inter-node measurements nor measurements of Open MPI's shared-memory transport. The <code>self</code> component supports a process communicating with itself. <a href="https://docs.open-mpi.org/en/v5.0.x/tuning-apps/networking/tcp.html">Open MPI's TCP documentation</a> explains this transport distinction; the actual runs use the installed 4.1 series.</p>
+
+<h2 id="distributed">Distributed memory makes ownership explicit <a class="timestamp" href="https://www.youtube.com/watch?v=ekz3AGb4ebY&amp;t=39s">W5L1 0:39</a></h2>
+<p>A distributed-memory machine connects nodes whose processors address local memory. To use a value held elsewhere, an algorithm must arrange communication. The hardware may supply sophisticated routing and remote-memory mechanisms, but an ordinary MPI send–receive program expresses that movement through library calls. The programming burden is to choose who owns each value, who needs a copy, and when the copy becomes valid.</p>
+<p>A shared-memory loop can hide the same questions behind array indexing. Every thread can name <code>u[i][j]</code>, although accessing that value may still cross caches or NUMA links. In an MPI decomposition, the owner rank is part of the algorithm. If rank 0 owns the top half of a grid and rank 1 the bottom half, each holds a local array, not half the virtual addresses of a universally accessible array. Before updating its interface row, each needs a copy of the adjacent row owned by its neighbour.</p>
+<p>MPI is a <em>library interface</em>, not a new programming language. A C compiler compiles the program; the MPI implementation supplies declarations, object code and a runtime environment. The standard defines C and Fortran bindings. The lecture contrasts this library approach with directive-based OpenMP and emphasizes testing several MPI processes on one workstation before moving to a cluster. That is a valuable development path because rank identities and matching rules survive the move even when the transport changes.</p>
+<p>Source portability does not imply performance portability. Suppose the local transport gives an 8000-byte exchange a startup cost comparable to its transfer cost. On another machine, startup might dominate, or network contention might add a separate queueing delay. The same decomposition can then have a different efficient process count. Correct message matching is transferable; the fitted parameters must be remeasured. Even a single workstation can choose different protocols for small and large messages.</p>
+<p>The lecture presents expansion using commodity nodes as an advantage over a single shared-memory machine. Expansion still meets algorithmic limits. If a local block is made smaller while its boundary remains substantial, the ratio of communicated boundary data to local work rises. More nodes also introduce process placement, network contention, failure exposure and file-system coordination. Physical expandability therefore removes one hardware ceiling without promising proportional speedup.</p>
+<p>The elementary capabilities are execution of cooperating processes, sending, receiving and synchronization. Many useful operations can be assembled from sends and receives, but spelling everything as point-to-point traffic is not always desirable. A collective sum, for example, lets an implementation choose a tree rather than making one rank receive every contribution serially. Chapter 15 develops those operations. Here the explicit construction is useful because every dependency remains visible.</p>
+<p>Three questions should precede an MPI call: which process owns the authoritative value, which processes need it next, and which event proves their copies are usable? For the integer sum, each rank owns its local partial result and rank 0 needs all partials. For a Jacobi halo, a neighbour owns a boundary row and the receiving rank needs it before updating adjacent cells. The same ownership discipline scales from one integer to a distributed solver.</p>
+
+<h2 id="launch">Compile once, execute several processes <a class="timestamp" href="https://www.youtube.com/watch?v=ekz3AGb4ebY&amp;t=395s">W5L1 6:35</a></h2>
+<p>The launcher command <code>mpirun -np 4 ./hello_mpi</code> requests four processes executing the same program. It does not request four threads inside one process. Each process reaches <code>main</code>, calls MPI initialization and obtains its own rank. The <code>-np</code> option belongs to the launcher; the program discovers the communicator size using <code>MPI_Comm_size</code>. It should not guess its process count from a normal command-line argument.</p>
+<p><code>mpicc</code> is a compiler wrapper. It arranges the MPI header search path and the libraries needed at link time, then invokes an underlying compiler. Using the underlying compiler directly is possible if the appropriate flags are supplied. The wrapper prevents those implementation-specific flags from becoming a distraction in every command. The header <code>mpi.h</code> provides declarations and constants; the implementation's library provides the executable routines.</p>
+<p>The first listing takes no numerical input. Four processes print their rank, a private counter and whether their operating-system identity is unchanged from before initialization. Rank 0 also reports the MPI standard version implemented by the library. The command sorts lines only to make the displayed check deterministic; sorting the text does not order the processes. The shell's pipe-failure option propagates a launcher failure through the sorting pipeline.</p>
+<pre><code class="language-c" data-file="hello_mpi.c" data-build="mpicc -O2 -Wall -Wextra hello_mpi.c -o hello_mpi" data-run="set -o pipefail; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 4 ./hello_mpi | sort" data-needs="mpi">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;unistd.h&gt;
+
+static int counter = 0;
+
+int main(int argc, char **argv)
+{
+    pid_t before = getpid();
+    int rank, size, major, minor;
+    MPI_Init(&amp;argc, &amp;argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &amp;rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &amp;size);
+    counter += rank + 1;
+    printf(&quot;Hello from rank %d of %d; private counter %d; same process: %s\n&quot;,
+           rank, size, counter, getpid() == before ? &quot;yes&quot; : &quot;no&quot;);
+    if (rank == 0) {
+        MPI_Get_version(&amp;major, &amp;minor);
+        printf(&quot;MPI standard version implemented: %d.%d\n&quot;, major, minor);
+    }
+    MPI_Finalize();
+    return 0;
+}
+</code></pre>
+<pre><code class="output">Hello from rank 0 of 4; private counter 1; same process: yes
+Hello from rank 1 of 4; private counter 2; same process: yes
+Hello from rank 2 of 4; private counter 3; same process: yes
+Hello from rank 3 of 4; private counter 4; same process: yes
+MPI standard version implemented: 3.1</code></pre>
+<p>Each counter begins at zero and ends at its own rank plus one. A global C variable is therefore still private to its process in this model. The unchanged identity shows that the call ran inside an already existing process. This observation concerns the ordinary launcher-based run; it does not forbid MPI's separate dynamic-process facilities. The version line identifies the standard supported by this installation, rather than equating the Open MPI package version with an MPI standard version.</p>
+<p>Unsorted output need not appear in rank order. A process can be delayed before its print, its C output can be buffered, and the runtime can forward output through independent channels. The first line seen on the terminal need not identify the first process to finish its computation. A particular order seen repeatedly is evidence about those runs, not a communication guarantee. Even if each print appears as one intact line, four distinct lines have \(4!=24\) possible orders in the abstract interleaving model; MPI does not require any probability distribution over them.</p>
+<p>A process count is also distinct from an allocation. Open MPI uses <em>slots</em>, units indicating how many processes a host allocation permits. Its <a href="https://www.open-mpi.org/doc/v4.1/man1/mpirun.1.php">4.1 launcher manual</a> describes core discovery when slots are not otherwise supplied, hardware-thread counting with <code>--use-hwthread-cpus</code>, and explicit oversubscription. A scheduler can provide a slot count unrelated to the whole machine's physical core count. A request for more processes can fail before the executable starts.</p>
+<p><em>Oversubscription</em> means assigning more runnable processes than the relevant execution resources or allocation normally provide. The operating system can time-share processes, so eight processes can perform a small functional test on fewer cores. That does not create eight cores or establish useful scaling. It may also worsen progress when one rank spins waiting for a peer that has been descheduled. The sum listing uses explicit oversubscription to exercise ten logical ranks; its purpose is partition correctness, not a ten-core performance claim.</p>
+<p>The lecture also supplies a Fortran hello world using <code>mpif.h</code> and an explicit error argument. C routines conventionally return an error code; Fortran bindings expose the corresponding argument. For new Fortran programs, a module-based interface, especially <code>use mpi_f08</code> where supported, gives stronger interface checking than the historical include file. MPI 4.1 deprecates <code>mpif.h</code>. The algorithmic objects—communicator, rank, datatype and request—remain the same across bindings.</p>
+
+<h2 id="lifetime">Initialization establishes an environment, finalization has preconditions <a class="timestamp" href="https://www.youtube.com/watch?v=ekz3AGb4ebY&amp;t=1028s">W5L1 17:08</a></h2>
+<p>The simple lifetime has three stages: ordinary code before initialization, MPI work inside the initialized environment, and ordinary cleanup after finalization. For this World Model, each participating process calls <code>MPI_Init</code> once and eventually calls <code>MPI_Finalize</code>. The lecture's description of initialization includes starting the copies on other machines. The precise separation is that the external launcher and runtime establish the processes; <code>MPI_Init</code> initializes MPI state inside each participating process. The preceding program demonstrates that its operating-system identity already exists before this call.</p>
+<p>A cluster launch must make the executable and required inputs accessible on the selected nodes. A shared file system is one common solution, and a host file or batch scheduler can specify the resources. Neither mechanism is an MPI matching rule. An installation could stage executables without a shared file system, and the standard deliberately leaves much process and resource management to the execution environment. This separation prevents an implementation convention from becoming a false requirement of MPI.</p>
+<p><code>MPI_Comm_rank</code> asks for a position in a particular communicator. The position is sufficient to select a block of data or a branch of code. It confers no automatic administrative authority on rank 0. A rank can also move between hardware cores during execution without changing its communicator rank. Conversely, pinning a process to a core changes its placement, not its rank.</p>
+<p><code>MPI_Finalize</code> is not a command that discards unfinished work. Before entering it, a process must satisfy its obligations for pending communication, including matching receives required by messages addressed to it. In an ordinary fixed job it is collective over the connected World processes. The standard's <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report.pdf">§11.2.2, especially Example 11.4</a>, explicitly marks a send without its matching receive as erroneous. A successful local send is insufficient to remove this obligation.</p>
+<p>The lecture's convenient rule that initialization is the first MPI call and finalization the last describes the basic examples. The standard permits a limited set of inquiry routines outside this interval, so the literal statement has exceptions. The practical rule is to initialize before using communicators and communicating, finish communications before finalization, and make no further ordinary communication calls afterwards. Returning from <code>main</code> without required finalization is not a valid substitute for cleanup.</p>
+<p>Error handling is another part of the environment. A normal return code of <code>MPI_SUCCESS</code> means that the routine succeeded. Many communication errors invoke an aborting handler by default, so a program cannot assume that every failure reaches its following <code>if</code> statement. Installing <code>MPI_ERRORS_RETURN</code> can make errors observable as return codes, but MPI does not promise that execution can safely continue after every error. These listings keep valid messages and use <code>MPI_Abort</code> on failed input or data checks; they do not demonstrate recovery from a failed distributed job.</p>
+<p>Finalization and error handling expose a useful distinction between a <em>local observation</em> and a <em>global invariant</em>. One rank may have received its expected value while another is still waiting. A local print proves only that the printing rank reached that statement. To argue that the job can terminate, count all sends and receives, prove matching, and show that every blocking dependency can eventually be satisfied. The next sections apply this discipline to the lecture's arithmetic example.</p>
+
+<h2 id="spmd">Ranks divide the work; a root combines it <a class="timestamp" href="https://www.youtube.com/watch?v=ZT5BqjCqcNk&amp;t=72s">W5L2 1:12</a></h2>
+<p><em>Single program, multiple data</em>, abbreviated SPMD, means that processes execute one program while operating on different data. Rank-based branches can give them different roles. The lecture uses unrelated routines as an extreme illustration, then returns to the useful case of similar calculations on disjoint portions of one problem. MPI also permits multiple executables in one job; SPMD is a programming choice, not a restriction of the interface.</p>
+<p>A <em>root</em> is a process the algorithm chooses to coordinate a result. The lecture selects rank 0 because every nonempty World job has one. This is a naming convenience, not a hardware privilege. If the root becomes responsible for every large input and every output, it can become a bottleneck. The simple integer sum deliberately exposes that structure: workers compute independently, then the root receives one partial sum from each.</p>
+<p>To divide \(n_{\mathrm{items}}\) equally when \(p\) need not divide it, define the quotient \(q=\lfloor n_{\mathrm{items}}/p\rfloor\) and remainder \(r=n_{\mathrm{items}}-pq\), so \(0\le r\lt p\). Give the first \(r\) ranks one extra item. Rank \(k\) has block length \(s_k=q+[k\lt r]\) and zero-based starting offset \(\ell_k=kq+\min(k,r)\), where the bracket is 1 if its condition is true and 0 otherwise. Its integer values are \(\ell_k+1,\ldots,\ell_k+s_k\).</p>
+\[
+\ell_{k+1}-\ell_k=q+\min(k+1,r)-\min(k,r)=q+[k\lt r]=s_k. \tag{14.1}
+\]
+<p>Equation (14.1) proves that consecutive blocks meet without a gap or overlap. The first offset is zero and the final endpoint is \(pq+r=n_{\mathrm{items}}\), so their union is exactly the intended set. Every block has either \(q\) or \(q+1\) items; an integer allocation cannot have a smaller possible maximum difference than one unless division is exact. This proves load balance for equal-cost items, not for arbitrary data-dependent work.</p>
+<p>For ten ranks there are ten blocks of 1000. For seven ranks, \(q=1428\) and \(r=4\): four blocks of 1429 and three of 1428. Their total is \(4(1429)+3(1428)=10\,000\). These are useful tests because an implementation that silently discards a remainder can pass the divisible case while losing four items in the seven-rank case. A one-rank test checks the empty receive loop at the root.</p>
+<p>The listing has no external input and prints the exact integer sum for \(p=1,7,10\). It uses <code>long long</code> with the matching <code>MPI_LONG_LONG_INT</code> datatype, checks that each worker contributes exactly once, and limits the job to 64 ranks to protect the fixed bookkeeping array. The sums are small enough to avoid integer overflow. Every worker sends once with tag 7; the root posts exactly \(p-1\) receives with that tag and obtains each source from the returned status.</p>
+<pre><code class="language-c" data-file="spmd_sum.c" data-build="mpicc -O2 -Wall -Wextra spmd_sum.c -o spmd_sum" data-run="mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 1 ./spmd_sum &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 7 ./spmd_sum &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 10 ./spmd_sum" data-needs="mpi">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+
+#define N 10000
+
+int main(int argc, char **argv)
+{
+    int rank, size;
+    MPI_Init(&amp;argc, &amp;argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &amp;rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &amp;size);
+    if (size &gt; 64) MPI_Abort(MPI_COMM_WORLD, 1);
+    int q = N / size, rem = N % size;
+    int lo = rank * q + (rank &lt; rem ? rank : rem);
+    int hi = lo + q + (rank &lt; rem);
+    long long local = 0;
+    for (int i = lo + 1; i &lt;= hi; ++i) local += i;
+    int good = 1;
+    if (rank != 0) {
+        MPI_Send(&amp;local, 1, MPI_LONG_LONG_INT, 0, 7, MPI_COMM_WORLD);
+    } else {
+        long long total = local;
+        int heard[64] = {0};
+        for (int k = 1; k &lt; size; ++k) {
+            long long part;
+            MPI_Status st;
+            MPI_Recv(&amp;part, 1, MPI_LONG_LONG_INT, MPI_ANY_SOURCE, 7,
+                     MPI_COMM_WORLD, &amp;st);
+            total += part;
+            ++heard[st.MPI_SOURCE];
+        }
+        for (int s = 1; s &lt; size; ++s) good &amp;= heard[s] == 1;
+        good &amp;= total == (long long)N * (N + 1) / 2;
+        printf(&quot;p=%d: blocks %d..%d; sum=%lld; every worker once: %s\n&quot;,
+               size, q, q + (rem != 0), total, good ? &quot;yes&quot; : &quot;FAILED&quot;);
+    }
+    if (!good) MPI_Abort(MPI_COMM_WORLD, 2);
+    MPI_Finalize();
+    return 0;
+}
+</code></pre>
+<pre><code class="output">p=1: blocks 10000..10000; sum=50005000; every worker once: yes
+p=7: blocks 1428..1429; sum=50005000; every worker once: yes
+p=10: blocks 1000..1000; sum=50005000; every worker once: yes</code></pre>
+<p>The formula check verifies both partition coverage and communication for these inputs. It is stronger than printing a plausible final sum alone because the source bookkeeping also detects an omitted worker paired with a duplicated contribution. It does not prove the general partition theorem; equation (14.1) supplies that argument. It also does not time a speedup: process launch and tiny arithmetic would dominate such a comparison.</p>
+<p>The root accepts messages from any source. Integer addition gives the same exact result in any order here because no intermediate sum overflows. Floating-point addition requires separate care: regrouping rounded additions can change the result. A deterministic output protocol can first store each contribution under its source rank and then add in rank order, or receive from named ranks in that order. This may trade earlier consumption of available messages for reproducibility.</p>
+<p>The code appears before the detailed argument list of send and receive because the lecture introduces the rank-based sum first. Its essential protocol is already complete: each nonroot rank owes one value, and the root consumes one from each. The following section refines exactly which message a receive is allowed to consume and why a wildcard needs accompanying status information.</p>
+
+<h2 id="sendrecv">A message matches an envelope, then fills a buffer <a class="timestamp" href="https://www.youtube.com/watch?v=ZT5BqjCqcNk&amp;t=365s">W5L2 6:05</a></h2>
+<p>The lecture's send is <code>MPI_Send(&amp;value, 1, MPI_INT, 0, 10, MPI_COMM_WORLD)</code>. Its first three arguments describe data: the address of <code>value</code>, one element, and the MPI datatype corresponding to a C <code>int</code>. Its remaining arguments name destination rank 0, tag 10 and the communicator. The address is local to the sender. MPI transfers the value described by that address; it does not send a usable remote pointer.</p>
+<p>The corresponding receive is <code>MPI_Recv(&amp;value, 1, MPI_INT, source, tag, comm, &amp;status)</code>. Its first address selects the receiver's local storage. The receive count is a <em>capacity</em>, the maximum number of elements that may be written, rather than a promise that exactly that many will arrive. A shorter message writes only the part it fills; a longer message creates a truncation error. The received element count is queried from the completed status with <code>MPI_Get_count</code>.</p>
+<p>A matching message must target the receiving process in the same communication context. Its source must equal the requested source unless the receive uses <code>MPI_ANY_SOURCE</code>; its tag must equal the requested tag unless the receive uses <code>MPI_ANY_TAG</code>. There is no corresponding wildcard communicator. Wildcards belong to receives, while a point-to-point send names one destination. The datatype is not an envelope field that prevents a wrong-type message from matching: type compatibility is an additional obligation of the program. These rules are specified in <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report.pdf">MPI 4.1, §§3.2.3–3.3</a>.</p>
+<p>For the contiguous basic-type examples, use the same basic type at both ends: a C <code>double</code> array with <code>MPI_DOUBLE</code>, or a C <code>int</code> with <code>MPI_INT</code>. Changing only the receive datatype to <code>MPI_DOUBLE</code> does not numerically convert integers into doubles. Typed communication can translate machine representations on heterogeneous systems, which differs from converting the numerical type requested by the application. <code>MPI_BYTE</code> instead describes uninterpreted bytes.</p>
+<p>The distinction between count and bytes makes the interface portable. A count of three <code>MPI_INT</code> elements means three C integers even when their machine representation differs. A count of twelve <code>MPI_BYTE</code> elements means twelve raw bytes. These can occupy the same amount of memory on one installation and still have different type-matching obligations. For a derived datatype, the relationship between count and extent is richer; the examples here deliberately avoid that complication.</p>
+<p>The returned <code>MPI_Status</code> identifies the actual source and tag. It is essential when wildcards widen the set of eligible messages. A root must store a result by <code>status.MPI_SOURCE</code> if its array is indexed by worker identity. Storing the first arrival under worker 1 silently assumes an ordering guarantee that MPI does not supply. Similarly, a tag selects a kind of receive, while the selected receive determines the destination memory. The tag does not itself encode an address or cause automatic routing into an application array.</p>
+<p>A protocol should choose a small vocabulary of tags with documented meanings. For example, tag 10 could mean a numerical result and tag 11 a release signal. A receive accepting any tag might accidentally consume the release signal as data. Distinct communicators can provide stronger isolation between independent components, but within one communicator exact tag matching often makes a simple protocol easier to prove. All tag values used here lie below the standard's guaranteed minimum upper bound of 32 767.</p>
+<p>The next listing uses four ranks. Worker \(k\) sends \(2k\) doubles with tag \(100+k\). Rank 0 repeatedly receives into a capacity of 16 doubles, records source, tag and actual count, checks every payload, and checks that unused buffer elements retain the sentinel value \(-1\). It prints by source order after collection, so the display is deterministic while the arrival order may vary. The size guard makes the fixed buffers sufficient for every allowed run.</p>
+<pre><code class="language-c" data-file="envelope.c" data-build="mpicc -O2 -Wall -Wextra envelope.c -o envelope" data-run="mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 4 ./envelope" data-needs="mpi">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+
+#define CAPACITY 16
+
+int main(int argc, char **argv)
+{
+    int rank, size;
+    MPI_Init(&amp;argc, &amp;argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &amp;rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &amp;size);
+    if (size != 4) MPI_Abort(MPI_COMM_WORLD, 1);
+    if (rank != 0) {
+        double data[CAPACITY];
+        for (int i = 0; i &lt; 2 * rank; ++i) data[i] = rank + i / 10.0;
+        MPI_Send(data, 2 * rank, MPI_DOUBLE, 0, 100 + rank, MPI_COMM_WORLD);
+    } else {
+        int tags[4] = {0}, counts[4] = {0}, good = 1;
+        for (int k = 1; k &lt; size; ++k) {
+            double buf[CAPACITY];
+            for (int i = 0; i &lt; CAPACITY; ++i) buf[i] = -1;
+            MPI_Status st;
+            int n;
+            MPI_Recv(buf, CAPACITY, MPI_DOUBLE, MPI_ANY_SOURCE, MPI_ANY_TAG,
+                     MPI_COMM_WORLD, &amp;st);
+            MPI_Get_count(&amp;st, MPI_DOUBLE, &amp;n);
+            int s = st.MPI_SOURCE;
+            good &amp;= n == 2 * s &amp;&amp; st.MPI_TAG == 100 + s;
+            for (int i = 0; i &lt; n; ++i) good &amp;= buf[i] == s + i / 10.0;
+            for (int i = n; i &lt; CAPACITY; ++i) good &amp;= buf[i] == -1;
+            tags[s] = st.MPI_TAG;
+            counts[s] = n;
+        }
+        for (int s = 1; s &lt; size; ++s)
+            printf(&quot;source %d: tag %d; count %d; capacity %d\n&quot;,
+                   s, tags[s], counts[s], CAPACITY);
+        printf(&quot;payloads and untouched buffer tails: %s\n&quot;, good ? &quot;ok&quot; : &quot;FAILED&quot;);
+        if (!good) MPI_Abort(MPI_COMM_WORLD, 2);
+    }
+    MPI_Finalize();
+    return 0;
+}
+</code></pre>
+<pre><code class="output">source 1: tag 101; count 2; capacity 16
+source 2: tag 102; count 4; capacity 16
+source 3: tag 103; count 6; capacity 16
+payloads and untouched buffer tails: ok</code></pre>
+<p>Counts 2, 4 and 6 fit capacities of 16, and the untouched tails confirm that the receive does not fill its unused capacity with additional data. Those tails are not part of the received message and must not be treated as valid new values. The test's exact equality is justified because each expected expression is reproduced with the same arithmetic and the transmitted doubles retain their representation on this homogeneous run. It is a data-transfer check, not a general floating-point error test.</p>
+<p>Message structure should be proved before payload interpretation. First establish which source and tag can match. Then establish a compatible datatype and sufficient capacity. Finally interpret the values. An application that performs only the last step can print 42 after receiving the wrong logical message. The next example shows a different failure: one correctly matched message can conceal six entirely missing receives.</p>
+
+<h2 id="lecture-program">Receiving 42 once does not consume seven sends <a class="timestamp" href="https://www.youtube.com/watch?v=ZT5BqjCqcNk&amp;t=853s">W5L2 14:13</a></h2>
+<p>The lecture's basic experiment sends 42 from rank 1 to rank 0. The listing below retains the wildcard receive to display its status, but requires exactly two ranks. This guard turns the intended two-process demonstration into an explicit precondition. One send then has one matching receive, after which both ranks may finalize. No input files are read and only rank 0 prints.</p>
+<pre><code class="language-c" data-file="send42.c" data-build="mpicc -O2 -Wall -Wextra send42.c -o send42" data-run="mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 2 ./send42" data-needs="mpi">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+
+int main(int argc, char **argv)
+{
+    int rank, size, value = 42;
+    MPI_Init(&amp;argc, &amp;argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &amp;rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &amp;size);
+    if (size != 2) MPI_Abort(MPI_COMM_WORLD, 1);
+    if (rank == 1) {
+        MPI_Send(&amp;value, 1, MPI_INT, 0, 10, MPI_COMM_WORLD);
+    } else {
+        MPI_Status st;
+        MPI_Recv(&amp;value, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG,
+                 MPI_COMM_WORLD, &amp;st);
+        printf(&quot;received %d from rank %d with tag %d\n&quot;,
+               value, st.MPI_SOURCE, st.MPI_TAG);
+        if (value != 42 || st.MPI_SOURCE != 1 || st.MPI_TAG != 10)
+            MPI_Abort(MPI_COMM_WORLD, 2);
+    }
+    MPI_Finalize();
+    return 0;
+}
+</code></pre>
+<pre><code class="output">received 42 from rank 1 with tag 10</code></pre>
+<p>The demonstration is a complete two-process protocol. Its value, source and tag are checked, and the sender's local buffer remains valid until its blocking send returns. The wildcard is harmless here because there is only one possible sender and one message. Naming source 1 and tag 10 would express that knowledge more narrowly, which is often preferable in a larger program.</p>
+<p>The lecture also runs the branch structure on eight processes: every nonzero rank sends, but rank 0 still receives only once. There are seven sends and one receive. At most one of those sends can match that receive, leaving six messages unmatched. Changing the transmitted value to the sender's rank makes the displayed winner vary between runs, but does not repair the missing receives. The winner is not guaranteed to be rank 1, the lowest rank, or a uniformly random rank.</p>
+<p>A small standard-mode send may return after MPI copies its payload into internal storage. That can allow all seven workers to reach finalization even while only one message was consumed. It does not make the program correct. Conversely, an implementation may wait for a matching receive before completing a send; then six workers can remain blocked. Neither outcome is a portable contract for the eight-process version. The defect follows from the unmatched messages and the finalization rule, without needing to execute an intentionally hanging program.</p>
+<p>The correct repair depends on the intended algorithm. If only rank 1 should send, select <code>rank == 1</code> and make other ranks perform no point-to-point operation. If every worker should contribute, the root must post \(p-1\) matching receives, as in the integer sum. If the purpose is to accept the first result and discard the rest, the discarded results still require a designed communication and cancellation protocol. Entering finalization is not such a protocol.</p>
+<p>This example separates two tests of correctness. A <em>value invariant</em> says that a received integer equals 42. A <em>communication invariant</em> says that every required send has a matching receive and that all operations are completed appropriately. The first invariant can hold while the second fails. A distributed test suite should exercise both; varying process count and message size is particularly effective at exposing assumptions about the second.</p>
+
+<h2 id="modes">Completion, buffering and a deadlock proof</h2>
+<p>A standard-mode blocking send, <code>MPI_Send</code>, returns when its buffer is safe to modify. The implementation may have copied the data into temporary storage or may have transferred them directly to a posted receive. Therefore its return does not generally prove that the receiving application has reached any particular line. A receive return, in contrast, proves that its buffer contains the received message and may be accessed by that process.</p>
+<p>The four send modes separate additional conditions. Standard mode leaves buffering decisions to MPI. <em>Synchronous</em> mode, <code>MPI_Ssend</code>, requires a matching receive to have started receiving before successful send completion, although it does not require the receiver to have returned. <em>Buffered</em> mode, <code>MPI_Bsend</code>, uses application-provided attached buffering and must be given enough space for the messages that depend on it. <em>Ready</em> mode, <code>MPI_Rsend</code>, requires that a matching receive already be posted when the send starts; violating that precondition is erroneous. All use ordinary matching receives. See <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report.pdf">MPI 4.1, §3.4</a>.</p>
+<p><em>Eager</em> and <em>rendezvous</em> name implementation protocols rather than new application send modes. An eager protocol can transmit data before the receiving application posts its receive, using storage to hold unexpected messages. A rendezvous protocol coordinates with the receiver before moving the main payload. The implementation can choose by size and available resources. No portable program may infer a universally safe eager threshold from one installation's small-message success.</p>
+<p>Consider two ranks that both call a blocking synchronous send to the other, then call their receive. Rank 0's send waits for rank 1's receive. Rank 1 cannot reach that receive until its own send completes, which waits for rank 0's receive. Rank 0 cannot reach its receive either. These implications form a cycle and neither receive can start. This is a <em>deadlock</em>: each blocked participant requires an event that another blocked participant cannot reach.</p>
+<p>The same program with standard sends is not guaranteed to deadlock, because buffering can break the wait. It is nevertheless unsafe as a portable exchange, because the implementation is permitted to withhold that buffering. A useful sufficient discipline for these simple point-to-point programs is to verify that replacing standard sends with synchronous sends would still leave the protocol able to finish. This examines dependencies rather than trusting a size-dependent implementation resource.</p>
+<p>There are three straightforward repairs for two ranks. Give rank 0 the order send–receive and rank 1 receive–send. Use <code>MPI_Sendrecv</code>, which expresses a send and receive together with separate buffers. Or initiate nonblocking receives and sends, then complete all requests. Each repair makes the required receive reachable while its peer's send is pending. The first is simple for one pair; the latter two are easier to extend to multiple neighbours.</p>
+<p>The next program demonstrates the issue without an unbounded hang. Rank 0 starts a nonblocking synchronous send of \(M=262\,144\) integers and tests it before sending a release signal. Rank 1 must receive that release before it posts the data receive. At the test, a matching data receive cannot yet exist, so completion must be false; the control dependency proves this independently of elapsed time. The program then releases the receiver and waits normally. It also checks ordered synchronous exchange, <code>MPI_Sendrecv</code>, and receive-first nonblocking synchronous exchange. On this machine each bulk message occupies 1 MiB.</p>
+<pre><code class="language-c" data-file="safe_exchange.c" data-build="mpicc -O2 -Wall -Wextra safe_exchange.c -o safe_exchange" data-run="mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 2 ./safe_exchange" data-needs="mpi">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+#define M 262144
+
+static int check(const int *a, int value)
+{
+    for (int i = 0; i &lt; M; ++i) if (a[i] != value) return 0;
+    return 1;
+}
+
+int main(int argc, char **argv)
+{
+    int rank, size, good = 1;
+    MPI_Init(&amp;argc, &amp;argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &amp;rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &amp;size);
+    if (size != 2) MPI_Abort(MPI_COMM_WORLD, 1);
+    MPI_Comm c = MPI_COMM_WORLD;
+    int other = 1 - rank;
+    int *out = malloc(M * sizeof *out), *in = malloc(M * sizeof *in);
+    if (!out || !in) MPI_Abort(c, 2);
+    for (int i = 0; i &lt; M; ++i) out[i] = rank + 10;
+
+    /* Rank 1 cannot post its data receive until rank 0 sends the release. */
+    if (rank == 0) {
+        MPI_Request req;
+        int complete = 0, go = 1;
+        MPI_Issend(out, M, MPI_INT, 1, 1, c, &amp;req);
+        MPI_Test(&amp;req, &amp;complete, MPI_STATUS_IGNORE);
+        good &amp;= !complete;
+        printf(&quot;synchronous send before matching receive: %s\n&quot;,
+               complete ? &quot;FAILED&quot; : &quot;incomplete&quot;);
+        MPI_Send(&amp;go, 1, MPI_INT, 1, 2, c);
+        MPI_Wait(&amp;req, MPI_STATUS_IGNORE);
+    } else {
+        int go;
+        MPI_Recv(&amp;go, 1, MPI_INT, 0, 2, c, MPI_STATUS_IGNORE);
+        MPI_Recv(in, M, MPI_INT, 0, 1, c, MPI_STATUS_IGNORE);
+        good &amp;= check(in, 10);
+    }
+
+    if (rank == 0) {
+        MPI_Ssend(out, M, MPI_INT, other, 3, c);
+        MPI_Recv(in, M, MPI_INT, other, 3, c, MPI_STATUS_IGNORE);
+    } else {
+        MPI_Recv(in, M, MPI_INT, other, 3, c, MPI_STATUS_IGNORE);
+        MPI_Ssend(out, M, MPI_INT, other, 3, c);
+    }
+    good &amp;= check(in, other + 10);
+    MPI_Sendrecv(out, M, MPI_INT, other, 4, in, M, MPI_INT, other, 4,
+                 c, MPI_STATUS_IGNORE);
+    good &amp;= check(in, other + 10);
+    MPI_Request req[2];
+    MPI_Irecv(in, M, MPI_INT, other, 5, c, &amp;req[0]);
+    MPI_Issend(out, M, MPI_INT, other, 5, c, &amp;req[1]);
+    MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
+    good &amp;= check(in, other + 10);
+    if (rank == 1) MPI_Send(&amp;good, 1, MPI_INT, 0, 6, c);
+    else {
+        int peer_good;
+        MPI_Recv(&amp;peer_good, 1, MPI_INT, 1, 6, c, MPI_STATUS_IGNORE);
+        good &amp;= peer_good;
+        printf(&quot;ordered, Sendrecv, nonblocking exchanges: %s on both ranks\n&quot;,
+               good ? &quot;ok&quot; : &quot;FAILED&quot;);
+    }
+    free(out);
+    free(in);
+    if (!good) MPI_Abort(c, 3);
+    MPI_Finalize();
+    return 0;
+}
+</code></pre>
+<pre><code class="output">synchronous send before matching receive: incomplete
+ordered, Sendrecv, nonblocking exchanges: ok on both ranks</code></pre>
+<p>The first line is stronger than a timed observation that a send happened not to finish within 0.3 seconds. The release protocol excludes the required receive until after the test. Once released, the receive makes completion possible and the program drains the request. Every subsequent exchange checks every received integer on both ranks. The test prints a summary after collecting the peer's verdict, so one rank's successful data check cannot conceal the other's failure.</p>
+<p>Buffers in <code>MPI_Sendrecv</code> are disjoint here. The ordinary routine is not permission to use one overlapping array as both operands; <code>MPI_Sendrecv_replace</code> is a different interface for the replace-in-place case. The nonblocking variant also keeps its output buffer unchanged until <code>MPI_Waitall</code> completes and does not inspect the input buffer during the active receive. These storage obligations are as important as posting the right envelope.</p>
+<p>A wait-for cycle is a proof of deadlock for the stated single-threaded, synchronous, no-alternative-action protocol. It is not a complete theorem that every cycle drawn in an arbitrary resource graph proves deadlock. Multiple interchangeable resources, extra threads and alternate transitions can invalidate such a shortcut. Here every arrow denotes a specific required receive, and each receive lies after the blocked send in the only thread of that process, so the argument is sufficient.</p>
+
+<h2 id="ordering">Nonblocking calls expose concurrency, not a universal order</h2>
+<p>A nonblocking operation returns an <code>MPI_Request</code> handle. <code>MPI_Wait</code> completes one request; <code>MPI_Test</code> reports whether it has completed; <code>MPI_Waitall</code> completes a collection. While a send remains active, the application must not modify its send buffer. While a receive remains active, it must not access that receive buffer. Returning from <code>MPI_Isend</code> or <code>MPI_Irecv</code> is initiation, not permission to reuse the associated storage.</p>
+<p>Nonblocking communication removes a dependency from the calling thread and can make useful computation between initiation and completion possible. It does not establish that the network transfer overlaps that computation on every implementation. Some progress can require entering MPI again, and local computation may compete with communication for memory bandwidth. A performance claim about overlap needs an experiment comparing a suitable combined operation with separate compute and communication baselines.</p>
+<p>The ordering guarantee is narrower than a global timeline. If one single-threaded process sends two messages in sequence to the same destination, and both would match the same receive, the later message cannot overtake the earlier pending one for that receive. Likewise, posted receives have an analogous matching order. Initiating nonblocking sends in sequence preserves this relevant order. The rule does not impose rank order between different senders. It also does not force a receive for tag 1 to precede a receive for tag 2.</p>
+<p>A receiver can explicitly request tag 2 first even if its sender initiated tag 1 first. These two messages do not compete for the same exact-tag receive. The sender should use nonblocking operations if it needs both messages outstanding: a blocking synchronous send of tag 1 followed by tag 2 would wait for the very receive that the receiver postpones. Envelopes and control flow together decide whether an apparent reordering is legitimate or a dependency error.</p>
+<p>The listing takes exactly three ranks. In its first phase, ranks 1 and 2 each send 200 numbered messages with tag 5. Rank 0 accepts either source and checks the sequence separately for each. In its second phase, rank 1 starts messages 111 and 222 with different tags and waits for both; rank 0 deliberately receives 222 first. Tags isolate this phase from any still-arriving tag-5 messages. Only rank 0 prints.</p>
+<pre><code class="language-c" data-file="ordering.c" data-build="mpicc -O2 -Wall -Wextra ordering.c -o ordering" data-run="mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 3 ./ordering" data-needs="mpi">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+
+#define K 200
+
+int main(int argc, char **argv)
+{
+    int rank, size;
+    MPI_Init(&amp;argc, &amp;argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &amp;rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &amp;size);
+    if (size != 3) MPI_Abort(MPI_COMM_WORLD, 1);
+    if (rank != 0) {
+        for (int i = 0; i &lt; K; ++i)
+            MPI_Send(&amp;i, 1, MPI_INT, 0, 5, MPI_COMM_WORLD);
+    } else {
+        int next[3] = {0}, errors = 0;
+        for (int k = 0; k &lt; 2 * K; ++k) {
+            int value;
+            MPI_Status st;
+            MPI_Recv(&amp;value, 1, MPI_INT, MPI_ANY_SOURCE, 5,
+                     MPI_COMM_WORLD, &amp;st);
+            errors += value != next[st.MPI_SOURCE]++;
+        }
+        printf(&quot;messages per sender: %d, %d; sequence errors: %d\n&quot;,
+               next[1], next[2], errors);
+        if (errors || next[1] != K || next[2] != K)
+            MPI_Abort(MPI_COMM_WORLD, 2);
+    }
+    if (rank == 1) {
+        int a = 111, b = 222;
+        MPI_Request req[2];
+        MPI_Isend(&amp;a, 1, MPI_INT, 0, 1, MPI_COMM_WORLD, &amp;req[0]);
+        MPI_Isend(&amp;b, 1, MPI_INT, 0, 2, MPI_COMM_WORLD, &amp;req[1]);
+        MPI_Waitall(2, req, MPI_STATUSES_IGNORE);
+    } else if (rank == 0) {
+        int x, y;
+        MPI_Recv(&amp;x, 1, MPI_INT, 1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&amp;y, 1, MPI_INT, 1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        printf(&quot;explicit tags: %d before %d\n&quot;, x, y);
+        if (x != 222 || y != 111) MPI_Abort(MPI_COMM_WORLD, 3);
+    }
+    MPI_Finalize();
+    return 0;
+}
+</code></pre>
+<pre><code class="output">messages per sender: 200, 200; sequence errors: 0
+explicit tags: 222 before 111</code></pre>
+<p>The zero sequence-error result is one finite implementation check of the standard's nonovertaking guarantee, rather than a proof of that guarantee for every execution. The second line is a constructed example of selective reception, with safe outstanding sends. Nothing in the result says which sender supplied the first tag-5 message, and the program does not need that information to validate each per-source sequence.</p>
+<p>Progress and fairness are distinct. MPI specifies progress obligations once matching operations have been initiated; that prevents certain unrelated traffic from blocking every possible completion. It does not promise fairness among competing sources. A wildcard consumer can repeatedly accept one source while another waits. A work queue requiring bounded service to every worker needs an application protocol or receive policy that establishes that property. <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report.pdf">MPI 4.1, §§3.5 and 3.7</a>, separates these issues explicitly.</p>
+
+<h2 id="cost">Ping-pong estimates a transport cost under stated conditions</h2>
+<p>After proving that a communication can complete, ask what it costs. In the <em>alpha–beta model</em>, one isolated message takes</p>
+\[
+T_{\mathrm{msg}}(m)=\alpha+\beta m,\qquad
+B(m)=\frac{m}{\alpha+\beta m}. \tag{14.2}
+\]
+<p>\(B(m)\) is the achieved payload bandwidth in bytes per second. The model assumes a fixed startup cost, a cost proportional to byte count, and conditions sufficiently stable that one pair of coefficients describes the selected range. <a href="https://www.mcs.anl.gov/~thakur/papers/ijhpca-coll.pdf">Thakur, Rabenseifner and Gropp (2005), §3</a>, use this model to reason about communication algorithms and attribute related formulations to earlier work including Hockney. The present derivation and fits are teaching constructions. A change of protocol can require a different line; contention and pipelining can require a richer model.</p>
+<p>If \(\alpha\gt0\) and \(\beta\gt0\), bandwidth approaches \(1/\beta\) for large messages. Setting \(B(m)\) equal to half that limit gives \(2\beta m=\alpha+\beta m\), hence the <em>half-bandwidth length</em> \(m_{1/2}=\alpha/\beta\). Below this length, startup accounts for more than half the predicted time; above it, the byte-dependent term does. The dimensions check: seconds divided by seconds per byte gives bytes. This interpretation is meaningful only where the fitted coefficients are positive and the model describes the measurements.</p>
+<p>A ping-pong round trip makes rank 0 send \(m\) bytes to rank 1 and receive the same payload back. If \(R\) round trips take elapsed time \(\Delta t\), define the measured half-round-trip mean \(t=\Delta t/(2R)\). It estimates a symmetric one-way cost, including MPI and scheduling overhead. It does not directly measure the propagation delay of a physical link, and asymmetry is hidden by the division by two. Only rank 0's clock appears, so clock synchronization between ranks is unnecessary.</p>
+<p>The listing measures eleven byte counts, \(1,4,\ldots,4^{10}=1\,048\,576\), warms each size with one trial, then records seven timed trials. It sorts the trial means and prints their minimum and median. The repetition count is 100 below 4096 bytes, 50 below 65 536 bytes and 10 thereafter. Every byte of the resulting payload is checked after each size. These choices bound runtime and avoid including launch time in each message. Minimum means the least observed batch average, not the minimum latency of every individual message.</p>
+<p>All displayed timing data are one actual sample under the loopback configuration described in the model section. Four separate sequential captures were made in an exclusive agent execution slot; operating-system activity, CPU frequency and process migration remained uncontrolled. The timing listing is checked by successful return and payload validation because its numerical output varies. The Python fit below instead uses the displayed rounded sample as fixed input and has an exact output check.</p>
+<pre><code class="language-c" data-file="pingpong.c" data-build="mpicc -O2 -Wall -Wextra pingpong.c -o pingpong" data-run="mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 2 ./pingpong" data-needs="mpi" data-check="returncode">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+#define MAXBYTES 1048576
+#define TRIALS 7
+
+static int cmp(const void *a, const void *b)
+{
+    double x = *(const double *)a, y = *(const double *)b;
+    return (x &gt; y) - (x &lt; y);
+}
+
+int main(int argc, char **argv)
+{
+    int rank, size;
+    MPI_Init(&amp;argc, &amp;argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &amp;rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &amp;size);
+    if (size != 2) MPI_Abort(MPI_COMM_WORLD, 1);
+    unsigned char *buf = malloc(MAXBYTES);
+    if (!buf) MPI_Abort(MPI_COMM_WORLD, 2);
+    for (int i = 0; i &lt; MAXBYTES; ++i) buf[i] = (unsigned char)(i % 251);
+    if (rank == 0) printf(&quot;bytes min_us median_us MB_per_s_at_min\n&quot;);
+    for (int m = 1; m &lt;= MAXBYTES; m *= 4) {
+        int reps = m &lt; 4096 ? 100 : (m &lt; 65536 ? 50 : 10);
+        double times[TRIALS];
+        for (int trial = -1; trial &lt; TRIALS; ++trial) {
+            double start = MPI_Wtime();
+            for (int i = 0; i &lt; reps; ++i) {
+                if (rank == 0) {
+                    MPI_Send(buf, m, MPI_BYTE, 1, 0, MPI_COMM_WORLD);
+                    MPI_Recv(buf, m, MPI_BYTE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                } else {
+                    MPI_Recv(buf, m, MPI_BYTE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    MPI_Send(buf, m, MPI_BYTE, 0, 0, MPI_COMM_WORLD);
+                }
+            }
+            double t = (MPI_Wtime() - start) / (2.0 * reps);
+            if (trial &gt;= 0) times[trial] = t;
+        }
+        for (int i = 0; i &lt; m; ++i)
+            if (buf[i] != (unsigned char)(i % 251)) MPI_Abort(MPI_COMM_WORLD, 3);
+        if (rank == 0) {
+            qsort(times, TRIALS, sizeof *times, cmp);
+            printf(&quot;%d %.3f %.3f %.2f\n&quot;, m, times[0] * 1e6,
+                   times[TRIALS / 2] * 1e6, m / times[0] / 1e6);
+        }
+    }
+    free(buf);
+    MPI_Finalize();
+    return 0;
+}
+</code></pre>
+<pre><code class="output">bytes min_us median_us MB_per_s_at_min
+1 2.885 2.936 0.35
+4 2.906 2.974 1.38
+16 2.700 2.797 5.93
+64 2.709 2.766 23.62
+256 2.785 2.861 91.93
+1024 2.959 3.129 346.10
+4096 3.877 4.016 1056.61
+16384 5.817 6.019 2816.74
+65536 18.321 18.480 3577.02
+262144 33.694 35.271 7780.10
+1048576 99.656 106.999 10521.97</code></pre>
+<p>Capture 4 gives a minimum half-round-trip mean of 2.885 microseconds at one byte and 99.656 microseconds at 1 MiB, with a median of 106.999 microseconds at the latter size. The minimum-based payload bandwidth there is 10.52 GB/s. This value is a rate through the local TCP path, not the bandwidth of a physical network interface. The bend between 16 384 and 65 536 bytes does not, by itself, identify a particular protocol switch.</p>
+<p>To fit a straight line, let \((m_i,t_i)\), \(i=1,\ldots,n_{\mathrm{obs}}\), denote the chosen observations. Minimize \(J(\alpha,\beta)=\sum_i w_i(\alpha+\beta m_i-t_i)^2\), where \(w_i\) is a positive weight. Equal weights minimize squared absolute time errors. Weights \(1/t_i^2\) instead minimize squared relative errors, giving small messages influence even when the sizes span six orders of magnitude. This is an explicitly selected loss function, not a claim that timing noise is independent Gaussian noise with a known variance.</p>
+<p>Differentiate \(J\) with respect to \(\alpha\) and \(\beta\) and set both derivatives to zero. Define \(A=\sum_iw_i\), \(C=\sum_iw_im_i\), \(G=\sum_iw_im_i^2\), \(H=\sum_iw_it_i\), and \(K=\sum_iw_im_it_i\). The two normal equations are \(A\alpha+C\beta=H\) and \(C\alpha+G\beta=K\). Their determinant \(\Delta=AG-C^2\) is positive if at least two measured sizes differ, since it is a positive weighted measure of size variance. Solving gives</p>
+\[
+\alpha=\frac{HG-CK}{\Delta},\qquad
+\beta=\frac{AK-CH}{\Delta}. \tag{14.3}
+\]
+<p>The script reports an unweighted all-size fit, a relative-error all-size fit and relative-error fits on two declared subranges. It reports the root-mean-square relative residual, \(\sqrt{\sum_i((\alpha+\beta m_i-t_i)/t_i)^2/n_{\mathrm{obs}}}\), and the largest absolute relative residual. A negative startup coefficient is an admissible least-squares result but an inadmissible physical interpretation as latency. Large residuals or unstable coefficients require restricting the model or withholding the physical interpretation; least squares cannot certify the model that supplied its equation.</p>
+<pre><code class="language-python" data-file="fit_hockney.py" data-run="python3 fit_hockney.py">&quot;&quot;&quot;Fits to the displayed rounded TCP-loopback sample; times are microseconds.&quot;&quot;&quot;
+
+SAMPLE = [
+    [
+        1,
+        2.885
+    ],
+    [
+        4,
+        2.906
+    ],
+    [
+        16,
+        2.7
+    ],
+    [
+        64,
+        2.709
+    ],
+    [
+        256,
+        2.785
+    ],
+    [
+        1024,
+        2.959
+    ],
+    [
+        4096,
+        3.877
+    ],
+    [
+        16384,
+        5.817
+    ],
+    [
+        65536,
+        18.321
+    ],
+    [
+        262144,
+        33.694
+    ],
+    [
+        1048576,
+        99.656
+    ]
+]
+
+def fit(points, relative):
+    weights = [1 / t**2 if relative else 1 for m, t in points]
+    A = sum(weights)
+    C = sum(w*m for w, (m, t) in zip(weights, points))
+    G = sum(w*m*m for w, (m, t) in zip(weights, points))
+    H = sum(w*t for w, (m, t) in zip(weights, points))
+    K = sum(w*m*t for w, (m, t) in zip(weights, points))
+    det = A*G-C*C
+    return (H*G-C*K)/det, (A*K-C*H)/det
+
+def report(label, points, relative):
+    alpha, beta = fit(points, relative)
+    residuals = [(alpha+beta*m-t)/t for m, t in points]
+    rms = (sum(e*e for e in residuals)/len(points))**0.5
+    worst = max(abs(e) for e in residuals)
+    print(f&quot;{label}: n={len(points)} alpha_us={alpha:.3f} beta_ns_per_B={beta*1000:.4f} &quot;
+          f&quot;rms_pct={100*rms:.2f} max_pct={100*worst:.2f}&quot;)
+
+report(&quot;plain all&quot;, SAMPLE, False)
+report(&quot;relative all&quot;, SAMPLE, True)
+report(&quot;relative 1..16384&quot;, [x for x in SAMPLE if x[0] &lt;= 16384], True)
+report(&quot;relative 65536..1048576&quot;, [x for x in SAMPLE if x[0] &gt;= 65536], True)
+</code></pre>
+<pre><code class="output">plain all: n=11 alpha_us=4.462 beta_ns_per_B=0.0924 rms_pct=46.35 max_pct=65.30
+relative all: n=11 alpha_us=2.907 beta_ns_per_B=0.1139 rms_pct=16.65 max_pct=43.39
+relative 1..16384: n=8 alpha_us=2.795 beta_ns_per_B=0.1935 rms_pct=3.85 max_pct=7.46
+relative 65536..1048576: n=3 alpha_us=12.820 beta_ns_per_B=0.0818 rms_pct=1.23 max_pct=1.72</code></pre>
+<p>For the displayed sample, the all-size relative fit has a 16.65% root-mean-square relative residual and a 43.39% worst residual. Equal absolute-error weighting instead gives a 46.35% relative RMS residual. The declared 1-to-16 384-byte subrange gives \(\alpha=2.795\ \mu\mathrm{s}\), \(\beta=0.1935\ \mathrm{ns/byte}\) and 3.85% relative RMS residual. The three-point large-size fit has a smaller residual but very little independent data to challenge its line; its intercept must not be interpreted as the latency of a tiny message.</p>
+<p>Across captures 1–4 the small-range intercept is 2.795–2.997 microseconds and its slope is 0.1911–0.1988 ns/byte. The large-range slope is 0.08184–0.10060 ns/byte. At 1 MiB the observed minimum batch mean ranges from 99.656 to 123.245 microseconds. These ranges show dependence on execution conditions even within one exclusive session. They do not assign the cause to a particular cache, kernel mechanism or CPU core.</p>
+<p>Interpolating the small-range fit to an 8000-byte halo predicts \(2.795+0.0001935(8000)=4.343\ \mu\mathrm{s}\), about 64% startup. This is a model estimate between tested sizes, not a direct 8000-byte measurement. The same fit predicts that combining two such messages, when their dependencies and destination permit it, saves about 2.795 microseconds. Repeating this procedure on a real inter-node connection is necessary before using these coefficients in a cluster scaling prediction.</p>
+<p>Aggregation illustrates the model's design value. Two messages of \(m\) bytes cost \(2\alpha+2\beta m\); one message of \(2m\) bytes costs \(\alpha+2\beta m\). The saving is one startup cost, provided both messages can be combined without adding a dependency or crossing a different protocol regime. Reducing byte count by half instead saves \(\beta m/2\). These are different interventions and their relative value follows from \(\alpha/(\beta m)\), not from a general slogan that bigger messages are always better.</p>
+<p>For a hypothetical—not measured—case with \(\alpha=10\ \mu\mathrm{s}\), \(\beta=0.1\ \mathrm{ns/byte}\), and an 8000-byte row, equation (14.2) gives \(10.8\ \mu\mathrm{s}\). Halving the byte count saves only \(0.4\ \mu\mathrm{s}\), while merging two such messages saves \(10\ \mu\mathrm{s}\). In a Jacobi solver, however, two rows may go to different neighbours or be needed at different times, so that algebraic saving may be infeasible. Performance models guide a protocol choice only after its dependencies and destination constraints have been respected.</p>
+
+<h2 id="limits">Lecture claims, established results and limits</h2>
+<div class="table-wrap"><table>
+<caption>Table 14.1. Checkable lecture claims and their status.</caption>
+<thead><tr><th scope="col">Lecture claim or demonstration</th><th scope="col">Status and evidence</th></tr></thead>
+<tbody>
+<tr><td>Several copies of hello world run independently and their visible order varies.</td><td>The independent-process model supports unspecified output order. The listing sorts the display and checks private values; it does not measure a probability distribution of orders.</td></tr>
+<tr><td>More processes than cores can be scheduled.</td><td>Possible with oversubscription and sufficient resources; the launcher may refuse the request without explicit permission or an allocation. The ten-rank sum is a functional test.</td></tr>
+<tr><td>Initialization creates the copies and starts them remotely.</td><td>Separate launcher/runtime creation from initialization within each process. The listing's process identity exists before initialization and is unchanged afterwards; MPI §11.1 separates communication from resource management.</td></tr>
+<tr><td>All nodes run the same code.</td><td>SPMD is the demonstrated convention. MPI also supports different executables in one job.</td></tr>
+<tr><td>The receive count names the number of items to receive.</td><td>It specifies capacity. Counts 2, 4 and 6 arrive in buffers of capacity 16; status and <code>MPI_Get_count</code> recover the actual lengths.</td></tr>
+<tr><td>Eight processes send to a root that receives once, then finish.</td><td>One observed printed result does not establish a valid program. Six messages remain unmatched; MPI §11.2.2, Example 11.4, forbids this finalization pattern.</td></tr>
+<tr><td>The received sender's rank varies with execution.</td><td>Different senders have no rank-order matching guarantee. Scheduling is one influence; MPI selection and transport progress also matter. Uniform randomness is not established.</td></tr>
+</tbody></table></div>
+<p>The correctness results are conditional and precise. The partition proof covers equal-cost indexed items. The matching rules describe which envelopes can be received, with compatible types and sufficient storage as additional requirements. The deadlock proof concerns the stated single-threaded synchronous exchange. The programs validate finite cases against these arguments; they cannot replace the arguments with a general claim that repeated successful runs imply safety.</p>
+<p>The timings concern two ranks on one laptop communicating through TCP loopback with no binding. They include the MPI library, kernel path, copies and scheduling. They measure neither a shared-memory transport nor a physical inter-node network. A fit to the minimum of seven batch means estimates a lower observed envelope for that procedure; it supplies no tail-latency guarantee. The four captures quantify limited run-to-run variation, not a confidence interval over all machine states.</p>
+<p>The execution environment also reported that its Windows-mounted file system could not create Open MPI's debugger-attachment FIFO, with operating-system error 95. The numerical jobs exited successfully and their payload checks passed; debugger attachment was not tested or claimed as supported. This environmental limitation is distinct from the message data path and remains relevant to anyone trying to reproduce a debugger workflow in the same setting.</p>
+<p>Derived datatypes, new communicators, probes, persistent requests, MPI threads, one-sided communication and the Sessions Model remain outside the implementation examples. Chapter 15 introduces collectives, while Chapter 16 builds domain decomposition and a full MPI solver. A useful next step is to record each solver array's owner and each halo's validity interval before tuning message size: that exposes both correctness dependencies and the communication volume that a performance model must describe.</p>
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> An even number \(p\ge2\) of ranks forms a ring. Rank \(k\) sends one message to \((k+1)\bmod p\) and receives from \((k-1)\bmod p\), using synchronous sends. An isolated ready sender–receiver pair takes \(T=\alpha+\beta m\); independent pairs can communicate concurrently, and local call overhead is ignored. Prove that all ranks sending first deadlocks. Compare a schedule in which only rank 0 receives first with a schedule in which odd ranks receive first and even ranks send first.</p>
+<details><summary>Solution</summary>
+<p>If all send first, rank \(k\)'s send needs the next rank's receive, which lies after that rank's blocked send. Following these dependencies reaches \(0\to1\to\cdots\to p-1\to0\); no receive can start. If only rank 0 receives first, only \(p-1\to0\) is initially enabled. Its completion lets rank \(p-1\) receive from \(p-2\), and the chain unwinds backwards. After \(p-1\) such messages, rank 1 can receive the final message from rank 0. There are \(p\) serial transfers, giving \(pT\).</p>
+<p>With the parity schedule, even-to-odd messages form \(p/2\) disjoint pairs in the first phase. Their completion enables odd-to-even messages in the second. The time is \(2T\), so the ideal ratio to the one-break schedule is \(p/2\). For the explicitly hypothetical values \(\alpha=10\ \mu\mathrm{s}\), \(\beta=0.1\ \mathrm{ns/byte}\), \(m=8000\) bytes and \(p=8\), \(T=10.8\ \mu\mathrm{s}\). The two times are 86.4 and 21.6 microseconds. These are model predictions, not measured ring timings. Contention, asymmetric progress and local overhead can change them.</p>
+</details>
+<p><strong>Exercise 2 (compute).</strong> Under the hypothetical coefficients of Exercise 1, compute the half-bandwidth length, the time and achieved bandwidth for an 8000-byte message, and the savings from either halving its byte count or combining two such messages into one. State the condition that lets the combination save time.</p>
+<details><summary>Solution</summary>
+<p>Convert \(\beta\) into seconds per byte: \(0.1\ \mathrm{ns/byte}=10^{-10}\ \mathrm{s/byte}\). Hence \(m_{1/2}=10^{-5}/10^{-10}=100\,000\) bytes. The row takes \(10+0.0001(8000)=10.8\ \mu\mathrm{s}\), giving \(8000/(10.8\times10^{-6})=7.4074\times10^8\) bytes/s, about 741 MB/s in decimal units. The asymptotic model bandwidth is \(10^{10}\) bytes/s, or 10 GB/s, so this short message achieves only 7.4% of that limit.</p>
+<p>A 4000-byte message takes \(10.4\ \mu\mathrm{s}\), saving \(0.4\ \mu\mathrm{s}\), or 3.70% of the original. Two separate 8000-byte messages take \(21.6\ \mu\mathrm{s}\); a combined 16 000-byte message takes \(11.6\ \mu\mathrm{s}\), saving one startup, \(10\ \mu\mathrm{s}\), or 46.3%. The combined data must have the same destination, be simultaneously available, and be usable together without delaying required work. The same coefficients must also remain valid at the larger size. Otherwise this algebra compares infeasible schedules or different transport regimes.</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> A receiver claims that two messages from the same sender must be consumed in send order. Construct a safe two-message protocol contradicting this statement without violating MPI's nonovertaking guarantee. Explain why replacing the nonblocking sends with blocking synchronous sends changes the result.</p>
+<details><summary>Solution</summary>
+<p>Rank 1 initiates a nonblocking send of 111 with tag 1, then a nonblocking send of 222 with tag 2, then waits for both. Rank 0 posts a receive from rank 1 for tag 2, then one for tag 1. The first receive can match only 222, so consumption order is 222 then 111, as <code>ordering.c</code> checks. Nonovertaking does not apply across these exact-tag receives because both messages do not match the same receive.</p>
+<p>With a blocking synchronous tag-1 send first, rank 1 cannot initiate tag 2 until rank 0 posts the tag-1 receive. Rank 0 cannot post that receive until its tag-2 receive completes, but tag 2 has not been sent. This is a dependency cycle. Nonblocking initiation makes both sends reachable before waiting and removes it; it does not revoke the guarantee for messages that actually compete for the same receive.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> A root posts seven receives from any source with capacity 16 doubles. Each worker sends two doubles. It stores the \(j\)-th arrival as worker \(j+1\)'s result and then processes all 16 positions as new data. Identify both unsupported assumptions and repair them.</p>
+<details><summary>Solution</summary>
+<p>The first assumption equates arrival order with rank order. Different sources have no such ordering guarantee. Retain the status, obtain its source rank \(s\), validate that the source is expected and has not already supplied its required message, then store the result under \(s\). A fixed-source receive loop is an alternative when the intended processing order is rank order.</p>
+<p>The second assumption equates receive capacity with message length. Query <code>MPI_Get_count(&amp;status, MPI_DOUBLE, &amp;n)</code>, verify that \(n=2\) for this protocol, and process exactly those two values. The remaining fourteen positions were not written by this message and may contain stale or uninitialized data. Specifying an exact count of two would narrow the capacity but still would not fix source identity. Independently validate source, tag, count and payload before using the result.</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> A Jacobi rank must exchange boundary rows with both neighbours and later combine floating-point partial sums reproducibly for a fixed process count. Choose communication and accumulation patterns. State what your choices guarantee and what still requires measurement or additional numerical analysis.</p>
+<details><summary>Solution</summary>
+<p>Post receives into separate halo buffers, initiate sends from the current boundary rows, then wait for all requests before reading the halos or modifying active send buffers. Synchronous nonblocking sends are a useful correctness stress test; standard nonblocking sends can be used with the same safe dependencies. Use distinct directions or phase tags so a receive cannot match the wrong row. Alternatively, carefully arranged <code>MPI_Sendrecv</code> calls can express each shift. No choice may rely on a supposed eager threshold.</p>
+<p>Collect each partial sum under its source identity, then add in a fixed rank order. This fixes the root's reduction order for fixed local algorithms and fixed process count. The reason matters: in ordinary binary64 arithmetic, \((10^{16}+1)-10^{16}=0\), while \((10^{16}-10^{16})+1=1\), because the spacing near \(10^{16}\) is 2. Fixed rank order prevents arrival order from selecting these groupings. It does not guarantee identical results across different process counts, compilers or local summation algorithms. Compensated or reproducible summation requires a separate numerical design. Communication overlap and the fastest exchange pattern remain measurement questions.</p>
+</details>
+<p><strong>Exercise 6 (implementation and verification).</strong> Compute \(\pi\) using the midpoint rule with <code>num_steps</code>\(=10^6\) and block distribution. Define \(h=1/\texttt{num_steps}\) and \(x_i=(i+1/2)h\); sum \(4h/(1+x_i^2)\) over \(0\le i\lt\texttt{num_steps}\). Collect partial sums with point-to-point receives in rank order. Compare runs with 1, 2, 4 and 7 ranks. Why can correct answers differ?</p>
+<details><summary>Solution</summary>
+<p>The quotient–remainder partition assigns every midpoint exactly once. Each worker multiplies its local sum by \(h\), sends one double, and the root adds workers in rank order. The program needs no input and writes only its final approximation and its difference from the library's binary64 <code>M_PI</code> constant. The printed difference is therefore relative to that constant, not an exact-real oracle.</p>
+<pre><code class="language-c" data-file="pi_p2p.c" data-build="mpicc -O2 -Wall -Wextra pi_p2p.c -o pi_p2p -lm" data-run="mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 1 ./pi_p2p &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 2 ./pi_p2p &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 4 ./pi_p2p &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 7 ./pi_p2p" data-needs="mpi">#include &lt;mpi.h&gt;
+#include &lt;math.h&gt;
+#include &lt;stdio.h&gt;
+
+int main(int argc, char **argv)
+{
+    long num_steps = 1000000;
+    int rank, size;
+
+    MPI_Init(&amp;argc, &amp;argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &amp;rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &amp;size);
+
+    double h = 1.0 / num_steps;
+    long q = num_steps / size, r = num_steps % size;          /* block distribution */
+    long lo = rank * q + (rank &lt; r ? rank : r);
+    long hi = lo + q + (rank &lt; r ? 1 : 0);
+    double sum = 0.0;
+    for (long i = lo; i &lt; hi; i++) {
+        double x = (i + 0.5) * h;
+        sum += 4.0 / (1.0 + x * x);
+    }
+    double part = h * sum;
+
+    if (rank != 0) {
+        MPI_Send(&amp;part, 1, MPI_DOUBLE, 0, 3, MPI_COMM_WORLD);
+    } else {
+        double pi = part;
+        for (int k = 1; k &lt; size; k++) {                      /* fixed order: rank 1, 2, ... */
+            double v;
+            MPI_Recv(&amp;v, 1, MPI_DOUBLE, k, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            pi += v;
+        }
+        printf(&quot;p = %d: pi = %.15f, pi - M_PI = %+.2e\n&quot;, size, pi, pi - M_PI);
+    }
+    MPI_Finalize();
+    return 0;
+}
+</code></pre>
+<pre><code class="output">p = 1: pi = 3.141592653589764, pi - M_PI = -2.89e-14
+p = 2: pi = 3.141592653589899, pi - M_PI = +1.06e-13
+p = 4: pi = 3.141592653589875, pi - M_PI = +8.22e-14
+p = 7: pi = 3.141592653589894, pi - M_PI = +1.01e-13</code></pre>
+<p>The midpoint discretization is unchanged by the process count, while the grouping of floating-point additions changes. For \(g(x)=4/(1+x^2)\), the leading composite midpoint error is \(-h^2(g'(1)-g'(0))/24\). Since \(g'(x)=-8x/(1+x^2)^2\), the endpoint derivative difference is \(-2\), giving a leading quadrature error \(+h^2/12\approx8.33\times10^{-14}\). Higher terms and floating-point roundoff must be distinguished from that leading expression.</p>
+<p>The observed approximations are close at roughly the \(10^{-13}\) scale, consistent with this truncation scale plus different rounding accumulation. One process adds a million terms sequentially; several processes form shorter local sums and combine them. A fixed root order gives reproducibility with respect to arrival schedules for a fixed partition, assuming the same local operations. It does not force the one-rank and seven-rank groupings to be identical or prove that one grouping is always more accurate. The next chapter replaces the explicit collection by a collective reduction.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li>NPTEL, IIT Bombay, <a href="https://www.youtube.com/watch?v=ekz3AGb4ebY">W5L1, Introduction to Message Passing Interface (MPI)</a> (26:02): distributed memory, MPI as a library, hello world in C and Fortran, launching, oversubscription, initialization, ranks and finalization.</li>
+<li>NPTEL, IIT Bombay, <a href="https://www.youtube.com/watch?v=ZT5BqjCqcNk">W5L2, Sending and Receiving the messages using MPI</a> (22:08): rank-based roles, the integer-sum example, send and receive arguments, datatypes, tags, wildcards, status, and the 42/rank experiments.</li>
+<li>MPI Forum, <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report.pdf"><em>MPI: A Message-Passing Interface Standard, Version 4.1</em></a> (2 November 2023). §§2.7 and 3.2–3.3: processes, envelopes, count, status and type matching; §§3.4–3.5: send modes, ordering, progress, fairness and safe exchanges; §3.7: nonblocking calls, requests and completion; §9.6: timers; §§11.1–11.2 and 11.5: process environment, initialization, finalization and launching. Example 11.4 specifically forbids the unmatched-send finalization pattern. The version history documents deprecation of <code>mpif.h</code>.</li>
+<li>Open MPI, <a href="https://www.open-mpi.org/doc/v4.1/man1/mpirun.1.php"><code>mpirun</code> manual, 4.1 series</a>, accessed 2026-10-28 UTC. The served page identifies version 4.1.8. Supports launcher aliases, slots, hardware-thread options, oversubscription and binding choices; it is not assumed identical to every installed patch release.</li>
+<li>Open MPI, <a href="https://docs.open-mpi.org/en/v5.0.x/tuning-apps/networking/tcp.html">TCP transport documentation, §11.2.2</a>, accessed 2026-10-28 UTC. Supports the distinction among TCP, shared memory and self communication and the interface-inclusion option. This 5.0-series explanatory page is used for that transport distinction; actual 4.1-series commands were checked locally.</li>
+<li>R. Thakur, R. Rabenseifner and W. Gropp, <a href="https://www.mcs.anl.gov/~thakur/papers/ijhpca-coll.pdf">“Optimization of Collective Communication Operations in MPICH”</a>, <em>International Journal of High Performance Computing Applications</em> 19(1), 49–66 (2005), DOI 10.1177/1094342005051521. §3, second PDF page, defines the startup-plus-bytes model and its assumptions; the abstract and introduction explain choosing algorithms by message size. Earlier work is attributed through this paper; no independent reading of Hockney is claimed.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-13-openmp-memory-tasks-numerical-codes.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-15-mpi-collective-communication.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

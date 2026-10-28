@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="3aae0153d517514740d8737b95cb801f2cc43a63c1a907c8647410ddb1f98a10"><title>Domain decomposition, an MPI solver, and performance analysis · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>Domain decomposition, an MPI solver, and performance analysis</h1>
+<p class="lead">A \(1000\times1000\) grid contains one million interior temperatures. Four row strips give each rank 250 000 updates per sweep, but an interior rank also needs two rows of 1000 values owned by its neighbours. Changing to sixteen square patches reduces the length of each communicated face while increasing the number of neighbours. Neither partition is automatically faster. The decision requires an ownership map, a correct halo protocol, a comparison against the serial numerical algorithm, and a cost model that distinguishes message count from byte count. A speedup of 4.71 on eight processes is also ambiguous: it can arise from genuinely serial work or from overhead in an otherwise parallel algorithm.</p>
+<p class="source-note">Grounded in NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay: <a href="https://www.youtube.com/watch?v=kKmAqFDJNc0">W5L4, Domain Decomposition</a>; <a href="https://www.youtube.com/watch?v=FSUT2kW66cA">W5L5, Parallelization of example code using MPI</a>; and <a href="https://www.youtube.com/watch?v=l6HVISG9f_M">W5L6, Performance Analysis Frameworks for Parallel Programming</a>. <strong>Lecture material:</strong> structured patches and halos, overlap, irregular meshes, graph cuts and compressed adjacency, METIS, the four-strip heat program, timing and reproducibility, serial/parallel/overhead decomposition, Amdahl, Gustafson–Barsis and Karp–Flatt. <strong>Research extensions:</strong> the METIS manual specifies graph representation and partition objectives; MPI 4.1 specifies Cartesian neighbours, derived datatypes, requests and collectives; Gustafson's 1988 paper supplies the scaled-work argument; Karp and Flatt's 1990 paper supplies the effective serial metric and its diagnostic purpose. <strong>Original teaching constructions:</strong> remainder-aware geometry, the canonical-boundary MPI solver and pointwise serial comparison, surface-to-volume and isoefficiency derivations, checked graph and metric programs, controlled local captures, and six worked exercises.</p>
+
+<h2 id="model">The numerical state and its owner</h2>
+<p>The physical model is steady conduction on a unit square with constant conductivity and no internal heat source. Temperature \(u\) is normalized so that the hot top boundary has value 1 and the other three boundaries have value 0. There are \(N\) interior grid points along each coordinate, with spacing \(h=1/(N+1)\). A serial grid contains \((N+2)^2\) doubles in row-major order. The index \(i\) increases downwards and \(j\) to the right; the top edge is \(i=0\), the bottom \(i=N+1\), and the side edges \(j=0,N+1\). Corners are zero and are not read by an interior five-point stencil.</p>
+<p>The discrete Laplace equation at an interior point is \(u_{i-1,j}+u_{i+1,j}+u_{i,j-1}+u_{i,j+1}-4u_{i,j}=0\). <em>Jacobi iteration</em> constructs a new array entirely from the old one:</p>
+\[
+u^{(k+1)}_{i,j}=\tfrac14\left(u^{(k)}_{i-1,j}+u^{(k)}_{i+1,j}
+ +u^{(k)}_{i,j-1}+u^{(k)}_{i,j+1}\right),\qquad 1\le i,j\le N. \tag{16.1}
+\]
+<p>The integer \(k\) counts sweeps, not physical time. The initial interior is zero; boundary values remain fixed. The arrays are named <code>u</code> and <code>unew</code>, and a driver swaps their pointers after a sweep. The serial kernel <code>jacobi_step</code> returns the <em>update norm</em> \(\delta_k=\max_{i,j}|u^{(k+1)}_{i,j}-u^{(k)}_{i,j}|\). A tolerance <code>tol</code> can stop the iteration when this quantity is small, or <code>max_iter</code> can prescribe a fixed sweep count.</p>
+<p>The update norm is not the residual of the differential equation. Define the discrete Laplacian \((\Delta_hu)_{i,j}=(u_{i-1,j}+u_{i+1,j}+u_{i,j-1}+u_{i,j+1}-4u_{i,j})/h^2\). Subtract the old value from equation (16.1) to obtain \(u^{(k+1)}-u^{(k)}=(h^2/4)\Delta_hu^{(k)}\). Therefore</p>
+\[
+\|\Delta_hu^{(k)}\|_\infty=\frac{4\delta_k}{h^2}. \tag{16.2}
+\]
+<p>The subscript infinity means the largest absolute component. Equation (16.2) concerns the old iterate that generated the update. Its factor grows as the grid is refined: a fixed update tolerance does not enforce a fixed differential-equation residual tolerance across different \(N\). It also does not directly measure error against the continuous solution; discretization error remains even when the discrete system is solved accurately.</p>
+<p>Let \(p\) denote the number of MPI processes, and let an <em>owned patch</em> be the interior grid cells assigned uniquely to one rank. A <em>halo</em>, or ghost layer, stores copies of adjacent cells owned elsewhere. A physical boundary is prescribed data; a process boundary is an artificial cut across a mathematically continuous interior. Treating a process boundary as a zero-temperature wall would solve a different problem. The central invariant is that, before an interface update, its halo values belong to the same old iterate \(k\) as the locally owned inputs.</p>
+<p>For performance, \(T_1\) denotes a stated one-process baseline and \(T_p\) a parallel wall time. Speedup is \(S_p=T_1/T_p\); efficiency is \(E_p=S_p/p\). Work \(W\) remains an operation count. For a fixed number of sweeps it is proportional to \(N^2\). A message of \(m\) bytes has the model cost \(\alpha+\beta m\), where \(\alpha\) is startup seconds and \(\beta\) seconds per byte. A local update takes model time \(c\) seconds. These coefficients depend on hardware, placement and implementation.</p>
+<p>The measured execution environment is the earlier Intel Core i5-12450H laptop, gcc 13.3 and Open MPI under WSL 2 Ubuntu 24.04. Its four performance cores and four efficient cores supply twelve unequal logical processors. All inter-rank traffic here is explicitly forced through TCP on the loopback interface, with the self transport available and process binding disabled. These are local transport and scheduling experiments, neither shared-memory-transport measurements nor inter-node cluster measurements. Raw commands, source hashes, UTC times and monotonic endpoints are retained for each capture.</p>
+
+<h2 id="patches">From a global grid to local patches and halos <a class="timestamp" href="https://www.youtube.com/watch?v=kKmAqFDJNc0&amp;t=75s">W5L4 1:15</a></h2>
+<p>A structured decomposition chooses \(p_r\) process rows and \(p_c\) process columns, with \(p=p_rp_c\). A process has coordinates \((a,z)\), where \(0\le a\lt p_r\) and \(0\le z\lt p_c\). These are logical coordinates; they do not promise physical proximity on a machine. A simple row-major rank map is \(a p_c+z\), but an MPI Cartesian communicator can maintain the mapping and determine neighbours without embedding arithmetic rank assumptions throughout the solver.</p>
+<p>The lecture initially assumes exact divisibility. The implementation also handles remainders. Along one dimension divided into \(d\) parts, let \(q=\lfloor N/d\rfloor\) and \(r=N-dq\). Coordinate \(a\) owns \(b_a=q+[a\lt r]\) points beginning at offset \(o_a=aq+\min(a,r)\), where a bracket equals 1 when its condition is true. Consecutive offsets satisfy \(o_{a+1}=o_a+b_a\), the first is zero and the final endpoint is \(N\). Apply the construction independently along rows and columns to tile all \(N^2\) interior cells without duplication or gaps.</p>
+<p>A rank with \(b_r\) owned rows and \(b_c\) owned columns allocates \((b_r+2)(b_c+2)\) entries per array. Local owned indices are \(1,\ldots,b_r\) and \(1,\ldots,b_c\); index zero and the final index in each coordinate hold halos or physical boundaries. Local cell \((i,j)\) corresponds to global cell \((o_r+i,o_c+j)\). That translation decides which initial and boundary conditions apply. An interior rank must not independently invent global boundary values for its artificial edges.</p>
+<p>For example, \(N=31\) on a \(2\times2\) process grid gives lengths 16 and 15 along each dimension. Patch areas are 256, 240, 240 and 225, whose sum is 961. Equal coordinate spans are impossible because 31 is odd. The imbalance is small in this example, but a timing model must use the largest assigned work, not simply the average \(N^2/p\), when the difference matters. The program rejects decompositions with a process-grid dimension larger than \(N\), avoiding zero-cell patches.</p>
+<p>The five-point stencil needs only face neighbours. It does not read diagonal halo corners, even though a rectangular allocation reserves them. A nine-point stencil that includes diagonal entries would need corner information too. A wider stencil needs a thicker halo, and its communication volume grows accordingly. The geometry of dependencies, rather than the shape of an allocation alone, determines which values must move.</p>
+<p>A row-major row segment is contiguous, but a column is not. Its successive elements are separated by a stride of \(b_c+2\) doubles. Passing the address of its first entry with a count of \(b_r\) <code>MPI_DOUBLE</code> elements would send a contiguous segment crossing the first row, not the intended column. Either pack the column into a contiguous buffer or describe its layout with a derived datatype. The listing uses <code>MPI_Type_vector(b_r, 1, b_c+2, MPI_DOUBLE, &amp;column)</code>, then commits the type before communicating it. The count is the number of blocks, the block length is one, and the stride is in extents of the old datatype, as specified by <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report.pdf">MPI 4.1, §5.1</a>.</p>
+<p>The receive layout may differ from the send layout if their basic-type signatures match. Here both sides use equivalent column descriptions, because horizontal neighbours share the same owned row count. Vertical neighbours share the same owned column count and send contiguous rows. Thus a remainder-aware decomposition still matches message lengths along each interface. Derived datatypes specify memory locations; they do not prove that an implementation avoids internal packing or that they outperform explicit packing.</p>
+<p><code>MPI_Cart_shift</code> supplies north, south, west and east ranks. At a nonperiodic edge it returns <code>MPI_PROC_NULL</code>. A receive from that null process leaves its buffer unchanged, so the preinitialized physical boundary remains in place. This makes the same communication code work at corners, edges and interior patches. If rank reordering were enabled, the program would need to use the Cartesian rank consistently; this implementation disables reordering and still queries coordinates through MPI.</p>
+<p>The halo invariant suggests the iteration order exchange–update–swap. Exchange current <code>u</code> faces, compute <code>unew</code> from that complete old state, determine a global update norm, then swap. The lecture's program instead computes new owned values, exchanges their faces, and copies them into the old state. Those orders can represent the same Jacobi sequence if initialization and halo generations are correct. Mixing them carelessly can cause the first sweep or later boundaries to use stale data.</p>
+<p>Nonblocking communication offers a legal overlap region. A cell at least one owned cell away from every process face reads no arriving halo. Initiate receives and sends, compute those strictly interior cells, wait for the requests, then compute the patch boundary. Send buffers remain unchanged while active, receive buffers remain unaccessed, and all writes go to <code>unew</code>. When a patch is one or two cells wide, the strict interior can be empty. A correct overlap implementation must still update every owned cell exactly once.</p>
+<p>Having work available during communication is different from obtaining a time saving. Progress may require MPI calls, and computation can compete with message handling for memory bandwidth or CPU resources. The lower-bound ideal is roughly the maximum of communication time and independent computation time, plus the dependent boundary work; a nonoverlapped schedule resembles their sum. Neither expression includes all real overhead. The program compares both schedules while checking identical numerical results, leaving any performance conclusion to actual measurements.</p>
+
+<h2 id="graphs">Irregular meshes become weighted graph problems <a class="timestamp" href="https://www.youtube.com/watch?v=kKmAqFDJNc0&amp;t=733s">W5L4 12:13</a></h2>
+<p>Geometric cuts work well when work density is nearly uniform. An unstructured mesh can place many small tetrahedra around a feature and few large ones elsewhere. Equal physical volumes then contain unequal numbers of elements. If each element costs approximately the same to process, balancing volume fails to balance computation. If element costs differ because of polynomial degree, chemistry or nonlinear iterations, even balancing element counts can fail.</p>
+<p>Represent the computation as a graph \(G=(V,\mathcal E)\). A vertex \(v\in V\) represents one element or unknown block; an edge \(\{v,w\}\in\mathcal E\) represents an interaction requiring data. The choice of graph matters. In a face-adjacent dual graph of a conforming tetrahedral mesh, an interior tetrahedron has at most four face neighbours because it has four faces. This bound does not hold for every graph built from that mesh, such as a node-adjacency graph. It is therefore a property of the modeling choice, not of all unstructured calculations.</p>
+<p>A partition function \(P:V\to\{0,\ldots,p-1\}\) assigns vertices to processes. A vertex weight \(a_v\) can estimate computational cost. Process \(k\)'s modeled load is \(A_k=\sum_{P(v)=k}a_v\); balancing seeks to keep \(\max_k A_k\) close to the mean \(\sum_va_v/p\). An edge weight \(w_{vw}\) can estimate communication volume or another penalty for separating its endpoints. The weighted cut is \(\sum_{\{v,w\}\in\mathcal E,\ P(v)\ne P(w)}w_{vw}\), counting each undirected edge once.</p>
+<p>The two objectives compete. Assigning all vertices to one process makes the cut zero and generally destroys balance. Assigning equal numbers of vertices arbitrarily balances counts while potentially cutting many interactions. A practical formulation constrains allowable imbalance and then minimizes a cut or communication-volume objective. The <a href="https://karypis.github.io/glaros/files/sw/metis/manual.pdf">METIS 5.1 manual, §§3 and 5.7</a>, distinguishes these objectives and supports vertex and edge weights. A heuristic partition is a useful candidate, not a certificate of a globally optimal layout.</p>
+<p>Communication volume and cut edges are also not identical in every application. Several cut edges can need the same remote vertex value, which might be sent once in an aggregated message. Conversely, one cut edge might carry a large block or be exercised repeatedly during an iteration. Message startup depends on the number of peer messages after aggregation, not merely the edge count. A graph weight model should approximate the algorithm's actual exchange, and a resulting partition should still be evaluated in the program.</p>
+<p>The adjacency structure is sparse: most pairs of elements do not interact directly. With \(n_v=|V|\) vertices and \(n_e=|\mathcal E|\) undirected edges, a dense adjacency matrix has \(n_v^2\) entries. <em>Compressed sparse row</em>, or CSR, stores an offset array <code>xadj</code> of length \(n_v+1\) and a neighbour array <code>adjncy</code> of length \(2n_e\). Vertex \(v\)'s neighbours occupy the half-open interval <code>adjncy[xadj[v]:xadj[v+1]]</code>. Its degree is the difference of those offsets. Every undirected edge is stored in both directions.</p>
+<p>The lecture's example has three rows and five columns of vertices, numbered row by row from 0 to 14. It has \(3(5-1)+5(3-1)=22\) undirected edges and 44 neighbour entries. Thus CSR needs \(16+44=60\) integer entries, compared with 225 dense entries, excluding optional weights and container overhead. For a million tetrahedra with degree at most four, the adjacency entries grow linearly rather than quadratically. The exact byte saving depends on integer width and representation; counting entries avoids pretending that a Python list has C-array storage cost.</p>
+<p>The following pure-Python program reconstructs that graph and its CSR offsets, checks symmetry and round-trip adjacency, then compares two explicit three-way partitions. Row strips have five vertices each. Column strips of widths two, two and one have loads six, six and three. The latter may cut fewer edges while having worse balance. The program does not call METIS and makes no claim that either candidate is an optimal partition.</p>
+<pre><code class="language-python" data-file="csr_partition.py" data-run="python3 csr_partition.py">&quot;&quot;&quot;Construct the lecture's 3-by-5 graph; compare two declared partitions.&quot;&quot;&quot;
+rows, cols = 3, 5
+neighbors = []
+for i in range(rows):
+    for j in range(cols):
+        ids = []
+        for di, dj in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            a, b = i + di, j + dj
+            if 0 &lt;= a &lt; rows and 0 &lt;= b &lt; cols:
+                ids.append(a * cols + b)
+        neighbors.append(sorted(ids))
+xadj = [0]
+adjncy = []
+for ids in neighbors:
+    adjncy.extend(ids)
+    xadj.append(len(adjncy))
+assert xadj[-1] == 44
+assert all(v in neighbors[u] for v, ns in enumerate(neighbors) for u in ns)
+assert all(adjncy[xadj[v]:xadj[v+1]] == neighbors[v] for v in range(15))
+edges = [(u, v) for u, ns in enumerate(neighbors) for v in ns if u &lt; v]
+print(&quot;vertices:&quot;, len(neighbors), &quot;undirected edges:&quot;, len(edges))
+print(&quot;xadj:&quot;, xadj)
+print(&quot;CSR entries:&quot;, len(xadj)+len(adjncy), &quot;dense entries:&quot;, 15*15)
+for name, labels in [
+    (&quot;row strips&quot;, [v // cols for v in range(15)]),
+    (&quot;column strips&quot;, [min((v % cols) // 2, 2) for v in range(15)]),
+]:
+    loads = [labels.count(k) for k in range(3)]
+    cut = sum(labels[u] != labels[v] for u, v in edges)
+    print(f&quot;{name}: loads={loads} cut={cut} max/mean={max(loads)/5:.2f}&quot;)
+</code></pre>
+<pre><code class="output">vertices: 15 undirected edges: 22
+xadj: [0, 2, 5, 8, 11, 13, 16, 20, 24, 28, 31, 33, 36, 39, 42, 44]
+CSR entries: 60 dense entries: 225
+row strips: loads=[5, 5, 5] cut=10 max/mean=1.00
+column strips: loads=[6, 6, 3] cut=6 max/mean=1.20</code></pre>
+<p>The comparison is a small diagnostic of the formulation. A low cut is insufficient without the loads, and equal loads are insufficient without the cut. In a real mesh the vertex weights, edge weights and constraints can represent different physical workloads, memory footprints and message sizes. The METIS manual's graph format supplies arrays for those quantities; choosing meaningful weights remains part of the simulation's design.</p>
+<p>The partitioner also does not create MPI communication by itself. Once a partition assigns ownership, the application must build local numbering, identify remote neighbours, allocate halos, and establish the send and receive lists. Repartitioning a changing mesh adds migration costs. For a static structured problem those preparations can be done once, while adaptive calculations may need to revisit whether the expected savings justify moving data.</p>
+
+<h2 id="solver">A distributed Jacobi sweep must preserve the serial recurrence <a class="timestamp" href="https://www.youtube.com/watch?v=FSUT2kW66cA&amp;t=234s">W5L5 3:54</a></h2>
+<p>The heat demonstration uses four row strips, 1000 interior rows and columns, and 1000 fixed iterations. Its boundary conditions differ from this book's canonical case: the top and left are zero, while the right and bottom vary linearly towards 100. Its arrays are single precision. The implementation below instead retains the book's top-one, other-edges-zero conditions and doubles. Its output therefore is not a reproduction of the lecture's final temperature trace; it tests the same decomposition mechanism on a deliberately standardized numerical problem.</p>
+<p>The displayed update reads four neighbours from <code>told</code> and writes <code>t</code>. This is Jacobi averaging. The introductory description calls it successive over-relaxation, but the displayed two-array recurrence does not implement a general SOR update with a relaxation parameter and sequentially updated neighbours. The classification matters: communication schedules legal for Jacobi need not preserve Gauss–Seidel or SOR semantics.</p>
+<p>The displayed halo code also issues blocking sends before its receives. If standard sends happen to buffer the 1000-float rows, the example can finish. If sends require matching receives, adjacent ranks can wait on each other before reaching those receives. A barrier after the exchange cannot repair a deadlock before it. The listing uses <code>MPI_Sendrecv</code> for blocking mode or posts all nonblocking receives and sends before waiting, following the safe patterns of Chapter 14.</p>
+<p>Configuration is read by World rank 0 and broadcast. The parameters are \(N\), <code>max_iter</code>, communication mode, update tolerance and a timing flag. Modes 0 and 1 use row strips; modes 2 and 3 use a near-square Cartesian grid. Even modes exchange before all computation; odd modes compute the strict interior while requests are active. Sizes and iteration counts are bounded, and the process grid must have nonempty patches. The initial physical boundaries are installed in both arrays so they survive pointer swaps.</p>
+<p>Each sweep computes a local maximum update, then <code>MPI_Allreduce</code> with <code>MPI_MAX</code> supplies one common global norm. Every rank therefore makes the same stopping decision. A rank stopping on its local norm alone could leave a neighbour waiting for the next halo. The collective is retained even in fixed-sweep timing runs, so its cost is part of the measured algorithm. A production fixed-iteration benchmark could omit it, but that would be a different measured kernel.</p>
+<p>The full serial reference runs on rank 0 before the timed MPI kernel. After the distributed solve, each rank packs its owned cells and <code>MPI_Gatherv</code> collects the variable counts. Rank 0 reconstructs global positions from Cartesian coordinates and compares every interior value with the serial iterate, checks that the iteration counts and update norms agree, and rejects nonfinite results. The comparison tolerance is \(10^{-14}\). A checksum alone would not detect compensating errors in different cells.</p>
+<p>The listing combines nine correctness cases and eight timed configurations. It covers unequal blocks, one-cell patches, one rank, all four modes and convergence. Timed configurations use 200 sweeps; they do not claim a converged physical solution. Printed timing lines are capture 4 of four sequential captures, and variable timings are checked by return code. Numerical checks inside the program still fail the job on an incorrect result. Each run writes only standard output; no grid files or external inputs are needed.</p>
+<pre><code class="language-c" data-file="jacobi_mpi.c" data-build="mpicc -O2 -Wall -Wextra jacobi_mpi.c -o jacobi_mpi -lm" data-needs="mpi" data-check="returncode" data-run="mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 1 ./jacobi_mpi 31 200 0 0 0 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 4 ./jacobi_mpi 31 200 0 0 0 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 4 ./jacobi_mpi 31 200 1 0 0 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 4 ./jacobi_mpi 31 200 2 0 0 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 4 ./jacobi_mpi 31 200 3 0 0 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 6 ./jacobi_mpi 17 200 3 0 0 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 4 ./jacobi_mpi 2 20 3 0 0 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 1 ./jacobi_mpi 1 20 1 0 0 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 4 ./jacobi_mpi 31 5000 3 0.00001 0 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 1 ./jacobi_mpi 512 200 0 0 1 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 2 ./jacobi_mpi 512 200 0 0 1 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 4 ./jacobi_mpi 512 200 0 0 1 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 8 ./jacobi_mpi 512 200 0 0 1 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 4 ./jacobi_mpi 512 200 2 0 1 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 4 ./jacobi_mpi 512 200 3 0 1 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 1 ./jacobi_mpi 128 200 2 0 1 &amp;&amp; mpirun --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include lo --bind-to none --oversubscribe -np 4 ./jacobi_mpi 256 200 2 0 1">#include &lt;mpi.h&gt;
+#include &lt;math.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+#define IDX(i,j) ((size_t)(i) * (N + 2) + (j))
+#define AT(i,j) ((size_t)(i) * stride + (j))
+
+static int block_size(int N, int parts, int coord)
+{
+    return N / parts + (coord &lt; N % parts);
+}
+
+static int block_start(int N, int parts, int coord)
+{
+    int rem = N % parts;
+    return coord * (N / parts) + (coord &lt; rem ? coord : rem);
+}
+
+double jacobi_step(int N, const double *u, double *unew)
+{
+    double delta = 0;
+    for (int i = 1; i &lt;= N; ++i)
+        for (int j = 1; j &lt;= N; ++j) {
+            double v = 0.25 * (u[IDX(i-1,j)] + u[IDX(i+1,j)]
+                             + u[IDX(i,j-1)] + u[IDX(i,j+1)]);
+            unew[IDX(i,j)] = v;
+            delta = fmax(delta, fabs(v - u[IDX(i,j)]));
+        }
+    return delta;
+}
+
+static double update_region(int stride, const double *u, double *unew,
+                            int i0, int i1, int j0, int j1)
+{
+    double delta = 0;
+    for (int i = i0; i &lt;= i1; ++i)
+        for (int j = j0; j &lt;= j1; ++j) {
+            double v = 0.25 * (u[AT(i-1,j)] + u[AT(i+1,j)]
+                             + u[AT(i,j-1)] + u[AT(i,j+1)]);
+            unew[AT(i,j)] = v;
+            delta = fmax(delta, fabs(v - u[AT(i,j)]));
+        }
+    return delta;
+}
+
+static double *new_grid(size_t count, MPI_Comm comm)
+{
+    double *a = calloc(count, sizeof *a);
+    if (!a) MPI_Abort(comm, 2);
+    return a;
+}
+
+static void exchange(double *u, int nr, int nc, int stride,
+                     const int peer[4], MPI_Datatype column, MPI_Comm comm)
+{
+    MPI_Sendrecv(&amp;u[AT(1,1)], nc, MPI_DOUBLE, peer[0], 10,
+                 &amp;u[AT(nr+1,1)], nc, MPI_DOUBLE, peer[1], 10,
+                 comm, MPI_STATUS_IGNORE);
+    MPI_Sendrecv(&amp;u[AT(nr,1)], nc, MPI_DOUBLE, peer[1], 11,
+                 &amp;u[AT(0,1)], nc, MPI_DOUBLE, peer[0], 11,
+                 comm, MPI_STATUS_IGNORE);
+    MPI_Sendrecv(&amp;u[AT(1,1)], 1, column, peer[2], 12,
+                 &amp;u[AT(1,nc+1)], 1, column, peer[3], 12,
+                 comm, MPI_STATUS_IGNORE);
+    MPI_Sendrecv(&amp;u[AT(1,nc)], 1, column, peer[3], 13,
+                 &amp;u[AT(1,0)], 1, column, peer[2], 13,
+                 comm, MPI_STATUS_IGNORE);
+}
+
+static void start_exchange(double *u, int nr, int nc, int stride,
+                           const int peer[4], MPI_Datatype column,
+                           MPI_Comm comm, MPI_Request req[8])
+{
+    MPI_Irecv(&amp;u[AT(nr+1,1)], nc, MPI_DOUBLE, peer[1], 10, comm, &amp;req[0]);
+    MPI_Irecv(&amp;u[AT(0,1)], nc, MPI_DOUBLE, peer[0], 11, comm, &amp;req[1]);
+    MPI_Irecv(&amp;u[AT(1,nc+1)], 1, column, peer[3], 12, comm, &amp;req[2]);
+    MPI_Irecv(&amp;u[AT(1,0)], 1, column, peer[2], 13, comm, &amp;req[3]);
+    MPI_Isend(&amp;u[AT(1,1)], nc, MPI_DOUBLE, peer[0], 10, comm, &amp;req[4]);
+    MPI_Isend(&amp;u[AT(nr,1)], nc, MPI_DOUBLE, peer[1], 11, comm, &amp;req[5]);
+    MPI_Isend(&amp;u[AT(1,1)], 1, column, peer[2], 12, comm, &amp;req[6]);
+    MPI_Isend(&amp;u[AT(1,nc)], 1, column, peer[3], 13, comm, &amp;req[7]);
+}
+
+int main(int argc, char **argv)
+{
+    MPI_Init(&amp;argc, &amp;argv);
+    int world_rank, p;
+    MPI_Comm_rank(MPI_COMM_WORLD, &amp;world_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &amp;p);
+    int config[4] = {31, 200, 0, 0};
+    double tol = 0;
+    if (world_rank == 0) {
+        if (argc &gt; 1) config[0] = atoi(argv[1]); /* N: interior grid size */
+        if (argc &gt; 2) config[1] = atoi(argv[2]); /* max_iter */
+        if (argc &gt; 3) config[2] = atoi(argv[3]); /* 0/1 strips; 2/3 tiles; odd=overlap */
+        if (argc &gt; 4) tol = atof(argv[4]);      /* 0: fixed sweep count */
+        if (argc &gt; 5) config[3] = atoi(argv[5]); /* print variable timings */
+    }
+    MPI_Bcast(config, 4, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&amp;tol, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    int N = config[0], max_iter = config[1], mode = config[2], timed = config[3];
+    if (N &lt; 1 || N &gt; 1024 || max_iter &lt; 1 || max_iter &gt; 20000 ||
+        mode &lt; 0 || mode &gt; 3 || !isfinite(tol) || tol &lt; 0 || p &gt; 64)
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    int dims[2] = {0, 0}, periodic[2] = {0, 0};
+    if (mode &lt; 2) { dims[0] = p; dims[1] = 1; }
+    else MPI_Dims_create(p, 2, dims);
+    if (dims[0] &gt; N || dims[1] &gt; N) MPI_Abort(MPI_COMM_WORLD, 1);
+    MPI_Comm comm;
+    MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periodic, 0, &amp;comm);
+    int rank, coord[2], peer[4];
+    MPI_Comm_rank(comm, &amp;rank);
+    MPI_Cart_coords(comm, rank, 2, coord);
+    MPI_Cart_shift(comm, 0, 1, &amp;peer[0], &amp;peer[1]); /* north, south */
+    MPI_Cart_shift(comm, 1, 1, &amp;peer[2], &amp;peer[3]); /* west, east */
+    int nr = block_size(N, dims[0], coord[0]);
+    int nc = block_size(N, dims[1], coord[1]);
+    int row0 = block_start(N, dims[0], coord[0]);
+    int stride = nc + 2;
+    double *u = new_grid((size_t)(nr+2)*stride, comm);
+    double *unew = new_grid((size_t)(nr+2)*stride, comm);
+    if (row0 == 0)
+        for (int j = 1; j &lt;= nc; ++j) u[AT(0,j)] = unew[AT(0,j)] = 1;
+    MPI_Datatype column;
+    MPI_Type_vector(nr, 1, stride, MPI_DOUBLE, &amp;column);
+    MPI_Type_commit(&amp;column);
+
+    double *reference = NULL, serial_delta = 0, serial_seconds = 0;
+    int serial_iters = 0;
+    if (rank == 0) {
+        reference = new_grid((size_t)(N+2)*(N+2), comm);
+        double *next = new_grid((size_t)(N+2)*(N+2), comm);
+        for (int j = 1; j &lt;= N; ++j) reference[IDX(0,j)] = next[IDX(0,j)] = 1;
+        double start = MPI_Wtime();
+        do {
+            serial_delta = jacobi_step(N, reference, next);
+            double *swap = reference; reference = next; next = swap;
+            ++serial_iters;
+        } while (serial_iters &lt; max_iter &amp;&amp; (tol == 0 || serial_delta &gt;= tol));
+        serial_seconds = MPI_Wtime() - start;
+        free(next);
+    }
+
+    MPI_Barrier(comm); /* align the beginning of the measured kernel */
+    double start = MPI_Wtime(), delta = 0;
+    int iter = 0;
+    do {
+        double local_delta;
+        if (mode % 2 == 0) {
+            exchange(u, nr, nc, stride, peer, column, comm);
+            local_delta = update_region(stride, u, unew, 1, nr, 1, nc);
+        } else {
+            MPI_Request req[8];
+            start_exchange(u, nr, nc, stride, peer, column, comm, req);
+            local_delta = update_region(stride, u, unew, 2, nr-1, 2, nc-1);
+            MPI_Waitall(8, req, MPI_STATUSES_IGNORE);
+            local_delta = fmax(local_delta, update_region(stride, u, unew, 1, 1, 1, nc));
+            if (nr &gt; 1)
+                local_delta = fmax(local_delta, update_region(stride, u, unew, nr, nr, 1, nc));
+            for (int i = 2; i &lt; nr; ++i) {
+                local_delta = fmax(local_delta, update_region(stride, u, unew, i, i, 1, 1));
+                if (nc &gt; 1)
+                    local_delta = fmax(local_delta, update_region(stride, u, unew, i, i, nc, nc));
+            }
+        }
+        MPI_Allreduce(&amp;local_delta, &amp;delta, 1, MPI_DOUBLE, MPI_MAX, comm);
+        double *swap = u; u = unew; unew = swap;
+        ++iter;
+    } while (iter &lt; max_iter &amp;&amp; (tol == 0 || delta &gt;= tol));
+    double seconds = MPI_Wtime() - start, parallel_seconds;
+    MPI_Reduce(&amp;seconds, &amp;parallel_seconds, 1, MPI_DOUBLE, MPI_MAX, 0, comm);
+
+    double *packed = new_grid((size_t)nr*nc, comm);
+    for (int i = 1; i &lt;= nr; ++i)
+        for (int j = 1; j &lt;= nc; ++j)
+            packed[(size_t)(i-1)*nc+j-1] = u[AT(i,j)];
+    int *counts = NULL, *displs = NULL;
+    double *all = NULL;
+    if (rank == 0) {
+        counts = malloc(p * sizeof *counts);
+        displs = malloc(p * sizeof *displs);
+        if (!counts || !displs) MPI_Abort(comm, 2);
+        int offset = 0;
+        for (int k = 0; k &lt; p; ++k) {
+            int xy[2];
+            MPI_Cart_coords(comm, k, 2, xy);
+            counts[k] = block_size(N, dims[0], xy[0]) * block_size(N, dims[1], xy[1]);
+            displs[k] = offset;
+            offset += counts[k];
+        }
+        if (offset != N*N) MPI_Abort(comm, 3);
+        all = new_grid((size_t)N*N, comm);
+    }
+    MPI_Gatherv(packed, nr*nc, MPI_DOUBLE, all, counts, displs, MPI_DOUBLE, 0, comm);
+    int good = 1;
+    if (rank == 0) {
+        double error = 0;
+        int compared = 0;
+        for (int k = 0; k &lt; p; ++k) {
+            int xy[2];
+            MPI_Cart_coords(comm, k, 2, xy);
+            int rows = block_size(N, dims[0], xy[0]), cols = block_size(N, dims[1], xy[1]);
+            int r0 = block_start(N, dims[0], xy[0]), c0 = block_start(N, dims[1], xy[1]);
+            for (int i = 0; i &lt; rows; ++i)
+                for (int j = 0; j &lt; cols; ++j) {
+                    double v = all[displs[k] + i*cols+j];
+                    if (!isfinite(v)) good = 0;
+                    error = fmax(error, fabs(v-reference[IDX(r0+i+1,c0+j+1)]));
+                    ++compared;
+                }
+        }
+        good &amp;= error &lt;= 1e-14 &amp;&amp; delta == serial_delta &amp;&amp; iter == serial_iters;
+        good &amp;= compared == N*N;
+        printf(&quot;N=%d p=%d grid=%dx%d mode=%d iterations=%d checked=%d error=%.1e status=%s\n&quot;,
+               N, p, dims[0], dims[1], mode, iter, compared, error, good ? &quot;ok&quot; : &quot;FAILED&quot;);
+        if (timed)
+            printf(&quot;timing serial_s=%.9f mpi_max_s=%.9f serial_over_mpi=%.4f\n&quot;,
+                   serial_seconds, parallel_seconds, serial_seconds/parallel_seconds);
+    }
+    MPI_Bcast(&amp;good, 1, MPI_INT, 0, comm);
+    free(all); free(counts); free(displs); free(reference);
+    free(packed); free(u); free(unew);
+    MPI_Type_free(&amp;column);
+    MPI_Comm_free(&amp;comm);
+    if (!good) MPI_Abort(MPI_COMM_WORLD, 4);
+    MPI_Finalize();
+    return 0;
+}
+</code></pre>
+<pre><code class="output">N=31 p=1 grid=1x1 mode=0 iterations=200 checked=961 error=0.0e+00 status=ok
+N=31 p=4 grid=4x1 mode=0 iterations=200 checked=961 error=0.0e+00 status=ok
+N=31 p=4 grid=4x1 mode=1 iterations=200 checked=961 error=0.0e+00 status=ok
+N=31 p=4 grid=2x2 mode=2 iterations=200 checked=961 error=0.0e+00 status=ok
+N=31 p=4 grid=2x2 mode=3 iterations=200 checked=961 error=0.0e+00 status=ok
+N=17 p=6 grid=3x2 mode=3 iterations=200 checked=289 error=0.0e+00 status=ok
+N=2 p=4 grid=2x2 mode=3 iterations=20 checked=4 error=0.0e+00 status=ok
+N=1 p=1 grid=1x1 mode=1 iterations=20 checked=1 error=0.0e+00 status=ok
+N=31 p=4 grid=2x2 mode=3 iterations=1094 checked=961 error=0.0e+00 status=ok
+N=512 p=1 grid=1x1 mode=0 iterations=200 checked=262144 error=0.0e+00 status=ok
+timing serial_s=0.067300803 mpi_max_s=0.066397778 serial_over_mpi=1.0136
+N=512 p=2 grid=2x1 mode=0 iterations=200 checked=262144 error=0.0e+00 status=ok
+timing serial_s=0.066063667 mpi_max_s=0.036771122 serial_over_mpi=1.7966
+N=512 p=4 grid=4x1 mode=0 iterations=200 checked=262144 error=0.0e+00 status=ok
+timing serial_s=0.069508057 mpi_max_s=0.029349692 serial_over_mpi=2.3683
+N=512 p=8 grid=8x1 mode=0 iterations=200 checked=262144 error=0.0e+00 status=ok
+timing serial_s=0.114269441 mpi_max_s=0.052656770 serial_over_mpi=2.1701
+N=512 p=4 grid=2x2 mode=2 iterations=200 checked=262144 error=0.0e+00 status=ok
+timing serial_s=0.087406690 mpi_max_s=0.031605127 serial_over_mpi=2.7656
+N=512 p=4 grid=2x2 mode=3 iterations=200 checked=262144 error=0.0e+00 status=ok
+timing serial_s=0.088145078 mpi_max_s=0.035881865 serial_over_mpi=2.4565
+N=128 p=1 grid=1x1 mode=2 iterations=200 checked=16384 error=0.0e+00 status=ok
+timing serial_s=0.005067998 mpi_max_s=0.005019988 serial_over_mpi=1.0096
+N=256 p=4 grid=2x2 mode=2 iterations=200 checked=65536 error=0.0e+00 status=ok
+timing serial_s=0.017009859 mpi_max_s=0.011497267 serial_over_mpi=1.4795</code></pre>
+<p>All nine dedicated correctness cases and all 32 timing invocations passed, with a displayed maximum pointwise difference of zero. The \(N=31\), four-rank convergence case stopped after 1094 sweeps for <code>tol</code>\(=10^{-5}\). That confirms agreement with the stated serial recurrence and stopping rule for these tests. It is not an independent proof of discretization accuracy or the correctness of every future modification. The serial and MPI kernels share the same arithmetic formula, while their ownership, indexing, communication and traversal differ.</p>
+<p>The gathered arrays contain only owned interior values. Halo copies are deliberately omitted because they are redundant and the final pointer swap can leave a halo from the previous generation. Requiring those stale copies to equal the returned interior state would impose an extra final exchange unrelated to the correctness of the completed sweeps. The prescribed physical boundaries remain unchanged in both arrays; the pointwise reference check concerns all \(N^2\) unknowns.</p>
+
+<h2 id="timing">Time the operation the speedup is meant to describe <a class="timestamp" href="https://www.youtube.com/watch?v=FSUT2kW66cA&amp;t=1343s">W5L5 22:23</a></h2>
+<p>The lecture places a barrier in each iteration and prints individual process times. The barrier ensures every rank has entered before any returns. It does not transfer halos or make incompatible message tags match. In this solver, completed neighbour exchanges establish the data needed by each update, and the all-reduce establishes a common stopping norm. An additional end-of-sweep barrier is unnecessary for the algorithm's data dependencies. Removing every synchronization would be wrong; retaining the necessary communication is the reason the extra barrier can be omitted.</p>
+<p>The timing starts after a barrier, immediately before the sweep loop, and ends before the maximum-time reduction and final gather. The maximum of the ranks' own elapsed durations is reported as <code>mpi_max_s</code>. No subtraction of timestamps from different clocks is used. Barrier-return skew means this is a maximum local kernel duration after start alignment, not a perfectly reconstructed global trace. Setup, reference computation, packing, verification, allocation and launcher startup are excluded.</p>
+<p>The printed serial reference time measures the ordinary <code>jacobi_step</code> driver for the same numerical work. Its ratio to the MPI time is labeled <code>serial_over_mpi</code>. In multi-rank jobs the other ranks wait for rank 0 at the start barrier and may consume CPU time in MPI progress; this reference timing is therefore not an isolated serial-process benchmark. That reference is rerun in every job and can vary with placement, frequency and cache conditions. For a strong-scaling curve, use a single declared baseline within a capture: the one-rank MPI strip kernel at \(N=512\). Do not silently select each job's different serial time as the numerator of one curve.</p>
+<div class="table-wrap"><table><caption>Table 16.1. Capture 4: fixed N=512, 200 sweeps, blocking row strips; one-rank MPI kernel baseline.</caption><thead><tr><th scope="col">Ranks</th><th scope="col">Maximum rank time (ms)</th><th scope="col">Speedup</th><th scope="col">Efficiency</th></tr></thead><tbody><tr><td>1</td><td>66.398</td><td>1.000</td><td>1.000</td></tr>
+<tr><td>2</td><td>36.771</td><td>1.806</td><td>0.903</td></tr>
+<tr><td>4</td><td>29.350</td><td>2.262</td><td>0.566</td></tr>
+<tr><td>8</td><td>52.657</td><td>1.261</td><td>0.158</td></tr></tbody></table></div>
+<p>The strong-scaling values use fixed \(N\) and 200 sweeps. The eight-rank time is longer than the four-rank time in the displayed sample, so adding processes does not monotonically reduce runtime here. The experiment combines message startup, a reduction every sweep, a hybrid CPU and an unbound local scheduler. Its data do not uniquely identify which mechanism caused the slowdown. A profile or controlled placement study would be needed to distinguish them.</p>
+<p>Across captures 1–4, four-rank strip speedup ranges from 2.262 to 3.541 and eight-rank strip speedup from 0.800 to 1.413, each relative to the one-rank MPI baseline from the same capture. Four-rank strip kernel times range from 21.434 to 29.350 milliseconds; eight-rank times range from 52.657 to 83.724 milliseconds. These are paired-capture ratios, not ratios formed by selecting the fastest time of one process count and the slowest of another.</p><p>In capture 4 the four-rank blocking tile takes 31.605 milliseconds and the nonblocking tile 35.882 milliseconds, compared with 29.350 milliseconds for strips. Nonblocking tiles are slightly faster than blocking tiles in capture 2 and slower in the other three; the samples establish no consistent overlap gain. The weak-scaling pair takes 5.020 and 11.497 milliseconds in capture 4, giving weak efficiency 0.437. Across all four captures that ratio is 0.327–0.437.</p>
+<p>The weak-scaling pair changes \(N=128,p=1\) to \(N=256,p=4\), keeping 16 384 owned cells per rank in a square decomposition and holding the sweep count at 200. Its weak efficiency is the smaller problem's parallel time divided by the larger problem's parallel time, not a fixed-size speedup divided by four. Only two process counts are tested; the result establishes no asymptotic trend. It also concerns fixed sweeps, while a converged Jacobi solve requires more sweeps on a finer grid.</p>
+<p>Four captures were dispatched sequentially in an exclusive agent slot. The operating system, power management and processor placement were not frozen. Open MPI also reported an unsupported debugger-attachment FIFO on the Windows-mounted workspace, with error 95; raw stderr is retained. The jobs' return codes and data checks passed, while debugger attachment was not tested. This environmental limitation is reported separately from numerical correctness.</p>
+
+<h2 id="cost">Surface, volume and the terms that stop scaling <a class="timestamp" href="https://www.youtube.com/watch?v=l6HVISG9f_M&amp;t=285s">W5L6 4:45</a></h2>
+<p>The performance lecture separates inherently sequential work, divisible parallel work and parallel overhead. Write these times as \(\sigma(N)\), \(\phi(N)\) and \(\kappa(N,p)\), respectively. The first two are durations in a one-process reference execution; \(\kappa\) is additional elapsed time in the parallel run. Under the idealized assumptions of identical processing rates and perfectly balanced divisible work, \(T_1=\sigma+\phi\) and \(T_p=\sigma+\phi/p+\kappa\). Imperfect balance can increase \(T_p\); a faster cache regime can invalidate the unchanged-rate assumption.</p>
+<p>The lecture's image-processing example applies a \(3\times3\) template, with nine multiply-add contributions per pixel. If one contribution takes \(t_c\) seconds, serial cost is \(9t_cN^2\), not nine floating-point operations unless the counting convention says so. Two adjacent strips exchange a layer of pixels with their neighbours. This mirrors the Jacobi ownership pattern, although a true nine-point dependency also requires corner information at two-dimensional patch junctions. The cost model must follow the actual stencil rather than reusing a five-point communication list blindly.</p>
+<p>For one Jacobi sweep, ignore physical-edge savings initially and consider a strip with two neighbours. It owns approximately \(N^2/p\) cells and sends two rows of \(N\) values. Let \(b=8\) bytes per double. The outgoing face data are \(2bN\) bytes, giving communicated values per owned cell \(2p/N\). A square interior patch has side \(N/\sqrt p\), four neighbours and outgoing data \(4bN/\sqrt p\), giving ratio \(4\sqrt p/N\). This is the <em>surface-to-volume</em> argument: boundary length grows more slowly than area for compact patches.</p>
+<p>Message count modifies that conclusion. Assume directional traffic can proceed bidirectionally without doubling the per-face cost, distinct faces are serialized for costing, and contention is absent. Then approximate halo times are \(H_{\mathrm{strip}}=2\alpha+2b\beta N\) and \(H_{\mathrm{tile}}=4\alpha+4b\beta N/\sqrt p\). These are interior-patch models; physical-edge ranks have fewer neighbours, and actual overlap or full-duplex behaviour can alter the phase count. For the \(2\times2\) process grid every patch lies at a physical corner and has two neighbours, so charging four real messages per rank there would be incorrect.</p>
+<p>A global maximum adds its own cost. A simple logarithmic model uses \(\tau\log_2p\), where \(\tau\) is seconds per reduction level. This is a model, not a guarantee that a particular MPI implementation always uses that exact algorithm. Combining the terms gives</p>
+\[
+T_p^{\mathrm{sweep}}\approx \frac{cN^2}{p}+H(N,p)+\tau\log_2p. \tag{16.3}
+\]
+<p>At fixed \(N\), compute time shrinks with \(p\), while startup and reduction can remain or grow. Strip payload per interior rank does not shrink at all. A two-dimensional decomposition reduces the payload, but its four startups can dominate short messages. The correct question is whether the saved byte cost exceeds the extra startup cost under the assumptions of equation (16.3).</p>
+<p>The next program uses declared hypothetical coefficients: \(\alpha=10\ \mu\mathrm{s}\), \(\beta=0.1\ \mathrm{ns/byte}\), \(c=2\ \mathrm{ns/cell}\), and \(\tau=5\ \mu\mathrm{s}\). With \(N=1024,p=16\), both decompositions have interior ranks. The script compares the model costs and solves the equality of their halo terms. None of these coefficients is fitted to the local benchmark.</p>
+<pre><code class="language-python" data-file="surface_model.py" data-run="python3 surface_model.py">&quot;&quot;&quot;Declared hypothetical coefficients; no measurements in this script.&quot;&quot;&quot;
+from math import log2, sqrt
+
+N, p = 1024, 16
+alpha = 10e-6
+beta = 0.1e-9
+bytes_per_value = 8
+cell_seconds = 2e-9
+reduction_level_seconds = 5e-6
+compute = cell_seconds * N*N / p
+collective = reduction_level_seconds * log2(p)
+serial = cell_seconds * N*N
+for name, messages, payload in [
+    (&quot;interior strip&quot;, 2, 2*bytes_per_value*N),
+    (&quot;interior square tile&quot;, 4, 4*bytes_per_value*N/sqrt(p)),
+]:
+    halo = messages*alpha + beta*payload
+    total = compute + halo + collective
+    print(f&quot;{name}: messages={messages} outgoing_bytes={payload:.0f} &quot;
+          f&quot;compute_us={compute*1e6:.3f} halo_us={halo*1e6:.3f} &quot;
+          f&quot;reduction_us={collective*1e6:.3f} S={serial/total:.3f}&quot;)
+crossover = 2*alpha/(bytes_per_value*beta*(2-4/sqrt(p)))
+print(f&quot;equal halo-model cost at N={crossover:.0f}&quot;)
+</code></pre>
+<pre><code class="output">interior strip: messages=2 outgoing_bytes=16384 compute_us=131.072 halo_us=21.638 reduction_us=20.000 S=12.143
+interior square tile: messages=4 outgoing_bytes=8192 compute_us=131.072 halo_us=40.819 reduction_us=20.000 S=10.929
+equal halo-model cost at N=25000</code></pre>
+<p>The tile halves outgoing bytes but has a larger modeled halo time because the extra two startups cost more than the saved transfer. Equating the two halo expressions yields \(2\alpha=b\beta N(2-4/\sqrt p)\). At \(p=16\), the example crosses at \(N=25\,000\). This is a model crossover, far outside the implemented timing cases and not a recommendation to allocate such a grid. Physical edges, packing, nonblocking progress and real bandwidth would need evaluation before extrapolation.</p>
+<p>The model also supplies a check on vague statements about communication “increasing.” The absolute per-rank halo time can decrease for tiles while its fraction of total time increases because computation decreases faster. Aggregate bytes across all ranks can rise while per-rank bytes fall. State which quantity is being discussed: aggregate volume, maximum rank's elapsed halo time, message count or fraction of kernel time. They answer different design questions.</p>
+
+<h2 id="amdahl">Amdahl bounds one fixed problem under a stated baseline <a class="timestamp" href="https://www.youtube.com/watch?v=l6HVISG9f_M&amp;t=557s">W5L6 9:17</a></h2>
+<p>Define the serial fraction \(f=\sigma/T_1\), measured relative to the one-process execution time for the fixed problem. Ignoring nonnegative overhead and assuming the parallel part divides perfectly gives \(T_p\ge T_1(f+(1-f)/p)\). Dividing \(T_1\) by this expression yields</p>
+\[
+S_p\le\frac{1}{f+(1-f)/p}. \tag{16.4}
+\]
+<p>If \(f\gt0\), taking \(p\) arbitrarily large gives the limiting bound \(1/f\). For finite \(p\) and a nonzero parallel fraction, the speedup is strictly below that limit. When \(f=0\), the bound is \(p\), and writing \(1/f\) is meaningless. When \(f=1\), the bound is one. These endpoint cases prevent an algebraic expression from being applied beyond its domain.</p>
+<p>The lecture's 90%-parallel example has \(f=0.1\). At eight processes the bound is \(1/(0.1+0.9/8)=4.705882\), while its infinite-process limit is ten. Increasing process count cannot remove time spent in the unchanged serial component. Positive communication and synchronization costs reduce the achieved result further within the model.</p>
+<p>A second example sets \(\sigma(n)=18\,000+n\) microseconds and \(\phi(n)=n^2/100\) microseconds, where \(n\) is that illustrative problem-size parameter, distinct from the grid dimension \(N\). At \(n=10\,000\), \(\sigma=28\,000\), \(\phi=1\,000\,000\), and \(T_1=1\,028\,000\) microseconds. The limiting speedup is \(T_1/\sigma=36.714286\); at eight processes it is \(1\,028\,000/(28\,000+125\,000)\approx6.719\). A larger problem can have a smaller serial fraction because its parallel component grows faster, without contradicting the fixed-problem bound.</p>
+<p>The fraction is a fraction of reference execution time, not automatically a fraction of source lines or floating-point operations. Different operations cost different amounts, and memory stalls can dominate. The simple model also presumes comparable processing rates. Cache effects can make a subdivided workload faster per cell and yield a measured speedup above \(p\) relative to a particular baseline. Such a result calls for explaining the baseline and changed rate; it does not turn \(f\) into a negative fraction of genuinely sequential instructions.</p>
+<p>The derivation is reconstructed here from the time decomposition. <a href="https://users.cs.utah.edu/~hari/teaching/paralg/Gustafson88.pdf">Gustafson's original 1988 paper</a> explicitly contrasts the fixed-size formula with a scaled-size alternative. The two viewpoints ask different workload questions. Neither is a machine-independent promise that every algorithm reaches the optimistic bound.</p>
+
+<h2 id="gustafson">Scaled work and weak scaling require the work to be specified <a class="timestamp" href="https://www.youtube.com/watch?v=l6HVISG9f_M&amp;t=946s">W5L6 15:46</a></h2>
+<p>Suppose a parallel execution of a chosen larger job spends time \(t_s\) in inherently serial work and \(t_q\) in parallel work across \(p\) identical processors, ignoring overhead. Its duration is \(t_s+t_q\). A hypothetical one-process execution of that same larger job would take \(t_s+pt_q\). Define the scaled serial fraction \(f_s=t_s/(t_s+t_q)\), measured in the parallel run. Then</p>
+\[
+S_{\mathrm{scaled}}=\frac{t_s+pt_q}{t_s+t_q}
+ =f_s+p(1-f_s)=p-(p-1)f_s. \tag{16.5}
+\]
+<p>For \(p=64,f_s=0.05\), equation (16.5) gives 60.85. This does not insert 0.05 into equation (16.4): the denominators defining \(f\) and \(f_s\) differ. For the same idealized job, \(f=f_s/[f_s+p(1-f_s)]\). Substituting that relation makes the two speedup expressions agree. Their distinction is how problem families and runtime budgets are chosen, not a contradiction in arithmetic.</p>
+<p><em>Strong scaling</em> holds the problem and numerical workload fixed while increasing \(p\). The \(N=512\), 200-sweep strip series is such a test. <em>Weak scaling</em> grows work approximately in proportion to \(p\), ideally keeping work per process and runtime fixed. For a two-dimensional fixed-sweep stencil, \(N^2/p\) is a useful local-work measure; square patches keep their side length fixed when \(N\) grows as \(\sqrt p\).</p>
+<p>A full converged solve is a different workload. For the standard Jacobi error iteration on this square, its slowest eigenvalue magnitude is \(\rho=\cos(\pi/(N+1))\). For an error component in that slow mode, reducing it by a fixed factor requires a sweep count proportional to \(1/(1-\rho)\). Since \(1-\cos x\sim x^2/2\), the count grows like \(N^2\). The fixed-accuracy solve can therefore require work proportional to \(N^4\), even though one sweep costs \(N^2\). This statement concerns asymptotic Jacobi convergence under the stated grid and error-mode model, not a fixed iteration count or a universal property of all solvers.</p>
+<p>Consequently, keeping cells per rank constant need not keep time to a converged solution constant. Tolerances must also be compared at matching residual or error scales, because equation (16.2) changes with \(h\). A weak-scaling report should identify the number of sweeps, stopping criterion, mesh family and accuracy target. A faster multigrid or Krylov solver can change the algorithmic scaling more than rearranging the same Jacobi messages.</p>
+
+<h2 id="karp">Effective serial fractions diagnose symptoms, not unique causes <a class="timestamp" href="https://www.youtube.com/watch?v=l6HVISG9f_M&amp;t=1182s">W5L6 19:42</a></h2>
+<p>Given an observed speedup \(S_p\) for \(p\gt1\), define the Karp–Flatt effective serial fraction</p>
+\[
+e_p=\frac{1/S_p-1/p}{1-1/p}. \tag{16.6}
+\]
+<p>It is the value that makes an Amdahl-shaped curve pass through that measurement. Starting from \(1/S_p=e_p+(1-e_p)/p\), move \(1/p\) to the left and divide by \(1-1/p\). No assumption about the actual source of overhead is needed for this algebra. Its diagnostic interpretation depends on using a consistent baseline and comparable problem sizes. <a href="https://parallelcomp.github.io/speedup-karp-flatt-cacm90.pdf">Karp and Flatt (1990), pp. 539–540</a>, introduce this experimentally determined quantity and discuss effects of imbalance and synchronization.</p>
+<p>Under the earlier additive model, \(T_p/T_1=f+(1-f)/p+\kappa/T_1\). Substituting into (16.6) gives \(e_p=f+\kappa/[T_1(1-1/p)]\). The denominator factor matters. The lecture slide initially writes an effective fraction as \((\sigma+\kappa)/(\sigma+\phi)\), then later derives equation (16.6). Those are not generally identical under its own stated time model. The corrected expression follows directly from substitution and makes the two definitions consistent.</p>
+<p>The first lecture table lists speeds 1.82, 2.50, 3.08, 3.57, 4.00, 4.38 and 4.71 for two through eight processes. The corresponding effective fractions are approximately 0.1, with small differences caused by the rounded speed inputs. The second table ends at the same 4.71 but has an effective fraction rising from about 0.07 to 0.1. The next program recomputes both tables and the earlier law examples from their stated numbers. These are illustrative lecture data, not timings obtained on this laptop.</p>
+<pre><code class="language-python" data-file="scaling_metrics.py" data-run="python3 scaling_metrics.py">&quot;&quot;&quot;Check the lecture's illustrative speedup tables, not local measurements.&quot;&quot;&quot;
+tables = [
+    [1.82, 2.50, 3.08, 3.57, 4.00, 4.38, 4.71],
+    [1.87, 2.61, 3.23, 3.73, 4.14, 4.46, 4.71],
+]
+for label, speeds in enumerate(tables, 1):
+    print(&quot;lecture table&quot;, label)
+    for p, speed in enumerate(speeds, 2):
+        effective = (1 / speed - 1 / p) / (1 - 1 / p)
+        print(f&quot;p={p} S={speed:.2f} E={speed/p:.4f} e={effective:.4f}&quot;)
+print(f&quot;Amdahl f=0.1 p=8: {1/(0.1+0.9/8):.6f}&quot;)
+print(f&quot;Gustafson f_s=0.05 p=64: {64-63*0.05:.2f}&quot;)
+serial_us, parallel_us = 18000 + 10000, 10000**2/100
+print(f&quot;n=10000 limiting speedup: {(serial_us+parallel_us)/serial_us:.6f}&quot;)
+print(&quot;indistinguishable timing models&quot;)
+for p in (2, 4, 8):
+    true_serial_model = 0.1 + 0.9 / p
+    overhead_model = 1 / p + 0.1 * (1 - 1 / p)
+    assert abs(true_serial_model - overhead_model) &lt; 1e-15
+    effective = (overhead_model - 1 / p) / (1 - 1 / p)
+    print(f&quot;p={p} time={overhead_model:.4f} true_f=0 effective_e={effective:.4f}&quot;)
+</code></pre>
+<pre><code class="output">lecture table 1
+p=2 S=1.82 E=0.9100 e=0.0989
+p=3 S=2.50 E=0.8333 e=0.1000
+p=4 S=3.08 E=0.7700 e=0.0996
+p=5 S=3.57 E=0.7140 e=0.1001
+p=6 S=4.00 E=0.6667 e=0.1000
+p=7 S=4.38 E=0.6257 e=0.0997
+p=8 S=4.71 E=0.5887 e=0.0998
+lecture table 2
+p=2 S=1.87 E=0.9350 e=0.0695
+p=3 S=2.61 E=0.8700 e=0.0747
+p=4 S=3.23 E=0.8075 e=0.0795
+p=5 S=3.73 E=0.7460 e=0.0851
+p=6 S=4.14 E=0.6900 e=0.0899
+p=7 S=4.46 E=0.6371 e=0.0949
+p=8 S=4.71 E=0.5887 e=0.0998
+Amdahl f=0.1 p=8: 4.705882
+Gustafson f_s=0.05 p=64: 60.85
+n=10000 limiting speedup: 36.714286
+indistinguishable timing models
+p=2 time=0.5500 true_f=0 effective_e=0.1000
+p=4 time=0.3250 true_f=0 effective_e=0.1000
+p=8 time=0.2125 true_f=0 effective_e=0.1000</code></pre>
+<p>The first table is consistent with a 10% serial fraction and negligible overhead. It does not uniquely prove that explanation. A counterexample has no inherently serial work, \(f=0\), but overhead \(\kappa(p)=0.1T_1(1-1/p)\). Then \(T_p/T_1=1/p+0.1(1-1/p)=0.1+0.9/p\), exactly the same curve as \(f=0.1,\kappa=0\). Both give constant \(e_p=0.1\). The script verifies their equality at several process counts; the algebra establishes it for all \(p\gt1\).</p>
+<p>Increasing \(e_p\) can signal growing overhead, but can also reflect imbalance, changing processor rates, cache effects or an inconsistent baseline. Negative \(e_p\) is possible when a chosen baseline gives superlinear speedup; it is not a negative amount of serial code. Treat the metric as a compact description of the timing curve, then use profiles, message counts and controlled experiments to test causal explanations.</p>
+<p><strong>Isoefficiency extension.</strong> The lecture announces this topic but does not develop it in the supplied discussion. An <em>isoefficiency function</em> asks how total work must grow with \(p\) to retain a fixed efficiency \(0\lt E_\star\lt1\). For \(T_1=cN^2\) per sweep and nonnegative overhead \(H+\tau\log_2p\), equation (16.3) gives \(E_p=1/[1+p(H+\tau\log_2p)/(cN^2)]\). Fixing \(E_p=E_\star\) therefore fixes the overhead-to-useful-work ratio, rather than fixing local cell count by assumption.</p>
+<p>For strips, its byte term requires \(N^2\) to grow at least proportionally to \(pN\), so \(N=\Omega(p)\) and per-sweep work \(W=\Omega(p^2)\), with fixed positive coefficients. Startup alone requires \(N^2=\Omega(p)\); the logarithmic collective requires \(N^2=\Omega(p\log p)\). The strip byte constraint dominates these asymptotically. The notation \(\Omega(g(p))\) means an eventual lower bound by a positive constant times \(g(p)\) in this model.</p>
+<p>For square tiles, the byte term requires \(N^2=\Omega(N\sqrt p)\), hence \(N^2=\Omega(p)\), and startup has the same requirement. If the global norm is reduced every sweep with the logarithmic cost, it strengthens this to \(W=\Omega(p\log p)\). Without that collective term the idealized tile model needs only \(W=\Omega(p)\). These conclusions depend on serialized face costs, stable per-cell rates and the assumed reduction model; they do not predict the full convergence work or prove that real networks remain contention-free as \(p\) grows.</p>
+
+<h2 id="limits">Claims, evidence and limits</h2>
+<div class="table-wrap"><table>
+<caption>Table 16.2. Lecture claims and their status.</caption>
+<thead><tr><th scope="col">Claim or demonstration</th><th scope="col">Status</th></tr></thead>
+<tbody>
+<tr><td>Local arrays need a surrounding halo.</td><td>Correct for this local stencil; face values must have the right iteration generation. Diagonal corners are unnecessary for a five-point stencil.</td></tr>
+<tr><td>Geometric cuts can fail on irregular meshes.</td><td>Correct when work density varies. Weighted graph models expose workload and communication objectives; a heuristic partition need not be globally optimal.</td></tr>
+<tr><td>The heat demonstration implements SOR.</td><td>The viewed update reads only the previous array and writes a separate one: Jacobi averaging. No general SOR relaxation or in-place update is displayed.</td></tr>
+<tr><td>Blocking sends before receives exchange the strips.</td><td>Successful small-message execution can rely on buffering. The safe listing uses Sendrecv or posted nonblocking operations.</td></tr>
+<tr><td>A barrier is needed at every sweep end.</td><td>The data dependencies require completed halos and a coordinated stopping rule. An extra barrier is unnecessary in the supplied implementation.</td></tr>
+<tr><td>Effective serial fraction equals \((\sigma+\kappa)/(\sigma+\phi)\).</td><td>Inconsistent with the subsequent Karp–Flatt inversion when \(\kappa\ne0\). The corrected expression has overhead factor \(1/(1-1/p)\).</td></tr>
+<tr><td>Constant effective fraction proves inherent sequential work.</td><td>Consistent with that explanation but not unique; an explicit overhead-only model gives the same curve.</td></tr>
+</tbody></table></div>
+<p>Pointwise agreement establishes preservation of the reference iteration for the tested inputs. It does not prove the continuous boundary-value solution or a universal floating-point accuracy bound. The canonical boundary values, precision, safe exchange and configurable decomposition differ from the lecture demonstration, so its temperature trace and approximately 2.61-second displayed timing are not direct comparison targets.</p>
+<p>Strong and weak results are local TCP-loopback samples with fixed sweeps, a reduction every sweep and unbound processes on a hybrid CPU. The repeat ranges demonstrate variability and do not provide confidence intervals. The surface model uses declared hypothetical coefficients, and the isoefficiency statements hold within its assumptions. Multi-node transport, bandwidth contention, fault tolerance, adaptive repartitioning and convergence-accelerating solvers remain unmeasured.</p>
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> Generalize the halo ratio to a \(d\)-dimensional grid with \(N\) owned interior points per coordinate. Assume \(p\) is a perfect \(d\)-th power, patches are cubes, the stencil needs one face layer, and the patch has neighbours on all \(2d\) faces. Compare with a slab decomposition that splits only one coordinate.</p>
+<details><summary>Solution</summary>
+<p>The cube side is \(N/p^{1/d}\), and its owned volume is \(N^d/p\). Each face has \((N/p^{1/d})^{d-1}\) values, so outgoing halo values are \(2dN^{d-1}/p^{(d-1)/d}\). Dividing by owned volume gives \(2dp^{1/d}/N\). A slab has volume \(N^d/p\) but two communicated faces of \(N^{d-1}\) values, giving ratio \(2p/N\). Multiply either count by bytes per value to obtain outgoing payload bytes.</p>
+<p>Compact patches therefore improve the asymptotic byte ratio with process count, at the price of more neighbour messages. Fixed local cube side keeps this face ratio constant as \(p\) grows. That alone does not prove constant iteration time: global reductions, routing contention and process startup are absent from the ratio. Physical-edge patches have fewer real faces, and wider or diagonal stencils change the payload calculation.</p>
+</details>
+<p><strong>Exercise 2 (compute).</strong> A fixed job has \(T_1=10\) seconds and \(T_8=2.5\) seconds. Compute speedup, efficiency and Karp–Flatt fraction. If independent profiling identifies true serial fraction \(f=0.05\) and the additive model otherwise applies, find the overhead \(\kappa\). Check by reconstructing the time.</p>
+<details><summary>Solution</summary>
+<p>The speedup is \(S_8=10/2.5=4\), efficiency \(E_8=4/8=0.5\), and \(e_8=(1/4-1/8)/(1-1/8)=1/7\approx0.142857\). From \(e_8=f+\kappa/[T_1(1-1/8)]\), obtain \(\kappa=(1/7-0.05)(10)(7/8)=0.8125\) seconds. Reconstructing gives serial time \(0.5\), parallel useful time \(9.5/8=1.1875\), plus overhead \(0.8125\), totaling 2.5 seconds.</p>
+<p>The shortcut \((\sigma+\kappa)/T_1\) would give \((0.5+0.8125)/10=0.13125\), which differs from the metric actually inferred from the speedup. This numerically checks the missing factor. The inferred overhead is conditional on the independent serial-fraction estimate and the unchanged-rate additive model; two elapsed times alone cannot supply all those causal quantities.</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> Construct two different time decompositions that give constant effective fraction 0.2 for every \(p\gt1\). In one, the overhead is zero; in the other, the true serial fraction is zero. Explain what an observed constant metric can establish.</p>
+<details><summary>Solution</summary>
+<p>Normalize \(T_1=1\). The first model has \(f=0.2,\kappa=0\), giving \(T_p=0.2+0.8/p\). The second has \(f=0\) and \(\kappa=0.2(1-1/p)\), giving \(T_p=1/p+0.2(1-1/p)=0.2+0.8/p\). Its overhead is nonnegative, vanishes at one process and grows towards 0.2. Substitution into equation (16.6) gives \(e_p=0.2\) in both cases.</p>
+<p>The entire timing curve is identical, so neither adding more process counts nor reducing timing noise distinguishes these models. The observation establishes consistency with an Amdahl-shaped curve, not a unique serial-code fraction. Additional evidence could measure time in a known serial phase or alter the communication protocol while preserving the numerical work.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> Two solves stop when the update norm is below \(10^{-5}\), first at \(N=31\), then at \(N=127\). A report says they have the same residual accuracy. Evaluate that claim and choose update tolerances that enforce a discrete-Laplacian maximum norm below \(10^{-3}\) for the old iterate.</p>
+<details><summary>Solution</summary>
+<p>Equation (16.2) multiplies the update by \(4(N+1)^2\). The two update thresholds imply old-iterate residual bounds \(4(32)^2(10^{-5})=0.04096\) and \(4(128)^2(10^{-5})=0.65536\), differing by sixteen. Equal update thresholds therefore do not enforce equal residual thresholds.</p>
+<p>For a target \(\epsilon_r=10^{-3}\), choose \(\texttt{tol}=\epsilon_r/[4(N+1)^2]\). This gives \(2.44140625\times10^{-7}\) at \(N=31\) and \(1.52587890625\times10^{-8}\) at \(N=127\). These translate the residual criterion for the iterate generating the update. They do not remove discretization error or supply an error bound against the continuum solution; that requires additional numerical analysis.</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> A programmer proposes replacing safe halo exchange by blocking synchronous sends on all ranks, then receives, then a barrier. Another proposes letting each rank stop on its local update maximum. Assess both changes and give a safe alternative.</p>
+<details><summary>Solution</summary>
+<p>With send-first synchronous exchange, two adjacent ranks can each wait for a receive the other has not reached. In a chain, the end rank's send can participate in the same adjacent cycle. A later barrier cannot execute until the blocked calls finish and therefore cannot break the deadlock. Retain Sendrecv shifts or post all receives and sends before waiting.</p>
+<p>A local maximum below tolerance says nothing about another rank's patch. If one exits while a neighbour continues, the continuing rank can wait forever for the next halo. Compute a global maximum with Allreduce and use the same stopping condition everywhere, or execute a globally agreed fixed sweep count. Correct halo generations and common termination solve different obligations; neither is replaced by a bare barrier.</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement).</strong> Specify and execute a test plan that detects ownership, halo-generation and overlap edge errors in the supplied solver. Include an uneven decomposition, a patch without strict interior, convergence, and a comparison of one and several ranks. State exactly what the observed checks establish.</p>
+<details><summary>Solution</summary>
+<p>The listing implements the plan in its command: \(N=31\) on four ranks exercises remainder blocks in strip and tile modes; \(N=17\) on six ranks exercises a \(3\times2\) grid with unequal dimensions; \(N=2\) on four tile ranks gives one owned cell per patch, so strict-interior work is empty. \(N=1\) on one rank checks the smallest physical-boundary case. The \(N=31\), four-rank nonblocking tile run uses <code>max_iter</code>\(=5000\) and <code>tol</code>\(=10^{-5}\), checking a common convergence decision.</p>
+<p>For each run, compute the serial iterate with the same stopping criterion, gather each patch's owned values, translate local coordinates with <code>block_start</code>, and compare every reconstructed interior against the serial grid. The program also checks finite values, total comparison count, identical global update norm and identical iteration count. All nine dedicated cases passed with zero printed pointwise error; the convergence case used 1094 sweeps. The fixed-size timing series separately compares one, two, four and eight ranks for exactly 200 sweeps.</p>
+<p>This plan catches many communication and indexing defects that a short diagonal trace or checksum can miss. Swapping two different cells, for example, preserves their sum while failing the pointwise comparison. The finite suite still does not prove every possible \(N,p\) combination correct, and sharing a stencil formula with the reference is not independent verification of the continuum model. The decomposition proof, halo invariant and numerical discretization analysis supply those separate layers of reasoning.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li>NPTEL, IIT Bombay, <a href="https://www.youtube.com/watch?v=kKmAqFDJNc0">W5L4, Domain Decomposition</a> (27:46): structured patches, halos, overlap, irregular meshes, weighted graph cuts, CSR and METIS.</li>
+<li>NPTEL, IIT Bombay, <a href="https://www.youtube.com/watch?v=FSUT2kW66cA">W5L5, Parallelization of example code using MPI</a> (26:48): four-strip heat example, boundary initialization, row exchanges, iteration broadcast, trace, barrier and per-process timing.</li>
+<li>NPTEL, IIT Bombay, <a href="https://www.youtube.com/watch?v=l6HVISG9f_M">W5L6, Performance Analysis Frameworks for Parallel Programming</a> (27:17): time decomposition, stencil cost, Amdahl, Gustafson–Barsis, Karp–Flatt and two illustrative speedup tables.</li>
+<li>G. Karypis, <a href="https://karypis.github.io/glaros/files/sw/metis/manual.pdf"><em>METIS 5.1.0 Manual</em></a> (30 March 2013), §§3, 5.5 and 5.7: weighted graph partitioning, balance, CSR <code>xadj/adjncy</code>, edge-cut and communication-volume objectives. No local METIS execution is claimed.</li>
+<li>MPI Forum, <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report.pdf"><em>MPI Standard 4.1</em></a> (2 November 2023), §3.2.7 and §3.7: Sendrecv and nonblocking completion; §3.10: null MPI processes; §5.1: vector datatypes; §6: broadcast, gather and reductions; Chapter 8: Cartesian topology creation, dimensions, coordinates and shifts; §9.6: timers. The installed implementation reports support for MPI 3.1; the routines used here predate MPI 4.1.</li>
+<li>J. L. Gustafson, <a href="https://users.cs.utah.edu/~hari/teaching/paralg/Gustafson88.pdf">“Reevaluating Amdahl's Law”</a>, <em>Communications of the ACM</em> 31(5), 532–533 (1988), DOI 10.1145/42411.42415. First and second text pages compare fixed-size and scaled-size speedups and attribute the scaled formulation to E. Barsis. The accessible copy has three PDF pages and a typographic “1088” footer; the bibliographic year is 1988.</li>
+<li>A. H. Karp and H. P. Flatt, <a href="https://parallelcomp.github.io/speedup-karp-flatt-cacm90.pdf">“Measuring Parallel Processor Performance”</a>, <em>Communications of the ACM</em> 33(5), 539–543 (1990). Pages 539–540 introduce effective serial fraction and discuss imbalance, synchronization and baseline choice. Its causal interpretations are tested here against explicit countermodels rather than treated as an identification theorem.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-15-mpi-collective-communication.html">Previous available chapter</a><a href="index.html">Lecture index</a><span>Further chapters pending</span></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

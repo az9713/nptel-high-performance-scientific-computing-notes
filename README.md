@@ -16,21 +16,11 @@ maps distinguish lecture material, research extensions, and original teaching
 constructions. Chapter citations and sidecars record source uncertainties and
 claims that could not be checked.
 
-**This is a partial edition.** The plan groups **75 recordings** (playlist items
-2–76) into **31 chronological topic chapters**; the 2-minute course trailer is
-outside the selected scope. **Chapters 1–12 are written.** They cover the first
-**22 recordings**, from Week 0 Lecture 0 to Week 4 Lecture 3: the Linux
-environment, HPC hardware and memory, concurrency, the cost of numerical models,
-memory bottlenecks, and OpenMP threads, synchronization, scheduling, reductions
-and data sharing. **Chapters 13–31 (OpenMP III onward: MPI, GPUs and CUDA,
-OpenACC, profiling, libraries, schedulers) are not yet written**; the lecture
-index lists them as pending.
+**This is a partial edition.** Chapters **1–16** are written and independently reviewed; chapters **17–31** remain pending.
 
-The written chapters contain **72 expandable solution disclosures** and **144
-runnable listings** (75 C, 43 Python, 26 Bash). Transcripts were produced
-locally with faster-whisper `small.en`; they are machine transcriptions, not
-publisher captions. The NPTEL caption tracks on the playlist are attached to
-the wrong videos and were not used.
+The plan groups **75 source recordings** (playlist items 2–76) into **31 topic chapters**; the separate course trailer is excluded. The written chapters cover **33 recordings** and contain **96 expandable worked solutions** and **176 runnable listings** (26 Bash, 102 C, 48 Python). The lecture index records each recording assignment and any remaining work.
+
+Transcripts were produced locally with faster-whisper small.en; they are machine transcriptions, not publisher captions. The NPTEL caption tracks are attached to the wrong videos and were not used.
 
 The reader includes searchable chapter navigation, local MathJax, light/dark
 themes, adjustable text size, expandable solutions, printing with solutions,
@@ -62,6 +52,8 @@ named `Ubuntu`). They need gcc with OpenMP support; the Python programs of
 chapters 1, 4 and 9 also need NumPy. Browser checks require Python Playwright
 and an installed supported browser.
 
+Additional toolchains are identified by each listing. MPI examples require an MPI compiler wrapper and launcher, such as mpicc and mpirun. Chapters using CUDA or OpenACC require the stated compiler/offload runtime and a compatible GPU; profiling and debugging examples require the named tools.
+
 All runs and timings made for these chapters come from one laptop (the lecture
 screens analysed in the text come from the lecturer's machines): an Intel Core i5-12450H
 (4 performance cores with 2 hardware threads each and 4 efficiency cores, 12
@@ -72,17 +64,9 @@ successful exit only; the others are checked byte for byte.
 
 ## Evidence and scope
 
-Every written chapter has at least two recorded independent review rounds.
-After each round the author repaired the findings, and the lead checked the
-repairs. The latest recorded review of every written chapter has zero blocking
-findings. Chapters 1, 2 and 4–8 reached that verdict in round 2. Chapters 3, 9,
-10 and 11 needed more rounds: their round-2 reviews still recorded one blocking
-finding each, so each received further independent rounds until one recorded
-zero blocking findings (round 3 for chapter 3, round 4 for chapters 9 and 11,
-round 5 for chapter 10). Chapter 12 reached ACCEPT with zero findings in round 3
-after the author repaired one blocking, one major and two minor round-2 findings.
-The author repaired the remaining major and minor findings of the other chapters’
-final rounds.
+Every written chapter has at least two recorded independent review rounds. The latest recorded review of every written chapter has zero blocking findings; all remaining findings were repaired and checked. Historical verdicts remain unchanged in the editorial record. Chapters requiring more than two rounds (chapter: rounds): 3: 3, 9: 4, 10: 5, 11: 4, 12: 3, 15: 3.
+
+Execution evidence is cumulative. Chapters 1–12 retain their original dated runs from the pinned historical source, with all current listing inputs checked for identity; they were not rerun under the later workspace-only policy. Chapters 13 onward record fresh workspace-contained runs. Each chapter keeps its own execution timestamp and environment profile. A successful run checks the stated finite example, not the general scientific claim.
 
 The [workflow](WORKFLOW.md), [source record](source-validation-summary.json),
 [editorial record](editorial-review-summary.json), [content inventory](completion.json),

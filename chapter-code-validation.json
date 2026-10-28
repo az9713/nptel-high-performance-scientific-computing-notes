@@ -1,7 +1,9 @@
 {
-  "checked_at_utc": "2026-10-28T05:12:20.217014+00:00",
+  "checked_at_utc": "2026-10-28T06:06:06.337974+00:00",
   "status": "passed",
-  "scope": "Actual isolated build and execution of each runnable listing; exact printed-output comparison where data-check=\"exact\", successful exit only where data-check=\"returncode\"; not a scientific review",
+  "timestamp_scope": "Aggregate update only; per-chapter checked_at_utc records actual execution time.",
+  "report_scope": "Current written chapter inventory",
+  "scope": "Cumulative actual execution evidence. Historical records retain their original source revision, timestamp and execution profile; they were not rerun under the workspace-only policy. Later chapters record fresh workspace-contained checks. Matching listing inputs do not establish environment equivalence; exact-output and return-code-only semantics remain distinct.",
   "machine": "WSL Ubuntu 24.04, gcc 13.3 (OpenMP, OpenACC nvptx offload), Open MPI, CUDA 13.3, NVIDIA GeForce RTX 3050 Laptop GPU (sm_86), 12 logical CPUs",
   "host": "Windows-11-10.0.26300-SP0",
   "chapters": {
@@ -107,7 +109,13 @@
           "stderr_tail": "",
           "output_diff": []
         }
-      ]
+      ],
+      "checked_at_utc": "2026-10-28T05:12:20.217014+00:00",
+      "fingerprint_sha256": "18f94b577137179935e53724b867a8d086d44bbb0d27205028cfc39c8f7369fb",
+      "source_commit": "277242ae7308788b43099d4b1bf7a8c5c446a3fd",
+      "execution_profile": "Historical pre-workspace-only-policy execution; not rerun under the current runtime.",
+      "retention_basis": "Recorded code hashes and complete current listing contracts match the immutable tested source snapshot.",
+      "retained_at_utc": "2026-10-28T05:39:09.475777+00:00"
     },
     "chapter-02-operating-systems-and-linux-kernel.html": {
       "status": "passed",
@@ -255,7 +263,13 @@
           "stderr_tail": "",
           "output_diff": []
         }
-      ]
+      ],
+      "checked_at_utc": "2026-10-28T05:12:20.217014+00:00",
+      "fingerprint_sha256": "540e773d49cdb39b2829fa68a6ab92a61849a9904d8d81e52acc3f26a4a68ae6",
+      "source_commit": "277242ae7308788b43099d4b1bf7a8c5c446a3fd",
+      "execution_profile": "Historical pre-workspace-only-policy execution; not rerun under the current runtime.",
+      "retention_basis": "Recorded code hashes and complete current listing contracts match the immutable tested source snapshot.",
+      "retained_at_utc": "2026-10-28T05:39:09.551639+00:00"
     },
     "chapter-03-linux-file-system-permissions-ownership.html": {
       "status": "passed",
@@ -414,7 +428,13 @@
           "stderr_tail": "",
           "output_diff": []
         }
-      ]
+      ],
+      "checked_at_utc": "2026-10-28T05:12:20.217014+00:00",
+      "fingerprint_sha256": "a65d8e9fa48edb5a6ba3f0726998ca5d89d62ebd5a783307fd8d0b4e6b479c0f",
+      "source_commit": "277242ae7308788b43099d4b1bf7a8c5c446a3fd",
+      "execution_profile": "Historical pre-workspace-only-policy execution; not rerun under the current runtime.",
+      "retention_basis": "Recorded code hashes and complete current listing contracts match the immutable tested source snapshot.",
+      "retained_at_utc": "2026-10-28T05:39:09.626949+00:00"
     },
     "chapter-04-processes-text-memory-and-networking.html": {
       "status": "passed",
@@ -606,7 +626,13 @@
           "stderr_tail": "",
           "output_diff": []
         }
-      ]
+      ],
+      "checked_at_utc": "2026-10-28T05:12:20.217014+00:00",
+      "fingerprint_sha256": "08cdc8dbfdbd7dadb362f96c990859b8541eaefe42eebd2745df345effebc093",
+      "source_commit": "277242ae7308788b43099d4b1bf7a8c5c446a3fd",
+      "execution_profile": "Historical pre-workspace-only-policy execution; not rerun under the current runtime.",
+      "retention_basis": "Recorded code hashes and complete current listing contracts match the immutable tested source snapshot.",
+      "retained_at_utc": "2026-10-28T05:39:09.707929+00:00"
     },
     "chapter-05-shell-scripting-processes-and-control-flow.html": {
       "status": "passed",
@@ -743,7 +769,13 @@
           "stderr_tail": "",
           "output_diff": []
         }
-      ]
+      ],
+      "checked_at_utc": "2026-10-28T05:12:20.217014+00:00",
+      "fingerprint_sha256": "cf546a5741bb4894230e789427e4337374aad87e4d967e96006058efb6991363",
+      "source_commit": "277242ae7308788b43099d4b1bf7a8c5c446a3fd",
+      "execution_profile": "Historical pre-workspace-only-policy execution; not rerun under the current runtime.",
+      "retention_basis": "Recorded code hashes and complete current listing contracts match the immutable tested source snapshot.",
+      "retained_at_utc": "2026-10-28T05:39:09.784624+00:00"
     },
     "chapter-06-hpc-components-and-node-architecture.html": {
       "status": "passed",
@@ -836,7 +868,13 @@
           "stderr_tail": "",
           "output_diff": []
         }
-      ]
+      ],
+      "checked_at_utc": "2026-10-28T05:12:20.217014+00:00",
+      "fingerprint_sha256": "cc73be50bf2069fc3569f4ca82bfcb6b0ad88f6b51a65e944b673617b8f67fb8",
+      "source_commit": "277242ae7308788b43099d4b1bf7a8c5c446a3fd",
+      "execution_profile": "Historical pre-workspace-only-policy execution; not rerun under the current runtime.",
+      "retention_basis": "Recorded code hashes and complete current listing contracts match the immutable tested source snapshot.",
+      "retained_at_utc": "2026-10-28T05:39:09.857836+00:00"
     },
     "chapter-07-hierarchical-memory-and-scalable-architectures.html": {
       "status": "passed",
@@ -940,7 +978,13 @@
           "stderr_tail": "",
           "output_diff": []
         }
-      ]
+      ],
+      "checked_at_utc": "2026-10-28T05:12:20.217014+00:00",
+      "fingerprint_sha256": "8cdfc65815ba3e884e9466bf7e0263da63a7aafc1af67be797881e9da2290d4f",
+      "source_commit": "277242ae7308788b43099d4b1bf7a8c5c446a3fd",
+      "execution_profile": "Historical pre-workspace-only-policy execution; not rerun under the current runtime.",
+      "retention_basis": "Recorded code hashes and complete current listing contracts match the immutable tested source snapshot.",
+      "retained_at_utc": "2026-10-28T05:39:09.934907+00:00"
     },
     "chapter-08-concurrency-and-synchronization.html": {
       "status": "passed",
@@ -1055,7 +1099,13 @@
           "stderr_tail": "",
           "output_diff": []
         }
-      ]
+      ],
+      "checked_at_utc": "2026-10-28T05:12:20.217014+00:00",
+      "fingerprint_sha256": "423acaa28764d48aaf46e91dcddcba5c9a7457f86367726f04a43e15ac89b084",
+      "source_commit": "277242ae7308788b43099d4b1bf7a8c5c446a3fd",
+      "execution_profile": "Historical pre-workspace-only-policy execution; not rerun under the current runtime.",
+      "retention_basis": "Recorded code hashes and complete current listing contracts match the immutable tested source snapshot.",
+      "retained_at_utc": "2026-10-28T05:39:10.009631+00:00"
     },
     "chapter-09-parallel-computing-numerical-models-and-cost.html": {
       "status": "passed",
@@ -1192,7 +1242,13 @@
           "stderr_tail": "",
           "output_diff": []
         }
-      ]
+      ],
+      "checked_at_utc": "2026-10-28T05:12:20.217014+00:00",
+      "fingerprint_sha256": "832adc57bce752d1fecd784ad376ad63bf028484796ea77220c135c4c6e9d19d",
+      "source_commit": "277242ae7308788b43099d4b1bf7a8c5c446a3fd",
+      "execution_profile": "Historical pre-workspace-only-policy execution; not rerun under the current runtime.",
+      "retention_basis": "Recorded code hashes and complete current listing contracts match the immutable tested source snapshot.",
+      "retained_at_utc": "2026-10-28T05:39:10.086614+00:00"
     },
     "chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.html": {
       "status": "passed",
@@ -1307,7 +1363,13 @@
           "stderr_tail": "",
           "output_diff": []
         }
-      ]
+      ],
+      "checked_at_utc": "2026-10-28T05:12:20.217014+00:00",
+      "fingerprint_sha256": "5a2db8da406e6c9b9cff785426fbbfe65460a67ee1ed3cfb109797fab50e895a",
+      "source_commit": "277242ae7308788b43099d4b1bf7a8c5c446a3fd",
+      "execution_profile": "Historical pre-workspace-only-policy execution; not rerun under the current runtime.",
+      "retention_basis": "Recorded code hashes and complete current listing contracts match the immutable tested source snapshot.",
+      "retained_at_utc": "2026-10-28T05:39:10.161201+00:00"
     },
     "chapter-11-openmp-threads-and-work-distribution.html": {
       "status": "passed",
@@ -1433,7 +1495,13 @@
           "stderr_tail": "",
           "output_diff": []
         }
-      ]
+      ],
+      "checked_at_utc": "2026-10-28T05:12:20.217014+00:00",
+      "fingerprint_sha256": "cc9fc0648c728d2dd1d4217449f509f8b48c1e5c3e11cbe1aa6a9da2198fb589",
+      "source_commit": "277242ae7308788b43099d4b1bf7a8c5c446a3fd",
+      "execution_profile": "Historical pre-workspace-only-policy execution; not rerun under the current runtime.",
+      "retention_basis": "Recorded code hashes and complete current listing contracts match the immutable tested source snapshot.",
+      "retained_at_utc": "2026-10-28T05:39:10.230602+00:00"
     },
     "chapter-12-openmp-synchronization-loops-data-sharing.html": {
       "status": "passed",
@@ -1647,7 +1715,434 @@
           "stderr_tail": "",
           "output_diff": []
         }
+      ],
+      "checked_at_utc": "2026-10-28T05:12:20.217014+00:00",
+      "fingerprint_sha256": "dd797dfac8bbdd7c75e4405ae8e8c36f826f4b23082d1c450d0806c31e23b80a",
+      "source_commit": "277242ae7308788b43099d4b1bf7a8c5c446a3fd",
+      "execution_profile": "Historical pre-workspace-only-policy execution; not rerun under the current runtime.",
+      "retention_basis": "Recorded code hashes and complete current listing contracts match the immutable tested source snapshot.",
+      "retained_at_utc": "2026-10-28T05:39:10.307643+00:00"
+    },
+    "chapter-13-openmp-memory-tasks-numerical-codes.html": {
+      "status": "passed",
+      "checked_at_utc": "2026-10-28T05:42:05.149922+00:00",
+      "fingerprint_sha256": "58892189794d1742522adfc57cd7108cd907401e8b3b158160a13660e04e2398",
+      "execution_profile": "Workspace-contained execution; MPI self,tcp transport.",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "publish.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "6d970fbd118d6493eef2924ea30473839e965643d4f2f73a19a1b80e9213f767",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "list_tasks.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "6d5f6810458b2c16cafee724685c05a5092c1f276084b0ad598ecb314e265313",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "task_scope.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "bca82685dca9b6fda3118250a5b24b20641f07ac74bafddcf2a05b7bedfe308a",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "fib_tasks.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "b2275f96a5574bd9523d2710835f7bfb5cad3419add7e51dc9d2ddc0edfcc5ed",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "pi_tasks.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "75c6a8c2724e443ab19f6900cd33b6c87d4d5fe9164ed05ff1cb6aee5ff1f156",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "heat.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "966be78cc172b00e37208e329234a910b5479498ad97842afff5fba2deb81454",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 7,
+          "file": "placement.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "e9afdbd592fdd1c82a1211f49c2b8cdd01db954b5d0ad2c6fe61556aaa463036",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 8,
+          "file": "trapezoid.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "66aec2f663754f40eccda401f7418afd221cb9299d9112214fe3ff540a1031ab",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 9,
+          "file": "monte_carlo.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "02b8c37717d1fa1fac149f0901bba26f77801d7bc7376c7c4a8f6084d1aa9af3",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-14-mpi-processes-and-point-to-point-messages.html": {
+      "status": "passed",
+      "checked_at_utc": "2026-10-28T06:06:06.337718+00:00",
+      "fingerprint_sha256": "154c8fc0cfd36d863749805d8ad4bfa56c170ca3a017e8b7df381df67ec4122f",
+      "execution_profile": "Workspace-contained execution; MPI self,tcp transport.",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "hello_mpi.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "338977afcbe8233cdb7c492466eb5d1b987ab30e18940c531e3683c6e31e75cb",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "spmd_sum.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "e77a1ff0bb4edff1837835fec14f89d3508ee26612aec9c69e42128d700d99fd",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "envelope.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "7318884541c7516e2a4ab9b48eaac5651974ce6c68853d9b2579cc741ba0f06d",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "send42.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "6759d15e0b4f8cebb45cf96d567ffb910919ee9746dac416317f9dca8bb2845b",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "safe_exchange.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "a01841c5b2f6b7783d5ac35e9b6ee5851941f74a09215e6c4d601aa21743c0c2",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "ordering.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "0c0b5de98f04d6b388ab7c477ea9e5d5137062f7e6883955c32c9ae0f3bef189",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 7,
+          "file": "pingpong.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "9275a531e4538b1784303681df3a7e81b9974f918dc7206e11b8539fd5d562c3",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 8,
+          "file": "fit_hockney.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "07c7c98aead03eb2fc3f9c041a2d75b2596e0ac590f17d8bac127352f14c3f4e",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 9,
+          "file": "pi_p2p.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "53a4a444320d00a6dff80ffa387a1e4515dd514b1eaf6c55e260221eeca81664",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-15-mpi-collective-communication.html": {
+      "status": "passed",
+      "checked_at_utc": "2026-10-28T05:59:10.578199+00:00",
+      "fingerprint_sha256": "ba0e9b7017046033967d8453072bf3e2934b4ef9733777913caa74a8461d6d93",
+      "execution_profile": "Workspace-contained execution; MPI self,tcp transport.",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "late.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "722ce442ddae0698eee642e4eb5efe4486fff6e4c3d255d0a1e982cdd3ff06a2",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "movement.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "92a694e1d335559a03a9a610425c33a90cf446486fb51acd3508aecec9b7c7f1",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "reduce_scan.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "565a71c076834e0b6185e86ffa62623e5c358a25fa50763a3f899e10dfe9ddce",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "nonblocking.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "7be9618a81d58faab2cfc4e4012460753bdc6c1de1d3b55e60aff9f157c9734f",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "jacobi_global.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "e34c178529447fbf08729649b985e473a7bb53c3e54ef0fb6a5db4a9158fef05",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 6,
+          "file": "dot_general.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "4509439c84df10073aa471c74aa242ea9a14b282b6c81c6771c100d7ac3641de",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 7,
+          "file": "vecnorm.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "bd84b45666d02e15846fb3345ebb82504cd6cdbfca5de116c42d8670c3d4dca6",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 8,
+          "file": "transpose.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "1ee2c91ec06c7aab19d51d93514b06f909f4d2e4f8704e47be90afa38d5fa000",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 9,
+          "file": "collective_costs.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "a0723b297aeb81b530af69d40b7f93faa50ef30c60c9a260e2a014bb03cf02c5",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 10,
+          "file": "collective_timing.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "83f8c054aae727c09112777e40083d5173ff0ad4ae5c16f71ddbf46a2c6a0e93",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-16-domain-decomposition-mpi-solver-and-performance-analysis.html": {
+      "status": "passed",
+      "checked_at_utc": "2026-10-28T06:00:57.231429+00:00",
+      "fingerprint_sha256": "9516ff89006b769bec76d1168be5f15a39732081ffa61d7e239a524a0c1e5ded",
+      "execution_profile": "Workspace-contained execution; MPI self,tcp transport.",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "csr_partition.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "7323549d4b6b84adf2d54b8110a2860d6495b331f339e69c50193b60d986f855",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "jacobi_mpi.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "5138e57b8d2f1d9a598b622e6de4fe65579be4798ba3f7e4c1d98da2f05812aa",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "surface_model.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "57a6326f368100cdcb497d1f4fcfec0f59d07ff010789cfba62be8777eaf9727",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "scaling_metrics.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "a1a4ef02b26bf0c5bd1a3bf067b9b487e0435240301e8bb6462b422fff6f53a7",
+          "stderr_tail": "",
+          "output_diff": []
+        }
       ]
     }
-  }
+  },
+  "updated_at_utc": "2026-10-28T06:32:39.925858+00:00"
 }

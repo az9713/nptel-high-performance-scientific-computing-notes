@@ -1,0 +1,347 @@
+{
+  "chapter": 14,
+  "title": "MPI I: processes and point-to-point messages",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "ekz3AGb4ebY",
+      "label": "W5L1",
+      "playlist_index": 27,
+      "duration_seconds": 1562
+    },
+    {
+      "video_id": "ZT5BqjCqcNk",
+      "label": "W5L2",
+      "playlist_index": 28,
+      "duration_seconds": 1328
+    }
+  ],
+  "frames_viewed": {
+    "ekz3AGb4ebY": [
+      "f0003",
+      "f0015",
+      "f0017",
+      "f0037",
+      "f0041"
+    ],
+    "ZT5BqjCqcNk": [
+      "f0005",
+      "f0015",
+      "f0018",
+      "f0025",
+      "f0029",
+      "f0031"
+    ]
+  },
+  "source_uncertainties": [
+    "Full assigned local machine transcripts were read and the listed frames inspected. No independent complete audio review was performed; no public quotation is based on a garbled machine rendering.",
+    "MPI 4.1 is the normative reference. The installed MPI_Get_version reports MPI 3.1; all listed routines predate MPI 4.1. This is not a full wording-by-wording comparison between standard editions.",
+    "The Open MPI launcher URL currently serves 4.1.8 documentation. Local programs use the installed 4.1 series. The TCP explanatory URL is a5.0-series document; transport arguments were also exercised locally rather than presumed identical across releases.",
+    "The earlier Hockney paper was not independently opened in this author pass and is not a directly relied-upon source. Model form and historical attribution come from the opened Thakur/Rabenseifner/Gropp primary paper, § 3.",
+    "No new unmatched-message hang or eager-threshold experiment was run. The defect of the eight-rank lecture program is established from message counting and MPI 4.1 Example 11.4. Old paused-draft vader measurements and uncontrolled distributions were excluded.",
+    "Four timing captures used TCP loopback+self and no binding in an exclusive agent execution slot; OS background activity, processor frequency and migration were not controlled. Minimum/median refer to seven trial batch means, not individual message latency distributions.",
+    "Least-squares fits are descriptive. The large-message fit uses only three observations. No protocol threshold or causal explanation of timing bends is established. The 8000-byte halo prediction interpolates the small-range fit; no 8000-byte measurement was made.",
+    "Open MPI emitted debugger_attach_fifo errno 95 under the Windows-mounted workspace. Raw stderr is retained privately; program data checks and exits succeeded, while debugger attachment is unavailable and untested.",
+    "The code-lab functional verification reran pingpong once after the four timing captures. That output is not included in the reported four-capture ranges. Raw outputs and provenance are retained privately.",
+    "The paused chapter14 original remains preserved and is not treated as previously accepted. This version replaces its empirical sections and many listings rather than inheriting their all-passed claims."
+  ],
+  "lecture_corrections": [
+    "Separate process launch from MPI_Init initialization inside each process. Same PID before/after initialization checked locally.",
+    "Recv count is a capacity; actual count is obtained from completed status using MPI_Get_count.",
+    "The eight-process single-receive branch leaves six of seven sends unmatched; one printed42 does not establish valid finalization.",
+    "Unlimited process launching requires resources and launcher configuration; Open MPI slots can forbid a request without oversubscription.",
+    "Unspecified output/source selection is not a uniform random distribution and first terminal output need not be first finished process.",
+    "Same executable on all ranks is the SPMD convention, not an MPI requirement."
+  ],
+  "sections": [
+    {
+      "id": "model",
+      "section": "Processes, ownership and the running problem",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Processes, local storage, ranks and messages.",
+      "research_extension": "MPI 4.1 §§ 2.7,3.2,3.4 and Open MPI TCP transport explanation.",
+      "teaching_construction": "Formal event, ownership, completion and cost model; integer sum and Jacobi halo running cases.",
+      "evidence_class": "definition"
+    },
+    {
+      "id": "distributed",
+      "section": "Distributed memory makes ownership explicit W5L1 0:39",
+      "video_id": "ekz3AGb4ebY",
+      "start": 39,
+      "end": 395,
+      "lecture_material": "Distributed-memory nodes, MPI as a library, local testing and basic communication capabilities.",
+      "research_extension": "MPI process model and separation from hardware/runtime management.",
+      "teaching_construction": "Ownership questions and source-versus-performance portability argument.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "launch",
+      "section": "Compile once, execute several processes W5L1 6:35",
+      "video_id": "ekz3AGb4ebY",
+      "start": 395,
+      "end": 1028,
+      "lecture_material": "Hello world C/Fortran, mpicc, mpirun -np, output order, processes beyond cores.",
+      "research_extension": "Open MPI launcher manual: slots, hardware-thread counting, oversubscription; MPI version history for mpif.h deprecation.",
+      "teaching_construction": "Checked hello/private-counter/PID program; distinction of sorting display from ordering execution.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "id": "lifetime",
+      "section": "Initialization establishes an environment, finalization has preconditions W5L1 17:08",
+      "video_id": "ekz3AGb4ebY",
+      "start": 1028,
+      "end": 1562,
+      "lecture_material": "Initialization, finalization, rank identities, return/error codes, host files and queuing environments.",
+      "research_extension": "MPI 4.1 §§ 11.1,11.2,11.4,11.5 and error handlers.",
+      "teaching_construction": "Launcher/init correction; global communication invariant and cleanup preconditions.",
+      "evidence_class": "definition"
+    },
+    {
+      "id": "spmd",
+      "section": "Ranks divide the work; a root combines it W5L2 1:12",
+      "video_id": "ZT5BqjCqcNk",
+      "start": 72,
+      "end": 365,
+      "lecture_material": "Rank-dependent branches, root choice, bag of 10000 integers and local/global sums.",
+      "research_extension": "SPMD as a convention within MPI MIMD model.",
+      "teaching_construction": "Remainder-aware block partition proof and checked sums on 1,7,10 ranks.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "sendrecv",
+      "section": "A message matches an envelope, then fills a buffer W5L2 6:05",
+      "video_id": "ZT5BqjCqcNk",
+      "start": 365,
+      "end": 853,
+      "lecture_material": "Send/receive arguments, data types, tags, communicator, wildcards, status.",
+      "research_extension": "MPI 4.1 §§ 3.2–3.3: matching, capacity, Get_count, data representation and type compatibility.",
+      "teaching_construction": "Checked envelopes, payloads and untouched receive-buffer tails.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "id": "lecture-program",
+      "section": "Receiving 42 once does not consume seven sends W5L2 14:13",
+      "video_id": "ZT5BqjCqcNk",
+      "start": 853,
+      "end": 1291,
+      "lecture_material": "42 demonstration at two and eight ranks; changing sent data to rank.",
+      "research_extension": "MPI 4.1 § 11.2.2 Example 11.4 unmatched send is erroneous; standard-mode completion.",
+      "teaching_construction": "Guarded two-rank listing, message-count proof of six unmatched messages, algorithm-dependent repairs.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "modes",
+      "section": "Completion, buffering and a deadlock proof",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Research extension after complete lecture coverage.",
+      "research_extension": "MPI 4.1 §§ 3.4–3.5 and Sendrecv semantics.",
+      "teaching_construction": "Cycle proof, bounded synchronous noncompletion through control-message release, three bulk-exchange repairs.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "id": "ordering",
+      "section": "Nonblocking calls expose concurrency, not a universal order",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Research extension.",
+      "research_extension": "MPI 4.1 §§ 3.5,3.7: nonovertaking, progress, fairness, buffers and requests.",
+      "teaching_construction": "Per-source sequence check and explicit reversed-tag reception without deadlock.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "id": "cost",
+      "section": "Ping-pong estimates a transport cost under stated conditions",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Lectures motivate locality but do not provide this cost model or benchmark.",
+      "research_extension": "Thakur et al.2005 § 3; MPI Wtime/Wtick; Open MPI transport distinction.",
+      "teaching_construction": "Four serial TCP-loopback captures, minimum/median batch means, derived weighted fits and halo interpolation.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "id": "limits",
+      "section": "Lecture claims, established results and limits",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Lecture claims table in original chronological order.",
+      "research_extension": "Previously cited standards and manuals.",
+      "teaching_construction": "Evidence boundaries, debugger FIFO limitation and model scope.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "id": "exercises",
+      "section": "Exercises",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Original practice based on the chapter; midpoint pi follows the book thread.",
+      "research_extension": "Previously defined MPI rules.",
+      "teaching_construction": "Exactly six full worked solutions: derive, compute, counterexample, assumption diagnosis, design, implementation.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "primary-sources",
+      "section": "Primary sources",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Both recordings first.",
+      "research_extension": "All cited primary references listed with supporting claims.",
+      "teaching_construction": "Source map.",
+      "evidence_class": "definition"
+    }
+  ],
+  "references": [
+    {
+      "title": "MPI: A Message-Passing Interface Standard, Version 4.1 (2 November 2023)",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report.pdf",
+      "supports": "Process/address-space model; envelope matching and status; receive capacity; compatible basic types; send modes; nonovertaking/progress/fairness; requests and buffer lifetimes; Sendrecv; timers; initialization/finalization and unmatched-send Example 11.4; mpif.h deprecation.",
+      "page_checked": "Opened official PDF; §§ 2.7,3.2–3.5,3.7,9.6,11.1–11.2,11.4–11.5; version-history page."
+    },
+    {
+      "title": "Open MPI mpirun manual,4.1 series (served 4.1.8)",
+      "url": "https://www.open-mpi.org/doc/v4.1/man1/mpirun.1.php",
+      "supports": "Compiler/runtime launch context; mpirun/mpiexec aliases; slots are allocation units; core/hardware-thread counting, oversubscription and binding options.",
+      "page_checked": "Opened 2026-10-28 UTC; Quick Summary, Definition of slot, Slots are not hardware resources and Options."
+    },
+    {
+      "title": "Open MPI TCP documentation,5.0 series § 11.2.2",
+      "url": "https://docs.open-mpi.org/en/v5.0.x/tuning-apps/networking/tcp.html",
+      "supports": "tcp,self and shared-memory transports differ; disabling shared memory may select TCP for same-node peers; self is for send-to-self; interface inclusion selects TCP interfaces.",
+      "page_checked": "Opened 2026-10-28 UTC; §§ 11.2.2.1,11.2.2.4 and11.2.2.6. Version distinction recorded."
+    },
+    {
+      "title": "Thakur,Rabenseifner,Gropp: Optimization of Collective Communication Operations in MPICH (2005)",
+      "url": "https://www.mcs.anl.gov/~thakur/papers/ijhpca-coll.pdf",
+      "supports": "Startup-plus-per-byte communication model, unit definitions and simplifying assumptions; historical attribution including Hockney; algorithm selection by message size.",
+      "page_checked": "Opened author PDF; abstract,introduction and§ 3, PDF page 2."
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "p,k",
+      "first_section": "model",
+      "definition": "Number of processes and one communicator rank0≤k<p."
+    },
+    {
+      "symbol": "n_items",
+      "first_section": "model",
+      "definition": "Count of integer values summed,10000. The C macro N in the small sum listing is this local item count; mathematical N elsewhere retains grid meaning."
+    },
+    {
+      "symbol": "N",
+      "first_section": "model",
+      "definition": "Interior grid points per side,1000 in the halo example."
+    },
+    {
+      "symbol": "m",
+      "first_section": "model",
+      "definition": "Message payload bytes."
+    },
+    {
+      "symbol": "T_msg(m),alpha,beta",
+      "first_section": "model",
+      "definition": "Message time seconds; startup seconds; transfer seconds per byte."
+    },
+    {
+      "symbol": "q,r,s_k,ell_k",
+      "first_section": "spmd",
+      "definition": "Quotient,remainder,rank block length and zero-based starting offset."
+    },
+    {
+      "symbol": "M",
+      "first_section": "modes",
+      "definition": "Bulk-exchange count262144 integers."
+    },
+    {
+      "symbol": "B(m),m_half",
+      "first_section": "cost",
+      "definition": "Payload bandwidth bytes/s; length alpha/beta achieving half asymptotic model bandwidth."
+    },
+    {
+      "symbol": "R,delta_t,t",
+      "first_section": "cost",
+      "definition": "Roundtrip repetition count,rank0 elapsed seconds,and half-roundtrip mean delta_t/(2R)."
+    },
+    {
+      "symbol": "m_i,t_i,n_obs,w_i,J",
+      "first_section": "cost",
+      "definition": "Observed byte counts,times,number of observations,positive fit weights,and squared-error objective."
+    },
+    {
+      "symbol": "A,C,G,H,K,Delta",
+      "first_section": "cost",
+      "definition": "Weighted moment sums and positive normal-equation determinant as defined before equation14.3."
+    },
+    {
+      "symbol": "T",
+      "first_section": "exercises",
+      "definition": "Ready sender–receiver cost in Exercise1 ideal ring model."
+    },
+    {
+      "symbol": "h,x_i,g",
+      "first_section": "exercises",
+      "definition": "Midpoint spacing1/num_steps; midpoint coordinate; integrand4/(1+x²)."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B tools/check_chapter_code.py --chapter 14 --merge-report",
+    "listings": 9,
+    "all_passed": true,
+    "checks": {
+      "exact": 8,
+      "returncode": 1
+    },
+    "notes": "All listings freshly compiled/run. Data-check returncode is only pingpong; all fixed outputs are actual captured stdout.",
+    "status": "All 9 public extracted listing contracts passed in the workspace-contained runtime; preliminary raw captures and the private code-lab pass are retained separately."
+  },
+  "measurement_provenance": {
+    "capture_date_utc": "2026-10-28",
+    "capture_utc_start": "2026-10-28T05:36:43.567369+00:00",
+    "capture_utc_end": "2026-10-28T05:36:55.908412+00:00",
+    "builds": 8,
+    "functional_mpi_invocations": 12,
+    "timing_captures": 4,
+    "displayed_timing_capture": 4,
+    "transport": "Open MPI ob1, tcp+self; btl_tcp_if_include=lo; bind-to none",
+    "exclusive_agent_slot": true,
+    "claim_scope": "TCP loopback on one WSL laptop, not shared-memory transport or inter-node network.",
+    "evidence": "Private capture-index.json records complete command arrays,return codes,source SHA-256,UTC and monotonic endpoints plus environment; stdout/stderr retained per invocation."
+  },
+  "author_validation": {
+    "prose_words": 8759,
+    "content_sections": 10,
+    "total_h2": 13,
+    "static_issues": [],
+    "old_private_draft_preserved": true
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch14-r1.md",
+      "changes": "Independent full review verified source fidelity, nine listing outputs and source hashes, equations, and recomputed timing fits; no repairs requested."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch14-r2.md",
+      "changes": "A fresh independent second reviewer checked complete source fidelity, nine code/output contracts, fits and ranges; no findings or repairs."
+    }
+  ]
+}

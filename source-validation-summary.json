@@ -1,16 +1,16 @@
 {
-  "checked_at_utc": "2026-10-28T05:05:53.320896+00:00",
+  "checked_at_utc": "2026-10-28T06:35:03.473674+00:00",
   "scope": "Manifest assignments and retained local transcript-file hashes; not a new source-content review",
   "chapter_count": 31,
-  "written_chapters": 12,
+  "written_chapters": 16,
   "recording_count": 75,
-  "recordings_used_by_written_chapters": 22,
+  "recordings_used_by_written_chapters": 33,
   "transcript_provenance": "Local machine transcription with faster-whisper small.en; not publisher captions",
   "limitations": [
     "The NPTEL caption tracks on the playlist are attached to the wrong videos (shifted by about one item); they were not used.",
     "Machine transcripts can contain recognition errors. Chapter source uncertainties and timestamped citations remain in the chapter sidecars.",
     "Raw media, transcripts, slide frames and private editorial records are excluded from the repository.",
-    "Recordings assigned to chapters 13-31 are not yet used by a written chapter."
+    "Recordings assigned to chapters 17-31 are not yet used by a written chapter."
   ],
   "recordings": [
     {
@@ -284,7 +284,7 @@
       "kind": "lecture",
       "url": "https://www.youtube.com/watch?v=Ognjz7DdsPk",
       "chapter_order": 13,
-      "chapter_written": false,
+      "chapter_written": true,
       "manifest_duration_seconds": 1675,
       "transcript_provenance": "local machine transcription (faster-whisper small.en)",
       "transcript_json_sha256": "ad3127a19dc0fcef448218209a6473ddf8dea7832d06c357569b6b13e97e0c92"
@@ -296,7 +296,7 @@
       "kind": "lecture",
       "url": "https://www.youtube.com/watch?v=vCgmyD4gh5M",
       "chapter_order": 13,
-      "chapter_written": false,
+      "chapter_written": true,
       "manifest_duration_seconds": 1650,
       "transcript_provenance": "local machine transcription (faster-whisper small.en)",
       "transcript_json_sha256": "e36c267af8d511a8c9cacbda66f5c8e1bcd2f24202fc1cdf9573471ac0e5ac80"
@@ -308,7 +308,7 @@
       "kind": "lecture",
       "url": "https://www.youtube.com/watch?v=pGqmaj4pLvM",
       "chapter_order": 13,
-      "chapter_written": false,
+      "chapter_written": true,
       "manifest_duration_seconds": 1672,
       "transcript_provenance": "local machine transcription (faster-whisper small.en)",
       "transcript_json_sha256": "a5e96a08b7fe7d8059c1ed2d8452e08455bd3cf60f989e4f3f947d6a981f5bf3"
@@ -320,7 +320,7 @@
       "kind": "lecture",
       "url": "https://www.youtube.com/watch?v=ekz3AGb4ebY",
       "chapter_order": 14,
-      "chapter_written": false,
+      "chapter_written": true,
       "manifest_duration_seconds": 1562,
       "transcript_provenance": "local machine transcription (faster-whisper small.en)",
       "transcript_json_sha256": "c4bfb7c308bc00b47c9f46919ee75421a539706e5c1c0543b2dfa1b2e9909583"
@@ -332,7 +332,7 @@
       "kind": "lecture",
       "url": "https://www.youtube.com/watch?v=ZT5BqjCqcNk",
       "chapter_order": 14,
-      "chapter_written": false,
+      "chapter_written": true,
       "manifest_duration_seconds": 1328,
       "transcript_provenance": "local machine transcription (faster-whisper small.en)",
       "transcript_json_sha256": "95b2445ca1dafd5c8da526e06241d8fe174b8f58c34bdf418ed988a076134934"
@@ -344,7 +344,7 @@
       "kind": "lecture",
       "url": "https://www.youtube.com/watch?v=pKlPIwdGSbE",
       "chapter_order": 15,
-      "chapter_written": false,
+      "chapter_written": true,
       "manifest_duration_seconds": 1581,
       "transcript_provenance": "local machine transcription (faster-whisper small.en)",
       "transcript_json_sha256": "7fe1e78ed62d2f8eb2484cfabd338ef892b4a56f081d03aafd59bf225fdbafb7"
@@ -356,7 +356,7 @@
       "kind": "lecture",
       "url": "https://www.youtube.com/watch?v=kKmAqFDJNc0",
       "chapter_order": 16,
-      "chapter_written": false,
+      "chapter_written": true,
       "manifest_duration_seconds": 1666,
       "transcript_provenance": "local machine transcription (faster-whisper small.en)",
       "transcript_json_sha256": "2788b147295d87c7d07bb9394932460cc53d3d4daa0841a9734404e012ce5a83"
@@ -368,7 +368,7 @@
       "kind": "lecture",
       "url": "https://www.youtube.com/watch?v=FSUT2kW66cA",
       "chapter_order": 16,
-      "chapter_written": false,
+      "chapter_written": true,
       "manifest_duration_seconds": 1608,
       "transcript_provenance": "local machine transcription (faster-whisper small.en)",
       "transcript_json_sha256": "baca4178cd4eee8bdf3afa2cdae5f5a263ae2850135b4582c8bfc0bc1f43a789"
@@ -380,7 +380,7 @@
       "kind": "lecture",
       "url": "https://www.youtube.com/watch?v=l6HVISG9f_M",
       "chapter_order": 16,
-      "chapter_written": false,
+      "chapter_written": true,
       "manifest_duration_seconds": 1637,
       "transcript_provenance": "local machine transcription (faster-whisper small.en)",
       "transcript_json_sha256": "629aeaf1bb9a113f2971367d4f45135b92df5efc534581d2627c611730551568"
@@ -392,7 +392,7 @@
       "kind": "lecture",
       "url": "https://www.youtube.com/watch?v=6bXLTaJjg_U",
       "chapter_order": 15,
-      "chapter_written": false,
+      "chapter_written": true,
       "manifest_duration_seconds": 1229,
       "transcript_provenance": "local machine transcription (faster-whisper small.en)",
       "transcript_json_sha256": "9d9b98782a466ed668a7ba5445dfef42512a2d79ee8b14b68b0ab9af1328e98f"
@@ -404,7 +404,7 @@
       "kind": "lecture",
       "url": "https://www.youtube.com/watch?v=gG3oMdoBZbM",
       "chapter_order": 15,
-      "chapter_written": false,
+      "chapter_written": true,
       "manifest_duration_seconds": 1188,
       "transcript_provenance": "local machine transcription (faster-whisper small.en)",
       "transcript_json_sha256": "ee1cad3c855ac154bb2d2e220593528c0a3ab90d962108300ec9fa19fd45e1e4"

@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="23d83db25ec14dd116eaac5d9b9153dc693723994d22c23e6802519fc27c344a"><title>MPI II: collective communication and global numerical decisions · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>MPI II: collective communication and global numerical decisions</h1>
+<p class="lead">Split a 16 × 16 heat grid across four processes. On the first Jacobi sweep, the process touching the hot edge sees a maximum update of 0.25, while the other three see zero. A local stopping test would let three processes declare success before heat has reached their rows. The correct decision is one global maximum, returned to every process. That scalar occupies eight bytes on the verification machine; the difficulty is coordinating its meaning and completion, not storing it. The same choices decide whether an eight-element dot product includes all eight elements and whether a distributed transpose actually changes the matrix.</p>
+<p class="source-note">Grounded in <a href="https://www.youtube.com/watch?v=pKlPIwdGSbE">W5L3, Collective Communication in MPI</a>, <a href="https://www.youtube.com/watch?v=6bXLTaJjg_U">W6L1, Examples of Collective Communication in MPI, Part 1</a>, and <a href="https://www.youtube.com/watch?v=gG3oMdoBZbM">W6L2, Part 2</a>, from the NPTEL course <em>High Performance Scientific Computing</em> (Prof. Shivasubramanian Gopalakrishnan, IIT Bombay). <strong>Lecture material:</strong> collective matching, barrier, broadcast, scatter, gather, all-gather, all-to-all, reduction operators and scans; nonblocking collectives; stencil decomposition and physical versus partition boundaries; dot products, vector normalization and matrix transposition. <strong>Research extensions:</strong> MPI 4.1, official PDF chapter 6, fixes the semantic guarantees; the Forum's explicitly unofficial HTML rendering numbers the corresponding collective chapter 7. Thakur, Rabenseifner and Gropp (2005) motivate message-size-dependent collective algorithms; Open MPI 4.1.6 source identifies concrete all-reduce selection and fallback rules. <strong>Original teaching constructions:</strong> the distributed-data model, coverage proofs for variable partitions, numerical stopping counterexample, complete verification programs, block-transpose derivation, analytic cost comparisons, fresh TCP-loopback captures and six worked exercises.</p>
+
+<h2 id="model">The objects of the chapter and the running case <a class="timestamp" href="https://www.youtube.com/watch?v=pKlPIwdGSbE&amp;t=36s">W5L3 0:36</a></h2>
+<p>An MPI process has its own address space. A communicator identifies a group of processes and a communication context; its ranks are the integers \(r=0,\ldots,p-1\), where \(p\) is the group size. This chapter uses intracommunicators, whose communicating processes belong to one group. A root is a rank chosen consistently by all participants as a source or destination for a rooted collective. The root need not be rank zero.</p>
+<p>A collective is a group operation in which the participating processes make matching calls. It does not mean that one process calls a routine which remotely forces other processes to enter theirs. Describe its mathematical input as a distributed tuple \((x_0,\ldots,x_{p-1})\), with x_r stored at rank r. A block is an ordered sequence of elements; its element count, datatype and byte size are different attributes. The collective defines a transformation of distributed tuples, while the library chooses how to implement that transformation.</p>
+<p>For equal-sized blocks, the following table separates the destination pattern from arithmetic. Here \(\rho\) denotes a root rank, \(x_{i,j}\) the block at source i intended for destination j, and \(\circ\) an associative combining operation. “Associative” means \((a\circ b)\circ c=a\circ(b\circ c)\) in the mathematical operation used to describe the reduction.</p>
+<div class="table-wrap"><table><caption>Collectives as transformations of distributed blocks; intracommunicator semantics.</caption><thead><tr><th>Operation</th><th>Input</th><th>Result</th></tr></thead><tbody>
+<tr><td>Bcast</td><td>root holds x_ρ</td><td>every rank holds x_ρ</td></tr><tr><td>Scatter</td><td>root holds p blocks</td><td>rank r receives block r</td></tr><tr><td>Gather</td><td>rank r holds x_r</td><td>root receives blocks in rank order</td></tr><tr><td>Allgather</td><td>rank r holds x_r</td><td>every rank receives the complete rank-ordered list</td></tr><tr><td>Alltoall</td><td>rank i holds blocks x_i,j</td><td>rank j receives x_i,j in source-rank order</td></tr><tr><td>Reduce</td><td>one equal-length vector per rank</td><td>root receives its elementwise reduction</td></tr><tr><td>Allreduce</td><td>one equal-length vector per rank</td><td>every rank receives the reduction</td></tr><tr><td>Reduce_scatter</td><td>one equal-length vector per rank</td><td>the reduced vector is partitioned across ranks</td></tr><tr><td>Scan / Exscan</td><td>one contribution per rank</td><td>inclusive / exclusive rank-prefix reduction</td></tr><tr><td>Barrier</td><td>no application data buffer</td><td>return requires every member to have entered</td></tr>
+</tbody></table></div>
+<p>The running scientific object is the canonical Jacobi grid. There are \(N\) interior cells per direction, spacing \(h_g=1/(N+1)\), a unit top boundary, zero other edges and an initially zero interior. The arrays <code>u</code> and <code>unew</code> hold successive iterates. A sweep sets each interior new value to the average of four old neighbors. Define the maximum update \(r_k=\max_{i,j}|u^{(k+1)}_{i,j}-u^{(k)}_{i,j}|\). This is an update norm, not the differential-equation residual; the old grid's maximum discrete Laplacian is \(4r_k/h_g^2\).</p>
+<p>Rank r owns a set of cells \(\Omega_r\). The ownership sets are disjoint and together cover every interior cell. Its local maximum is \(r_{k,r}=\max_{(i,j)\in\Omega_r}|u^{(k+1)}_{i,j}-u^{(k)}_{i,j}|\), with zero for an empty owned set. Then \(r_k=\max_r r_{k,r}\). Every process must use that same global value for the stop decision. The equation identifies Allreduce with MAX as the required operation without committing to a communication algorithm.</p>
+<p>The cost model uses message latency \(\alpha\) in seconds and inverse bandwidth \(\beta\) in seconds per byte: a message carrying m bytes costs \(\alpha+\beta m\). A reduction adds \(\gamma\), seconds per byte of local combine work. These are model parameters for a stated transport and regime, not universal constants. Later sections assume identical links and one simultaneous send and receive per process. Local experiments use processes on one laptop with TCP over loopback plus self transport, rather than shared-memory message transport or a physical inter-node network.</p>
+
+<h2 id="semantics">Matching and local completion determine legal programs <a class="timestamp" href="https://www.youtube.com/watch?v=pKlPIwdGSbE&amp;t=182s">W5L3 3:02</a></h2>
+<p>Collectives use a communicator and a consistent call order instead of application message tags. They do not match ordinary point-to-point messages. Count and datatype arguments must have the required matching type signatures between sending and receiving participants; identical byte counts alone do not establish a type match. A type signature is the ordered sequence of basic MPI types described by the datatype and count. Distinct memory layouts can describe the same signature.</p>
+<p><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node114.htm">MPI 4.1 HTML §7.1</a> distinguishes local completion from group synchronization. Returning from a blocking data collective makes the caller's relevant buffers usable according to that operation. It does not generally prove that every other process has completed, or even entered, its call. Thus the W5L3 description of blocking broadcast as waiting until every recipient has received is too strong. It is legitimate for a root to finish its participation before a delayed receiver starts.</p>
+<p>A <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node119.htm">barrier, HTML §7.3</a>, has the explicit entry guarantee: it cannot return to a process until all communicator members have entered. Even this does not promise simultaneous return. Nor does it order text arrival from different operating-system output streams. To produce stable output, the programs collect results at one rank and print them there. A barrier is a distributed execution condition, not a terminal-output ordering service.</p>
+<p>A useful dataflow argument explains why some calls often appear to synchronize. If rank j needs an output that depends on a still-undetermined input at rank i, j cannot correctly produce that output before the contribution is available. But availability of contributions, completion of local buffers, entry to calls and simultaneous continuation are distinct statements. Barrier has no data buffer, so a send-buffer counterfactual is not its proof. Use the operation's documented synchronization contract rather than classifying all data collectives as interchangeable barriers.</p>
+<p>For an invalid matching example, rank zero calls Bcast followed by Barrier while rank one calls Barrier followed by Bcast on the same communicator. The routine order disagrees. A small-message broadcast that happens to finish early can conceal the defect; a synchronizing implementation can expose it as a hang. The valid repair is the same collective order on all ranks, or a deliberately separated communicator context for independent collective streams. Merely changing message size is not a correctness repair.</p>
+<p>The first program delays rank one by 100 ms before each of four operations. Rank zero times its own Bcast-root, Reduce-nonroot, Allreduce and Barrier calls. Each case begins with a barrier to avoid carrying an earlier case's delay into the next interval. The operation results are checked. The displayed times are one capture, not predictions of early completion: an implementation is allowed to synchronize a broadcast too. Allreduce receives the delayed rank's contribution before its result is consumed.</p>
+<pre><code class="language-c" data-file="late.c" data-build="mpicc -O2 -std=c11 late.c -lm -o late" data-needs="mpi" data-run="mpirun -np 4 ./late" data-check="returncode">#define _POSIX_C_SOURCE 200809L
+#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;time.h&gt;
+int main(int argc,char **argv) {
+    int r,p;MPI_Init(&amp;argc,&amp;argv);MPI_Comm_rank(MPI_COMM_WORLD,&amp;r);MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    if(p&lt;2)MPI_Abort(MPI_COMM_WORLD,2);
+    const char *names[]={"Bcast root0","Reduce root1","Allreduce","Barrier"};
+    for(int op=0;op&lt;4;++op) {
+        int x=7,y=0;MPI_Barrier(MPI_COMM_WORLD);
+        if(r==1){struct timespec delay={0,100000000};nanosleep(&amp;delay,NULL);}
+        double t=MPI_Wtime();
+        if(op==0)MPI_Bcast(&amp;x,1,MPI_INT,0,MPI_COMM_WORLD);
+        if(op==1)MPI_Reduce(&amp;x,&amp;y,1,MPI_INT,MPI_SUM,1,MPI_COMM_WORLD);
+        if(op==2)MPI_Allreduce(&amp;x,&amp;y,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD);
+        if(op==3)MPI_Barrier(MPI_COMM_WORLD);
+        t=MPI_Wtime()-t;
+        if((op==0&amp;&amp;x!=7)||(op==1&amp;&amp;r==1&amp;&amp;y!=7*p)||(op==2&amp;&amp;y!=7*p))MPI_Abort(MPI_COMM_WORLD,3);
+        if(r==0)printf("%-13s rank0 elapsed=%.3f ms\n",names[op],1000*t);
+    }
+    MPI_Finalize();return 0;
+}
+</code></pre>
+<pre><code class="output">Bcast root0   rank0 elapsed=0.010 ms
+Reduce root1  rank0 elapsed=0.011 ms
+Allreduce     rank0 elapsed=100.251 ms
+Barrier       rank0 elapsed=100.282 ms</code></pre>
+<p>A root returning early would demonstrate that this library permits early local completion in this case. It would not identify an eager protocol or internal buffer allocation without further evidence. Conversely, a late return would not make a broadcast a portable barrier. The lecture motivates collectives partly by fewer send buffers; MPI specifies results and buffer-use rules, not a universal reduction in internal memory allocation. Better algorithms and an implementation's tuning are sound motivations without inventing an allocation guarantee.</p>
+
+<h2 id="movement">Specify the destination layout before selecting a collective <a class="timestamp" href="https://www.youtube.com/watch?v=pKlPIwdGSbE&amp;t=242s">W5L3 4:02</a></h2>
+<p>Broadcast replicates one root buffer. Scatter partitions a root buffer into equal-size destination blocks, whereas Gather concatenates source blocks at the root. <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node124.htm">MPI 4.1 HTML §7.6</a> states Scatter's per-destination count; <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node122.htm">HTML §7.5</a> states Gather's per-source receive count. Confusing a per-rank count with the total count causes buffer overruns. The library cannot infer the allocation size of a C pointer.</p>
+<p>For four ranks, a direct root-to-others broadcast uses three network messages, each with a matching receive. The root retains its own data without requiring a network transfer to itself. W5L3 counts three such pairs, while the later recap counts four. Four is a count including the root's conceptual participation, not the minimal direct message count. An algorithm may forward data through a tree instead of issuing those three root sends; the conceptual transformation does not prescribe a transport schedule.</p>
+<p><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node126.htm">Allgather, HTML §7.7</a>, gives every rank the rank-ordered list of all source blocks. If each input block occupies m bytes, each result occupies pm bytes. Summing replicated result storage over p ranks gives p²m bytes, an original consequence of the per-rank scaling noted in W6L2. With 10000 ranks and eight-byte contributions, that is 80000 bytes per rank and 800000000 bytes over all ranks. Allreduce can instead return only the combined scalar when the full list is unnecessary.</p>
+<p><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node128.htm">Alltoall, HTML §7.8</a>, sends different destination blocks from every source. If source i stores blocks x_i,0 through x_i,p−1, destination j receives x_0,j through x_p−1,j. This transposes a table of blocks; it does not necessarily transpose the elements inside each block. That second mapping is central to the matrix example below.</p>
+<p>The verification program uses root value 73, scatter blocks 10+r, an all-gather of ranks, and all-to-all blocks encoded as 100i+j. It checks every received integer before combining success flags with an Allreduce of MIN. Only rank zero prints. This exercises layout and matching with a small exact dataset; it measures neither network efficiency nor internal point-to-point message count.</p>
+<pre><code class="language-c" data-file="movement.c" data-build="mpicc -O2 -std=c11 movement.c -lm -o movement" data-needs="mpi" data-run="mpirun -np 4 ./movement">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+int main(int argc,char **argv) {
+    int r,p;MPI_Init(&amp;argc,&amp;argv);
+    MPI_Comm_rank(MPI_COMM_WORLD,&amp;r);MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    int *send=malloc((size_t)p*sizeof *send),*recv=malloc((size_t)p*sizeof *recv);
+    if(!send||!recv)MPI_Abort(MPI_COMM_WORLD,2);
+    int ok=1,value=r==0?73:0,part=0;
+    MPI_Bcast(&amp;value,1,MPI_INT,0,MPI_COMM_WORLD);ok&amp;=value==73;
+    for(int j=0;j&lt;p;++j)send[j]=10+j;
+    MPI_Scatter(send,1,MPI_INT,&amp;part,1,MPI_INT,0,MPI_COMM_WORLD);ok&amp;=part==10+r;
+    MPI_Gather(&amp;part,1,MPI_INT,recv,1,MPI_INT,0,MPI_COMM_WORLD);
+    if(r==0)for(int j=0;j&lt;p;++j)ok&amp;=recv[j]==10+j;
+    MPI_Allgather(&amp;r,1,MPI_INT,recv,1,MPI_INT,MPI_COMM_WORLD);
+    for(int j=0;j&lt;p;++j)ok&amp;=recv[j]==j;
+    for(int j=0;j&lt;p;++j)send[j]=100*r+j;
+    MPI_Alltoall(send,1,MPI_INT,recv,1,MPI_INT,MPI_COMM_WORLD);
+    for(int j=0;j&lt;p;++j)ok&amp;=recv[j]==100*j+r;
+    int allok;MPI_Allreduce(&amp;ok,&amp;allok,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD);
+    if(r==0)printf("p=%d broadcast/scatter/gather/allgather/alltoall verified\n",p);
+    free(send);free(recv);MPI_Finalize();return allok?0:1;
+}
+</code></pre>
+<pre><code class="output">p=4 broadcast/scatter/gather/allgather/alltoall verified</code></pre>
+<p>The vector variants, named Scatterv, Gatherv, Allgatherv and Alltoallv, permit differing block sizes. Counts give elements, while displacements locate blocks in units of the relevant datatype's extent. For the basic contiguous types used here, extent equals the spacing between successive array elements. Byte displacements and element displacements must not be confused. We use small int counts; large-count APIs and arbitrary derived datatypes require additional representation checks.</p>
+<p>For N elements over p ranks, let q be the integer quotient N/p and \(n_{\rm rem}\) the remainder N mod p. Assign \(c_r=q+1\) when \(r\lt n_{\rm rem}\) and \(c_r=q\) otherwise, with displacement \(d_r=rq+\min(r,n_{\rm rem})\). There are \(n_{\rm rem}\) larger blocks, so their sum is \(pq+n_{\rm rem}=N\). Also \(d_{r+1}=d_r+c_r\), starting at zero and ending at N. These identities prove that the half-open intervals \([d_r,d_r+c_r)\) are disjoint and cover every index exactly once. Empty blocks when p exceeds N are legitimate; the code supplies valid allocation objects even for zero counts.</p>
+
+<h2 id="reduction">Reduction is algebra plus a numerical ordering choice <a class="timestamp" href="https://www.youtube.com/watch?v=pKlPIwdGSbE&amp;t=683s">W5L3 11:23</a></h2>
+<p>A reduction combines corresponding elements from every participant. <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node130.htm">MPI 4.1 HTML §7.9.1</a> specifies Reduce's root result; <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node136.htm">HTML §7.9.6</a> specifies Allreduce's result at every rank and requires identical results among participants in that operation. Neither routine concatenates the input vectors. Reducing vectors of length n produces n combined elements, whereas gathering p such vectors produces pn elements.</p>
+<p>The built-in operator families include SUM and PROD for arithmetic, MAX and MIN for extrema, logical AND/OR/exclusive-OR, and bitwise AND/OR/exclusive-OR. An operation's allowed datatype matters: logical combination is not interchangeable with addition or arbitrary structure reduction. <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node131.htm">The predefined-operator table, HTML §7.9.2</a>, gives the allowed pairs. User-defined combining operations require the stated algebraic properties and an appropriate datatype; passing a C function does not make an arbitrary order-sensitive calculation a valid associative reduction.</p>
+<p>In exact arithmetic, associativity lets the library choose a tree. With a commutative operation, operand order may also change. Floating-point addition models an associative mathematical sum but is not itself associative. For binary64 round-to-nearest arithmetic, take \(a=2^{53}\), the point beyond which adjacent integers are not all representable. Then \((a+1)+(-a)=0\) after the first addition rounds, whereas \(a+(1-a)=1\). A changed last bit is therefore not sufficient evidence of an MPI race or a wrong mathematical partition.</p>
+<p>Correct numerical verification should identify both the mathematical answer and an error criterion. For midpoint π, rank r handles indices r,r+p,r+2p and so forth below n. Every nonnegative integer index has exactly one remainder modulo p, proving complete disjoint coverage. Each rank computes its partial sum and Reduce adds those sums at the root. The integrand is \(4/(1+x^2)\), the width is \(\Delta=1/n\), and \(x_i=(i+1/2)\Delta\). The truncation error is from the quadrature formula; additional rounding error depends on the order of local and global additions. Changing p can change the latter without changing the sample set.</p>
+<p>Scans retain rank-prefix results. <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node142.htm">Scan, HTML §7.11.1</a>, includes the caller's contribution, while <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node143.htm">Exscan, HTML §7.11.2</a>, excludes it. Rank zero's Exscan receive value is undefined, so explicitly set it to the desired empty-prefix identity before using it. Summing distributed counts this way produces offsets for packed data: rank r's offset is the total count of all lower ranks.</p>
+<p>MAXLOC returns a value and an attached index. <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node133.htm">HTML §7.9.4</a> defines tie-breaking toward the smaller index. Supplying each process's rank as that index finds the first rank holding the maximum. Supplying a global cell index instead can locate the first maximum cell, provided the datatype matches that pair representation. A rank and a numerical array index are different identifiers.</p>
+<p>The following program verifies integer sum, inclusive and exclusive prefixes, MAXLOC tie-breaking, and a 100000-step π estimate whose absolute error must be below \(10^{-9}\). All integer values fit the C int type for the requested four ranks. It prints assertions rather than pretending that one particular MPI sum order is portable. Its exact stdout check is possible because the varying low bits of π are not printed.</p>
+<pre><code class="language-c" data-file="reduce_scan.c" data-build="mpicc -O2 -std=c11 reduce_scan.c -lm -o reduce_scan" data-needs="mpi" data-run="mpirun -np 4 ./reduce_scan">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;math.h&gt;
+int main(int argc,char **argv) {
+    int r,p;MPI_Init(&amp;argc,&amp;argv);MPI_Comm_rank(MPI_COMM_WORLD,&amp;r);MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    int x=r+1,sum=0,prefix=0,offset=0,ok=1;
+    MPI_Allreduce(&amp;x,&amp;sum,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD);
+    MPI_Scan(&amp;x,&amp;prefix,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD);
+    MPI_Exscan(&amp;x,&amp;offset,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD);
+    if(r==0)offset=0;
+    ok&amp;=sum==p*(p+1)/2;ok&amp;=prefix==(r+1)*(r+2)/2;ok&amp;=offset==r*(r+1)/2;
+    struct {double value;int rank;} in={r%2==0?9.0:4.0,r},out;
+    MPI_Allreduce(&amp;in,&amp;out,1,MPI_DOUBLE_INT,MPI_MAXLOC,MPI_COMM_WORLD);
+    ok&amp;=out.value==9.0&amp;&amp;out.rank==0;
+    const long num_steps=100000;
+    double local=0.0,pi=0.0,h=1.0/num_steps;
+    for(long i=r;i&lt;num_steps;i+=p){double z=(i+0.5)*h;local+=4.0/(1.0+z*z);}
+    MPI_Reduce(&amp;local,&amp;pi,1,MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD);
+    if(r==0)ok&amp;=fabs(pi*h-acos(-1.0))&lt;1e-9;
+    int allok;MPI_Allreduce(&amp;ok,&amp;allok,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD);
+    if(r==0)printf("p=%d sum/scans/MAXLOC verified; midpoint pi error below 1e-9\n",p);
+    MPI_Finalize();return allok?0:1;
+}
+</code></pre>
+<pre><code class="output">p=4 sum/scans/MAXLOC verified; midpoint pi error below 1e-9</code></pre>
+<p>Reduce-scatter combines before distributing. In <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node139.htm">HTML §7.10.1</a>, Reduce_scatter_block reduces equal full input vectors and gives rank r the r-th equal block of the result. The variable-count version uses a common array of receive block lengths. This is useful when the reduced vector itself should remain distributed. It avoids materializing a complete reduced vector at every process merely to discard most of it.</p>
+
+<h2 id="residual">Global convergence and nonblocking completion are different obligations <a class="timestamp" href="https://www.youtube.com/watch?v=pKlPIwdGSbE&amp;t=857s">W5L3 14:17</a></h2>
+<p>Nonblocking collectives return a request that must later be completed. <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node145.htm">MPI 4.1 HTML §7.12</a> requires preserving send data and input argument arrays, and not accessing receive buffers, until completion. Blocking and nonblocking collectives do not match each other; all participants must initiate them in the same order on the communicator. Nonblocking gives an opportunity for useful independent work, not a guarantee of communication/computation overlap or improved time.</p>
+<p>The next program starts an integer Iallreduce, computes an unrelated checksum, then waits before examining the global sum. The checksum is deliberately not a performance workload and the compiler may simplify it. The check demonstrates legal buffer ownership and completion, without claiming asynchronous progress or measured overlap. A progress experiment would need independently observable work and timings that distinguish initiation, computation and wait.</p>
+<pre><code class="language-c" data-file="nonblocking.c" data-build="mpicc -O2 -std=c11 nonblocking.c -lm -o nonblocking" data-needs="mpi" data-run="mpirun -np 4 ./nonblocking">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+int main(int argc,char **argv) {
+    int r,p;MPI_Init(&amp;argc,&amp;argv);MPI_Comm_rank(MPI_COMM_WORLD,&amp;r);MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    int local=r+1,global=0;MPI_Request request;
+    MPI_Iallreduce(&amp;local,&amp;global,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD,&amp;request);
+    uint64_t checksum=0;
+    for(uint64_t i=0;i&lt;100000;++i)checksum+=i;
+    MPI_Wait(&amp;request,MPI_STATUS_IGNORE);
+    int ok=global==p*(p+1)/2&amp;&amp;checksum==UINT64_C(4999950000),allok;
+    MPI_Allreduce(&amp;ok,&amp;allok,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD);
+    if(r==0)printf("p=%d Iallreduce completed; independent checksum=4999950000\n",p);
+    MPI_Finalize();return allok?0:1;
+}
+</code></pre>
+<pre><code class="output">p=4 Iallreduce completed; independent checksum=4999950000</code></pre>
+<p>For time modeling, if communication takes C seconds and independent computation H seconds, perfect overlap would cost roughly \(\max(C,H)\), while no overlap costs roughly C+H, plus initiation and completion overhead. The maximum ideal saving is \(\min(C,H)\). Obtaining it depends on progress, resources and data independence. Running a second Jacobi sweep that overwrites a still-active reduction's send buffer is not a legal way to manufacture overlap.</p>
+
+<p>W5L3 moves from nonblocking collectives to a five-point mesh and its partitioning. The global geometry is fixed; partition boundaries are artifacts of assigning cells to processes. Physical boundaries carry the prescribed heat data. Internal boundaries require neighbor data, not a new physical boundary condition. A process grid with \(P_x\) subdivisions in x and \(P_y\) in y has \(p=P_xP_y\) processes. Divisibility makes equal rectangular blocks easy; it is a convenience, not a condition for solving a PDE in parallel.</p>
+<p>On the 3-by-3 process-grid slide the center process has four adjacent neighbors, edge processes three and corners two. Naming an absent outside neighbor as MPI_PROC_NULL simplifies communication control but does not install a temperature value. The application must initialize and preserve physical boundary data. The next chapter develops efficient halo exchange; the present question is what every process must learn to stop the iteration consistently.</p>
+<p>The global update norm is exactly the maximum of local update norms because the ownership sets partition the interior. Taking max over each subset and then over subsets includes every candidate and introduces none. For finite nonnegative floating-point updates without NaNs, selecting a maximum does not accumulate rounding error as a sum does. If each cell uses the same arithmetic expression and old neighbor values as serial, an induction on sweeps proves identical cell values: initialization agrees, all required old values agree, and therefore each new expression agrees. The maximum then agrees too. This proof is about the implemented discrete iteration under the stated arithmetic, not the continuum PDE error.</p>
+<p>We verify that argument using a deliberately simple communication design. Each rank owns rows for computation but retains a full grid replica; Allgatherv assembles newly computed rows at every rank after each sweep. An Allreduce of MAX produces the stopping value. This is a verification construction whose full-grid replication and communication are expensive. It keeps the collective question separate from halo implementation and is not presented as the scalable production solver.</p>
+<p>The program uses N=16, an update threshold of \(10^{-6}\) and a 5000-sweep cap. It executes a serial reference sweep alongside every distributed sweep, checking all cells and the global norm at every iteration. It also records the first iteration on which each rank's local norm is below the threshold while continuing safely with the global stop. It never actually lets an early local success terminate neighbor participation.</p>
+<pre><code class="language-c" data-file="jacobi_global.c" data-build="mpicc -O2 -std=c11 jacobi_global.c -lm -o jacobi_global" data-needs="mpi" data-run="for p in 3 4; do mpirun -np $p ./jacobi_global; done">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+#define N 16
+#define PITCH (N+2)
+#define IDX(i,j) ((i)*PITCH+(j))
+int main(int argc,char **argv) {
+    int r,p;MPI_Init(&amp;argc,&amp;argv);MPI_Comm_rank(MPI_COMM_WORLD,&amp;r);MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    int *counts=malloc((size_t)p*sizeof *counts),*displs=malloc((size_t)p*sizeof *displs),start=0,rows=0;
+    if(!counts||!displs)MPI_Abort(MPI_COMM_WORLD,2);
+    for(int q=0;q&lt;p;++q){int c=N/p+(q&lt;N%p);counts[q]=c*PITCH;displs[q]=(start+1)*PITCH;if(q==r)rows=c;start+=c;}
+    start=displs[r]/PITCH;
+    double *local=calloc((size_t)(rows?rows:1)*PITCH,sizeof *local);
+    double u[PITCH*PITCH]={0},unew[PITCH*PITCH]={0},ref[PITCH*PITCH]={0},next[PITCH*PITCH]={0};
+    if(!counts||!displs||!local)MPI_Abort(MPI_COMM_WORLD,2);
+    for(int j=0;j&lt;PITCH;++j)u[j]=unew[j]=ref[j]=next[j]=1.0;
+    double global=1.0;int iter=0,first=0,ok=1;
+    while(global&gt;=1e-6&amp;&amp;iter&lt;5000) {
+        double diff=0.0;
+        for(int i=0;i&lt;rows;++i)for(int j=1;j&lt;=N;++j) {
+            int q=IDX(start+i,j);
+            double v=0.25*(u[q-PITCH]+u[q+PITCH]+u[q-1]+u[q+1]);
+            local[IDX(i,j)]=v;diff=fmax(diff,fabs(v-u[q]));
+        }
+        MPI_Allgatherv(local,rows*PITCH,MPI_DOUBLE,unew,counts,displs,MPI_DOUBLE,MPI_COMM_WORLD);
+        MPI_Allreduce(&amp;diff,&amp;global,1,MPI_DOUBLE,MPI_MAX,MPI_COMM_WORLD);
+        double serialdiff=0.0;
+        for(int i=1;i&lt;=N;++i)for(int j=1;j&lt;=N;++j) {
+            int q=IDX(i,j);next[q]=0.25*(ref[q-PITCH]+ref[q+PITCH]+ref[q-1]+ref[q+1]);
+            serialdiff=fmax(serialdiff,fabs(next[q]-ref[q]));
+        }
+        for(int q=0;q&lt;PITCH*PITCH;++q){ok&amp;=next[q]==unew[q];u[q]=unew[q];ref[q]=next[q];}
+        ok&amp;=serialdiff==global;++iter;if(first==0&amp;&amp;diff&lt;1e-6)first=iter;
+    }
+    ok&amp;=iter&lt;5000;
+    int *firsts=malloc((size_t)p*sizeof *firsts),allok;
+    if(!firsts)MPI_Abort(MPI_COMM_WORLD,2);
+    MPI_Gather(&amp;first,1,MPI_INT,firsts,1,MPI_INT,0,MPI_COMM_WORLD);
+    MPI_Allreduce(&amp;ok,&amp;allok,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD);
+    if(r==0){printf("p=%d N=16 global_stop=%d local_first:",p,iter);for(int q=0;q&lt;p;++q)printf(" %d",firsts[q]);puts("; every grid/norm matched serial");}
+    free(counts);free(displs);free(local);free(firsts);MPI_Finalize();return allok?0:1;
+}
+</code></pre>
+<pre><code class="output">p=3 N=16 global_stop=515 local_first: 509 1 1; every grid/norm matched serial
+p=4 N=16 global_stop=515 local_first: 493 1 1 1; every grid/norm matched serial</code></pre>
+<p>Both three and four processes stop at sweep 515 and match every serial grid and norm. With four processes the first local threshold crossings are 493,1,1,1. A local maximum need not stay below the threshold after its first crossing: heat can reach an initially unchanged block later. Therefore “this rank has once converged” is not a persistent certificate. The global test supplies one consistent stop decision for the current iterate.</p>
+<p>Checking the global norm only every b sweeps can save reductions. If the stopping measure decreases monotonically and the checked iteration meets the threshold, at most b−1 additional sweeps occur after its first threshold crossing. Without monotonicity that overshoot argument is not valid. If a reduction costs \(T_c\) per check and a sweep costs \(T_s\) excluding that check, checking every b sweeps contributes approximately \(T_c/b\) per sweep before considering changed stopping work. This simple accounting is not a justification for every pipelined stopping scheme.</p>
+
+<h2 id="dot">The dot product must cover all elements for every process count <a class="timestamp" href="https://www.youtube.com/watch?v=6bXLTaJjg_U&amp;t=144s">W6L1 2:24</a></h2>
+<p>For vectors \(\mathbf a\) and \(\mathbf b\) of length N, the dot product is \(\sum_{i=0}^{N-1}a_ib_i\). Partition corresponding indices identically, compute local products and sums, then Reduce with SUM. Scatter need not be followed by a Gather of all partial scalars when the only desired result is their sum. The collective should express the required mathematical result directly.</p>
+<p>The lecture sets \(a_i=i+1\) and \(b_i=2(i+1)\) for N=8. The exact dot product is \(2\sum_{j=1}^8j^2=2(8\cdot9\cdot17/6)=408\). For four processes, pairs of terms produce local sums 10,50,122,226, whose sum is 408. These integers are small enough that integer overflow cannot explain an incorrect answer in this example.</p>
+<p>Its editor allocates local arrays of N/4 elements and computes the send count as integer N/p. At six ranks, that count is one and the first six elements alone contribute \(2\sum_{j=1}^6j^2=182\), matching the terminal output. The last two elements were omitted. At three ranks the same first six elements are included through two-element blocks. At five ranks the partial coverage gives 110, and at seven gives 280. With one or two ranks the requested local receive count exceeds the two-element local allocation, so executing that reconstruction would have undefined behavior rather than a meaningful “wrong answer.”</p>
+<p>Dynamic allocation alone does not fix omitted remainders. Allocate according to the count assigned by the quotient/remainder partition, and use Scatterv with those counts and displacements. The proof in the movement section then certifies complete coverage. With more processes than elements, some ranks receive zero elements and contribute the additive identity zero; they still participate in the collective sequence.</p>
+<p>The general program retains N=8 so the result remains transparent and tests p=1,3,6,9. These cases cover the ordinary serial allocation, a remainder, the lecture's problematic process count and zero-length blocks. Only the root uses the reduced total; it broadcasts the success flag so every process returns a consistent status. All four launches must report 408.</p>
+<pre><code class="language-c" data-file="dot_general.c" data-build="mpicc -O2 -std=c11 dot_general.c -lm -o dot_general" data-needs="mpi" data-run="for p in 1 3 6 9; do mpirun -np $p ./dot_general; done">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+int main(int argc,char **argv) {
+    int r,p;MPI_Init(&amp;argc,&amp;argv);MPI_Comm_rank(MPI_COMM_WORLD,&amp;r);MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    const int N=8;int A[8],B[8];int *counts=malloc((size_t)p*sizeof *counts),*displs=malloc((size_t)p*sizeof *displs);
+    if(!counts||!displs)MPI_Abort(MPI_COMM_WORLD,2);
+    int off=0;for(int q=0;q&lt;p;++q){counts[q]=N/p+(q&lt;N%p);displs[q]=off;off+=counts[q];}
+    int n=counts[r],*a=malloc((size_t)(n?n:1)*sizeof *a),*b=malloc((size_t)(n?n:1)*sizeof *b);
+    if(!counts||!displs||!a||!b)MPI_Abort(MPI_COMM_WORLD,2);
+    for(int i=0;i&lt;N;++i){A[i]=i+1;B[i]=2*(i+1);}
+    MPI_Scatterv(A,counts,displs,MPI_INT,a,n,MPI_INT,0,MPI_COMM_WORLD);
+    MPI_Scatterv(B,counts,displs,MPI_INT,b,n,MPI_INT,0,MPI_COMM_WORLD);
+    int local=0,total=0;for(int i=0;i&lt;n;++i)local+=a[i]*b[i];
+    MPI_Reduce(&amp;local,&amp;total,1,MPI_INT,MPI_SUM,0,MPI_COMM_WORLD);
+    int ok=r!=0||total==408;MPI_Bcast(&amp;ok,1,MPI_INT,0,MPI_COMM_WORLD);
+    if(r==0)printf("p=%d N=8 dot=%d; all 8 elements included\n",p,total);
+    free(a);free(b);free(counts);free(displs);MPI_Finalize();return ok?0:1;
+}
+</code></pre>
+<pre><code class="output">p=1 N=8 dot=408; all 8 elements included
+p=3 N=8 dot=408; all 8 elements included
+p=6 N=8 dot=408; all 8 elements included
+p=9 N=8 dot=408; all 8 elements included</code></pre>
+<p>The four output lines are four launches, not eight. A correct partition is necessary but not sufficient for arbitrary large integer data, where products and sums can overflow; such inputs need a wider checked representation. For floating vectors the partition proof still applies, while numerical error criteria replace exact integer comparison.</p>
+<p>The lecture's compiler rejects declarations inside for initializers unless given a C99 language option. That is a toolchain-mode diagnostic, not an MPI restriction. Our build requests C11 explicitly through mpicc, the MPI compiler wrapper. The wrapper supplies MPI compile/link settings to a C compiler; it does not define a separate C language.</p>
+
+<h2 id="norm">Normalization needs one global scalar, not every partial sum <a class="timestamp" href="https://www.youtube.com/watch?v=gG3oMdoBZbM&amp;t=38s">W6L2 0:38</a></h2>
+<p>The Euclidean norm of a nonzero vector is \(\|\mathbf v\|_2=(\sum_iv_i^2)^{1/2}\); normalization divides each component by that norm. The value must be global: using one norm per partition changes the vector and produces several locally unit-length pieces rather than one globally unit-length vector.</p>
+<p>The lecture scatters the vector, computes local sums of squares, all-gathers those sums to every process, has the root add them and take a square root, broadcasts the norm, normalizes local pieces, and gathers the final vector. This can be correct under its fixed-size assumptions, but the Allgather gives every rank more information than it uses. One Allreduce of SUM directly supplies the total to every process; each then takes the square root locally. It replaces both the gathered scalar list and the extra broadcast.</p>
+<p>For the vector (1,2,…,8), the squared norm is 204 and the norm is about 14.28285686. The normalized components rounded to three decimals are 0.070,0.140,0.210,0.280,0.350,0.420,0.490,0.560. The lecture's six-rank terminal output instead ends with untouched 7 and 8, with earlier values consistent with normalizing only 1 through 6 by \(\sqrt{91}\). Integer N/p omits the remainder, and the fixed four-element gathered-sums array is too small for six contributions. Because that array access is out of bounds, the displayed output is an observation, not a guaranteed outcome of invalid C execution.</p>
+<p>The revised listing uses the same variable partition as the dot product, an Allreduce of local squared sums, and a Gatherv only to display/check the resulting full vector at the root. It verifies every component against \((i+1)/\sqrt{204}\) and verifies the final squared norm against one within \(10^{-14}\). Four and six ranks should satisfy the same numerical criterion.</p>
+<pre><code class="language-c" data-file="vecnorm.c" data-build="mpicc -O2 -std=c11 vecnorm.c -lm -o vecnorm" data-needs="mpi" data-run="for p in 4 6; do mpirun -np $p ./vecnorm; done">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+int main(int argc,char **argv) {
+    int r,p;MPI_Init(&amp;argc,&amp;argv);MPI_Comm_rank(MPI_COMM_WORLD,&amp;r);MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    int N=8,off=0;double V[8],result[8];
+    int *counts=malloc((size_t)p*sizeof *counts),*displs=malloc((size_t)p*sizeof *displs);
+    if(!counts||!displs)MPI_Abort(MPI_COMM_WORLD,2);
+    for(int q=0;q&lt;p;++q){counts[q]=N/p+(q&lt;N%p);displs[q]=off;off+=counts[q];}
+    int n=counts[r];double *v=malloc((size_t)(n?n:1)*sizeof *v);
+    if(!v)MPI_Abort(MPI_COMM_WORLD,2);for(int i=0;i&lt;N;++i)V[i]=i+1.0;
+    MPI_Scatterv(V,counts,displs,MPI_DOUBLE,v,n,MPI_DOUBLE,0,MPI_COMM_WORLD);
+    double local=0.0,global=0.0;for(int i=0;i&lt;n;++i)local+=v[i]*v[i];
+    MPI_Allreduce(&amp;local,&amp;global,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
+    if(global&lt;=0.0)MPI_Abort(MPI_COMM_WORLD,3);
+    double norm=sqrt(global);for(int i=0;i&lt;n;++i)v[i]/=norm;
+    MPI_Gatherv(v,n,MPI_DOUBLE,result,counts,displs,MPI_DOUBLE,0,MPI_COMM_WORLD);
+    int ok=1;
+    if(r==0){double check=0.0;for(int i=0;i&lt;N;++i){check+=result[i]*result[i];ok&amp;=fabs(result[i]-(i+1)/sqrt(204.0))&lt;1e-14;}ok&amp;=fabs(check-1.0)&lt;1e-14;printf("p=%d normalized norm within 1e-14 of 1; vector:",p);for(int i=0;i&lt;N;++i)printf(" %.3f",result[i]);puts("");}
+    MPI_Bcast(&amp;ok,1,MPI_INT,0,MPI_COMM_WORLD);
+    free(v);free(counts);free(displs);MPI_Finalize();return ok?0:1;
+}
+</code></pre>
+<pre><code class="output">p=4 normalized norm within 1e-14 of 1; vector: 0.070 0.140 0.210 0.280 0.350 0.420 0.490 0.560
+p=6 normalized norm within 1e-14 of 1; vector: 0.070 0.140 0.210 0.280 0.350 0.420 0.490 0.560</code></pre>
+<p>The program assumes nonzero bounded input. A zero vector has no unique unit normalization. Very large or small components can overflow or underflow the naive sum of squares; robust norm routines use scaling rather than blindly squaring every component. Those concerns are independent of collective correctness. We intentionally choose modest exact integer squares to isolate data distribution and global reduction.</p>
+<p>The math library appears after the source/object in the build command. Some Unix linkers process libraries in command-line order, so placing -lm before an object that needs sqrt can fail on some toolchains. The lecture's displayed earlier-library command successfully links on its own system; that success is not a portable link-order guarantee. No invented linker diagnostic is needed to explain the robust ordering used here.</p>
+
+<h2 id="transpose">Alltoall transposes ownership; local indexing finishes the matrix transpose <a class="timestamp" href="https://www.youtube.com/watch?v=gG3oMdoBZbM&amp;t=663s">W6L2 11:03</a></h2>
+<p>For a square matrix A of order N, the transpose B satisfies \(B_{j,i}=A_{i,j}\). With one row per rank and N=p, each source i sends A_i,j to destination j. Alltoall delivers destination j a receive vector indexed by source i, so its vector is row j of B. This is exactly the four-by-four demonstration whose received rows start 1,5,9,13 and 2,6,10,14.</p>
+<p>The editor then stores <code>transposed[i][rank]=recv_buf[i]</code>. At destination r, receive element i equals A_i,r, so that assignment writes A_i,r into position (i,r), reconstructing a column of A rather than storing row r of B. The printed receive vector is a valid transposed row, but the separate two-dimensional storage assignment does not follow that mapping. A correct row storage is <code>B[rank][i]=recv_buf[i]</code>.</p>
+<p>For multiple rows per process, let q=N/p and assume divisibility for this program. Rank r owns input rows rq through (r+1)q−1. It packs one q-by-q block for each destination d: entry (i,j) of that block is \(A_{rq+i,dq+j}\). After Alltoall, destination d receives from source r the same q-by-q block in row-major order. To store output rows dq+j, write that received entry to \(B_{dq+j,rq+i}\). The communication exchanges blocks; the local placement transposes the within-block indices.</p>
+<p>The code sets q=2 and therefore N=2p. This tests a genuine block case rather than only scalars. Each matrix entry is encoded as row×N+column+1, making the expected transpose computable without gathering the input matrix. The program checks every element of its owned output rows, then reduces success flags. Tests with three and four ranks cover N=6 and N=8.</p>
+<pre><code class="language-c" data-file="transpose.c" data-build="mpicc -O2 -std=c11 transpose.c -lm -o transpose" data-needs="mpi" data-run="for p in 3 4; do mpirun -np $p ./transpose; done">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+int main(int argc,char **argv) {
+    int r,p;MPI_Init(&amp;argc,&amp;argv);MPI_Comm_rank(MPI_COMM_WORLD,&amp;r);MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    const int q=2,N=2*p,count=q*q;int *send=malloc((size_t)p*count*sizeof *send),*recv=malloc((size_t)p*count*sizeof *recv),*B=malloc((size_t)q*N*sizeof *B);
+    if(!send||!recv||!B)MPI_Abort(MPI_COMM_WORLD,2);
+    for(int d=0;d&lt;p;++d)for(int i=0;i&lt;q;++i)for(int j=0;j&lt;q;++j)send[d*count+i*q+j]=(r*q+i)*N+(d*q+j)+1;
+    MPI_Alltoall(send,count,MPI_INT,recv,count,MPI_INT,MPI_COMM_WORLD);
+    for(int s=0;s&lt;p;++s)for(int i=0;i&lt;q;++i)for(int j=0;j&lt;q;++j)B[j*N+s*q+i]=recv[s*count+i*q+j];
+    int ok=1,allok;for(int j=0;j&lt;q;++j)for(int i=0;i&lt;N;++i)ok&amp;=B[j*N+i]==i*N+(r*q+j)+1;
+    MPI_Allreduce(&amp;ok,&amp;allok,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD);
+    if(r==0)printf("p=%d N=%d q=2 packed Alltoall plus local transpose verified\n",p,N);
+    free(send);free(recv);free(B);MPI_Finalize();return allok?0:1;
+}
+</code></pre>
+<pre><code class="output">p=3 N=6 q=2 packed Alltoall plus local transpose verified
+p=4 N=8 q=2 packed Alltoall plus local transpose verified</code></pre>
+<p>For this row-block distribution, each rank sends p blocks of q² elements, of which one stays local. The off-rank payload per rank is \((p-1)q^2\) elements and the total is \(p(p-1)q^2\). At fixed global N, that is \((1-1/p)N^2\) off-rank elements overall. Alltoall's convenience does not remove this required redistribution; it lets the implementation choose a schedule for it. An arbitrary N not divisible by p requires variable block counts and a correspondingly checked packing map.</p>
+
+<h2 id="algorithms">Derive collective cost from rounds, bytes and local combinations</h2>
+<p>The recordings describe collectives through their effects. The following algorithm model is a research extension. <a href="https://www.mcs.anl.gov/~thakur/papers/ijhpca-coll.pdf">Thakur, Rabenseifner and Gropp (2005), §3–4</a>, explain why implementations need different algorithms for short and long messages. We derive idealized costs below from explicit schedules. A model can guide a design without identifying which algorithm an uninstrumented library call actually executes.</p>
+<p>Assume p is a power of two and write \(\ell=\log_2p\). Each process can send one message and receive one message simultaneously in a round. Every participating pair has the same α and β, independent of competing transfers; communication and local reduction costs add; topology, packing, protocol changes and contention are omitted. Let s be the byte size of the full vector being broadcast or reduced, and γ the combine time per byte. A bound under this model is not a hardware guarantee.</p>
+<p>For dissemination, one informed process can inform at most one new process per round. Starting from one root, the number of informed processes at most doubles, requiring at least ℓ rounds to inform p processes. For aggregation, a process that exchanges with at most one partner per round can at most double the number of original inputs incorporated into its state. An output depending on all p contributions likewise needs at least ℓ rounds. These are dual arguments; broadcast does not require every recipient to depend on every sender's independent input.</p>
+<p>A binomial-tree broadcast sends the whole s-byte message across each critical-path edge, for ℓ rounds and cost \(\ell\alpha+\ell s\beta\). The total data sent over all tree edges is (p−1)s, just as in a direct root-to-each schedule; what improves is the critical path and root injection schedule, not the total number of data bytes. Alternatively, scatter equal pieces down a tree and recursively all-gather them. Each phase moves \((p-1)s/p\) bytes per critical path, for \(2\ell\alpha+2(p-1)s\beta/p\). For p=4 the bandwidth coefficients are 2 versus 1.5, but the latter uses twice as many latency rounds. At p=2 the bandwidth coefficients are equal. These comparisons are explicitly for powers of two.</p>
+<p>For all-gather, let m be the byte size contributed by one rank, so the final vector has s=pm bytes. A ring passes one m-byte block per round for p−1 rounds: cost \((p-1)\alpha+(p-1)m\beta\). Recursive doubling exchanges accumulated blocks whose sizes are m,2m,4m,…,(p/2)m. The geometric sum is (p−1)m, so its cost is \(\ell\alpha+(p-1)m\beta\). In this ideal model the same bandwidth term accompanies fewer latency rounds. Real algorithms must also respect rank layout, non-power-of-two groups and memory-copy cost.</p>
+<p>Pairwise all-to-all exchanges one destination block per partner for p−1 rounds, giving \((p-1)(\alpha+m\beta)\) for m bytes per destination. A bit-routing approach such as Bruck reduces the round count to \(\lceil\log_2p\rceil\), rather than “halving” it. For p=8 the change is seven rounds to three, and for p=64 it is 63 to six. It may forward additional data and require local rearrangement; fewer rounds do not establish lower time for large blocks. This explains why a short-message choice can be unsuitable once bandwidth dominates.</p>
+<p>Allreduce combines an aggregation phase with a distribution requirement. Recursive doubling exchanges and reduces the entire s-byte vector at every round. A ring instead performs a reduce-scatter phase and an all-gather phase, each with p−1 rounds on blocks of size s/p. Rabenseifner's power-of-two schedule uses recursive halving for reduce-scatter and recursive doubling for all-gather. Summing the message and combine sizes gives</p>
+\[
+\begin{aligned}
+T_{\mathrm{RD}}(s)&=\ell\alpha+\ell s\beta+\ell s\gamma,\\
+T_{\mathrm{ring}}(s)&=2(p-1)\alpha+2\frac{p-1}{p}s\beta+\frac{p-1}{p}s\gamma,\\
+T_{\mathrm{Rab}}(s)&=2\ell\alpha+2\frac{p-1}{p}s\beta+\frac{p-1}{p}s\gamma.
+\end{aligned} \tag{15.1}
+\]
+<p>The ring combines one received s/p-byte block during each of p−1 reduce-scatter rounds, hence its γ coefficient (p−1)/p. Recursive halving combines block sizes s/2,s/4,…,s/p, whose sum is the same. The all-gather phases copy but do not reduce, so they add bandwidth without another γ term. Recursive doubling repeatedly combines a full vector, explaining its larger bandwidth and reduction coefficients.</p>
+<p>At p=8 the latency counts are 3,14,6; bandwidth coefficients are 3,7/4,7/4; reduction coefficients are 3,7/8,7/8. Ring and Rabenseifner therefore have the same large-vector terms in this model, but Rabenseifner has fewer latency rounds. This prediction omits implementation-specific advantages of a ring, segmentation, topology and pipelining. A theoretical comparison should not be promoted into a universal ranking of library algorithms.</p>
+<p>Setting recursive-doubling and ring costs equal gives the model crossover</p>
+\[
+s_* = \frac{[2(p-1)-\ell]\alpha}{[\ell-2(p-1)/p]\beta+[\ell-(p-1)/p]\gamma}, \tag{15.2}
+\]
+<p>when the denominator is positive. For the hypothetical parameters α=2 µs, β=1 ns/byte and γ=0.5 ns/byte at p=8, the numerator is 22 µs and the denominator 2.3125 ns/byte, yielding about 9513.5 bytes. These are invented model inputs for arithmetic, not fitted machine characteristics. The following Python program uses exact rational coefficients and evaluates the formulas at three vector sizes.</p>
+<pre><code class="language-python" data-file="collective_costs.py" data-run="python3 -B collective_costs.py">from fractions import Fraction
+p = 8
+k = p.bit_length() - 1
+assert p == 2**k
+# Work per rank on the critical path, in units of one whole message size.
+rd_beta = Fraction(k)
+ring_beta = 2*Fraction(p-1,p)
+rd_gamma = Fraction(k)
+ring_gamma = Fraction(p-1,p)
+print(f"p={p} rounds: recursive_doubling={k} ring={2*(p-1)} rabenseifner={2*k}")
+print(f"allreduce bandwidth factors: RD={rd_beta} ring/Rabenseifner={ring_beta}")
+print(f"allreduce reduction factors: RD={rd_gamma} ring/Rabenseifner={ring_gamma}")
+# Original hypothetical model: no local measurement or hardware fit.
+alpha, beta, gamma = 2e-6, 1e-9, 0.5e-9
+numerator = (2*(p-1)-k)*alpha
+denominator = float(rd_beta-ring_beta)*beta + float(rd_gamma-ring_gamma)*gamma
+crossover = numerator/denominator
+assert denominator &gt; 0
+print(f"hypothetical RD/ring crossover={crossover:.1f} bytes")
+for size in (8, 1024, 1048576):
+    rd=k*(alpha+size*beta+size*gamma)
+    ring=2*(p-1)*alpha+float(ring_beta)*size*beta+float(ring_gamma)*size*gamma
+    rab=2*k*alpha+float(ring_beta)*size*beta+float(ring_gamma)*size*gamma
+    print(f"bytes={size} model_us RD={1e6*rd:.3f} ring={1e6*ring:.3f} Rabenseifner={1e6*rab:.3f}")
+</code></pre>
+<pre><code class="output">p=8 rounds: recursive_doubling=3 ring=14 rabenseifner=6
+allreduce bandwidth factors: RD=3 ring/Rabenseifner=7/4
+allreduce reduction factors: RD=3 ring/Rabenseifner=7/8
+hypothetical RD/ring crossover=9513.5 bytes
+bytes=8 model_us RD=6.036 ring=28.018 Rabenseifner=12.018
+bytes=1024 model_us RD=10.608 ring=30.240 Rabenseifner=14.240
+bytes=1048576 model_us RD=4724.592 ring=2321.760 Rabenseifner=2305.760</code></pre>
+<p>A library can change algorithm at a configured threshold unrelated to this illustrative crossover. In the <a href="https://raw.githubusercontent.com/open-mpi/ompi/v4.1.6/ompi/mca/coll/tuned/coll_tuned_decision_fixed.c">Open MPI 4.1.6 tuned fixed-decision source</a>, the commutative all-reduce branch for 8–15 ranks chooses recursive doubling below 8192 bytes and algorithm 6 from 8192 bytes onward. The <a href="https://raw.githubusercontent.com/open-mpi/ompi/v4.1.6/ompi/mca/coll/tuned/coll_tuned_allreduce_decision.c">versioned enumeration</a> names algorithm 6 Rabenseifner, although one associated help string omits it. This describes that specific component's decision rule, conditional on its use; it is not a promise about other versions or components.</p>
+<p>Even forcing a named algorithm can encounter a fallback. The <a href="https://raw.githubusercontent.com/open-mpi/ompi/v4.1.6/ompi/mca/coll/base/coll_base_allreduce.c">same version's ring implementation</a> switches to recursive doubling when element count is smaller than communicator size. A timing table labeled “ring” for one double on eight ranks could therefore time a fallback rather than a ring. This source-level distinction is stronger evidence than inferring the algorithm from a coincidentally similar elapsed time.</p>
+<p>The final experiment times the installed default Allreduce API without forcing or tracing its internal algorithm. For every vector size it performs three warmup calls, a barrier, then twenty repeated operations in a timed batch. Each rank divides its local batch duration by twenty; a separate Reduce of MAX selects the largest rank's batch mean. Five trials produce the displayed minimum and maximum of those maxima. That statistic is not a single-message latency and does not require globally synchronized clocks.</p>
+<pre><code class="language-c" data-file="collective_timing.c" data-build="mpicc -O2 -std=c11 collective_timing.c -lm -o collective_timing" data-needs="mpi" data-run="for p in 4 8; do mpirun -np $p ./collective_timing; done" data-check="returncode">#include &lt;mpi.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+int main(int argc,char **argv) {
+    int r,p;MPI_Init(&amp;argc,&amp;argv);MPI_Comm_rank(MPI_COMM_WORLD,&amp;r);MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    int sizes[]={1,16,1024,16384};
+    for(int z=0;z&lt;4;++z) {
+        int n=sizes[z],repeat=20;double *a=malloc((size_t)n*sizeof *a),*b=malloc((size_t)n*sizeof *b);
+        if(!a||!b)MPI_Abort(MPI_COMM_WORLD,2);for(int i=0;i&lt;n;++i)a[i]=r+1.0;
+        double best=1e9,worst=0.0;
+        for(int trial=0;trial&lt;5;++trial) {
+            for(int w=0;w&lt;3;++w)MPI_Allreduce(a,b,n,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
+            MPI_Barrier(MPI_COMM_WORLD);double t=MPI_Wtime();
+            for(int j=0;j&lt;repeat;++j)MPI_Allreduce(a,b,n,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
+            t=(MPI_Wtime()-t)/repeat;double maxrank;
+            MPI_Reduce(&amp;t,&amp;maxrank,1,MPI_DOUBLE,MPI_MAX,0,MPI_COMM_WORLD);
+            if(r==0){if(maxrank&lt;best)best=maxrank;if(maxrank&gt;worst)worst=maxrank;}
+        }
+        int ok=1,allok;for(int i=0;i&lt;n;++i)ok&amp;=b[i]==p*(p+1)/2.0;
+        MPI_Allreduce(&amp;ok,&amp;allok,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD);if(!allok)MPI_Abort(MPI_COMM_WORLD,3);
+        if(r==0)printf("p=%d bytes=%d Allreduce max-rank batchmean min=%.3f max=%.3f us\n",p,8*n,1e6*best,1e6*worst);
+        free(a);free(b);
+    }
+    MPI_Finalize();return 0;
+}
+</code></pre>
+<pre><code class="output">p=4 bytes=8 Allreduce max-rank batchmean min=10.932 max=19.331 us
+p=4 bytes=128 Allreduce max-rank batchmean min=10.605 max=11.738 us
+p=4 bytes=8192 Allreduce max-rank batchmean min=20.728 max=239.570 us
+p=4 bytes=131072 Allreduce max-rank batchmean min=90.060 max=113.324 us
+p=8 bytes=8 Allreduce max-rank batchmean min=55.457 max=1057.044 us
+p=8 bytes=128 Allreduce max-rank batchmean min=28.953 max=35.815 us
+p=8 bytes=8192 Allreduce max-rank batchmean min=69.710 max=98.561 us
+p=8 bytes=131072 Allreduce max-rank batchmean min=217.932 max=370.258 us</code></pre>
+<p>This is one fresh capture in an exclusive agent slot on 2026-10-28 UTC, with TCP loopback plus self transport. At four ranks the eight-byte batch means range from 10.932 to 19.331 µs; at eight ranks they range from 55.457 to 1057.044 µs. Such variation makes a precise two-parameter fit unwarranted. The 8192-byte four-rank range is also broad, 20.728–239.570 µs. Larger messages do not automatically make a noisy system identifiable.</p>
+<p>The benchmark checks every output element against the exact integer-valued sum p(p+1)/2 in double precision. Program correctness and timing interpretation are separate checks. Processes share one hybrid laptop, not a cluster fabric; kernel TCP stacks, scheduling and memory copies contribute to these times. The measurements neither isolate those contributions nor estimate inter-node latency, shared-memory transport cost or physical memory bandwidth. All reported ranges come from the retained five-trial capture.</p>
+
+<h2 id="limits">Limits and lecture claims that need qualification</h2>
+<p>The analytic model uses explicitly hypothetical parameters; local measurements test the installed API under one transport. Raw captures retain commands, source hashes, return codes, stdout, stderr and clock endpoints. These two forms of evidence answer different questions.</p>
+<div class="table-wrap"><table><caption>Lecture claims and their supported scope.</caption><thead><tr><th>Item</th><th>Interpretation</th></tr></thead><tbody>
+<tr><td>Blocking broadcast waits for every receiver</td><td>Local completion is the general guarantee; barrier has its own group-entry requirement.</td></tr><tr><td>Collectives use fewer internal buffers</td><td>Not specified universally; algorithms and storage are implementation choices.</td></tr><tr><td>Four-process broadcast requires four pairs</td><td>A direct off-root schedule requires three; root participation is not a necessary network transfer.</td></tr><tr><td>All-gather expands memory by p</td><td>Per-rank result grows from m to pm; total p²m follows by summing replicas.</td></tr><tr><td>Reduce accumulates serially at the root</td><td>That is one possible schedule; associative combination permits other trees and floating-point orders.</td></tr><tr><td>Dot product and norm examples work for arbitrary p</td><td>Their visible fixed allocations and integer division impose constraints; variable partitioning repairs both coverage and storage.</td></tr><tr><td>Received transpose row and stored matrix are the same result</td><td>The printed receive vector has the right transpose row, while the visible column assignment reconstructs original-column positions.</td></tr><tr><td>Nonblocking means measured overlap</td><td>It supplies a request and buffer-lifetime rules; progress and speed require separate evidence.</td></tr>
+</tbody></table></div>
+<p>The formal partition arguments apply independently of process speed. The numerical proofs assume finite values, identical arithmetic and correct initialization. The verification Jacobi design replicates grids to isolate global stopping and deliberately leaves efficient halo exchange to Chapter 16. Derived datatypes, very large counts, noncommutative user reductions, resilience to failed processes and multi-node transport measurement need additional models and experiments.</p>
+
+<h2 id="exercises">Six worked exercises</h2>
+<h3>1. Derive a correct uneven partition</h3>
+<p>Distribute N=17 elements over p=6 ranks with the quotient/remainder rule. Find counts and displacements, prove coverage, and state how to generate the displacements from distributed counts using Exscan.</p>
+<details><summary>Solution</summary><p>The quotient is two and the remainder five, so counts are (3,3,3,3,3,2) and displacements (0,3,6,9,12,15). Each displacement equals the previous displacement plus its count; the last endpoint is 15+2=17. Thus the half-open intervals meet without overlapping and cover indices zero through sixteen. An Exscan of SUM gives each rank the sum of preceding counts. Set rank zero's output explicitly to zero because its Exscan receive value is undefined. Counts and displacements are elements for the contiguous datatype, not bytes.</p></details>
+<h3>2. Diagnose a collective-completion counterexample</h3>
+<p>Rank zero broadcasts a configuration and then sends a point-to-point “everyone ready” notification to another subsystem. Explain why Bcast return alone does not justify that phrase. Give a valid protocol if every recipient must finish a local setup step before notification.</p>
+<details><summary>Solution</summary><p>The root's local completion permits reuse of its buffer; it does not generally certify that all recipients have entered or returned. Even a completed receiver may still be doing setup. Each participant must finish its own setup, then all must enter a barrier on the agreed communicator. Rank zero sends the notification after its barrier returns. The barrier proves all participants reached that post-setup point, while the broadcast supplied the configuration. A Reduce of explicit readiness flags could encode an alternative acknowledgment protocol, but a broadcast alone cannot acknowledge work it did not describe.</p></details>
+<h3>3. Compare all-reduce algorithms without a fitted machine claim</h3>
+<p>For p=8, α=2 µs, β=1 ns/byte and γ=0.5 ns/byte, compute the recursive-doubling/ring crossover. At s=1024 bytes, which has the lower modeled cost? Explain why a measured switch at another size would not refute MPI correctness.</p>
+<details><summary>Solution</summary><p>The latency difference is (14−3)α=22 µs. The byte-cost difference is (3−1.75)β+(3−0.875)γ=1.25+1.0625=2.3125 ns/byte. Therefore s*=22000/2.3125≈9513.5 bytes. At 1024 bytes, recursive doubling costs 3(2+1.024+0.512)=10.608 µs; ring costs 28+1.75×1.024+0.875×0.512=30.240 µs. The model omits topology, protocol, copying and scheduling, and the parameters are hypothetical. An implementation may use a third algorithm or a tuned threshold. MPI correctness concerns the result and semantic guarantees, not minimizing this model at every message size.</p></details>
+<h3>4. Construct a floating-point reduction counterexample</h3>
+<p>Use binary64 round-to-nearest arithmetic and a=2⁵³ to compare (a+1)−a with a+(1−a). What does this imply for exact equality between serial and parallel sums? Contrast a finite maximum reduction.</p>
+<details><summary>Solution</summary><p>At a, adjacent representable values above it are two units apart. The exact a+1 is a midpoint and rounds to a under ties-to-even, so the first expression becomes zero. The integer 1−a=−9007199254740991 is exactly representable, making the second expression one. Changing parenthesization can therefore change a valid floating sum. A test should use an appropriate error criterion unless the arithmetic order is fixed deliberately. A maximum of finite values merely selects one input value, so changing its associative grouping does not add rounding error. NaNs and special ordering conventions require separate treatment and are excluded from the Jacobi proof.</p></details>
+<h3>5. Choose the collective that matches a norm</h3>
+<p>Each of 10000 ranks holds one local sum of squares. Compare result storage for all-gathering those eight-byte sums with all-reducing them to one eight-byte sum per rank. Explain what information the norm computation needs and identify a remaining numerical hazard.</p>
+<details><summary>Solution</summary><p>Allgather returns 10000×8=80000 bytes per rank, or 800000000 bytes over all ranks. Allreduce returns eight bytes per rank, or 80000 bytes overall. The norm needs the combined scalar, not the entire list, so Allreduce matches the required information. The ratio of result storage is 10000. This is not a claim about every internal implementation buffer. Naively squaring very large or tiny components can still overflow or underflow; collective selection does not repair that numerical issue. A scaled norm algorithm is needed when input magnitude demands it.</p></details>
+<h3>6. Implement and measure a block transpose safely</h3>
+<p>Extend the q=2 transpose program to another small q, retain p=3 and p=4, and describe a verification that catches a missing within-block transpose. Design five timing trials without using terminal print order as synchronization evidence.</p>
+<details><summary>Solution</summary><p>Set N=qp and allocate p blocks of q² elements per rank. Pack source rank r, destination d, local row i and local column j as A_(rq+i,dq+j). After Alltoall, destination d stores the received value from source r into local output row j and global output column rq+i. Check each output B_(dq+j,k) against the encoded A_(k,dq+j)=kN+dq+j+1. Choosing q greater than one makes swapped within-block indices observable; q=1 cannot reveal that defect.</p><p>Initialize and allocate before timing, run warmups consistently, and time the same packing/communication/unpacking interval in every trial. Each rank records its own interval; combine their durations with MAX after the interval and report all five values or a declared summary. Check results after timing, reduce success flags, and let one rank print the report. A barrier can align trial entry but does not order independent output streams. Record process count, q, compiler, MPI version and transport, and retain raw captures rather than inferring an inter-node rate from a loopback run.</p></details>
+
+<h2 id="primary-sources">Recordings and primary sources</h2>
+<ol>
+<li><a href="https://www.youtube.com/watch?v=pKlPIwdGSbE">NPTEL W5L3</a> — collective overview, data patterns, operators, scans, nonblocking communication and stencil partitioning.</li>
+<li><a href="https://www.youtube.com/watch?v=6bXLTaJjg_U">NPTEL W6L1</a> — scatter/reduce dot product, fixed-allocation assumptions and six-process terminal result.</li>
+<li><a href="https://www.youtube.com/watch?v=gG3oMdoBZbM">NPTEL W6L2</a> — all-gather normalization, displayed invalid six-rank result and all-to-all transpose indexing.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report.pdf">MPI Forum, MPI 4.1, 2 November 2023</a>, official PDF chapter 6 — the normative source. The Forum's unofficial HTML pages linked below number the corresponding material as chapter 7; labels beginning “HTML” retain that rendering's section numbers.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node114.htm">HTML §7.1</a> and <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node119.htm">HTML §7.3</a> — local completion and explicit barrier entry guarantee.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node122.htm">HTML §7.5</a>, <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node124.htm">HTML §7.6</a>, <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node126.htm">HTML §7.7</a>, <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node128.htm">HTML §7.8</a> — gather/scatter, vector counts and displacements, all-gather and all-to-all block placement.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node130.htm">HTML §7.9.1</a>, <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node131.htm">HTML §7.9.2</a>, <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node133.htm">HTML §7.9.4</a>, <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node136.htm">HTML §7.9.6</a> — reduce, operators, MAXLOC tie-breaking and all-reduce result agreement.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node139.htm">HTML §7.10.1</a>, <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node142.htm">HTML §7.11.1</a>, <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node143.htm">HTML §7.11.2</a> — reduce-scatter and inclusive/exclusive prefix semantics.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node145.htm">HTML §7.12</a> — nonblocking initiation, request completion, buffer restrictions and collective ordering.</li>
+<li><a href="https://www.mcs.anl.gov/~thakur/papers/ijhpca-coll.pdf">Thakur, Rabenseifner and Gropp, Optimization of Collective Communication Operations in MPICH (2005)</a>, §§3–4 — single-port cost assumptions and short/long-message algorithm motivation; our arithmetic examples use explicitly hypothetical parameters.</li>
+<li><a href="https://raw.githubusercontent.com/open-mpi/ompi/v4.1.6/ompi/mca/coll/tuned/coll_tuned_decision_fixed.c">Open MPI v4.1.6 fixed decision source</a> and <a href="https://raw.githubusercontent.com/open-mpi/ompi/v4.1.6/ompi/mca/coll/tuned/coll_tuned_allreduce_decision.c">algorithm enumeration</a> — conditional tuned-component branch for commutative all-reduce on 8–15 ranks and algorithm 6's name.</li>
+<li><a href="https://raw.githubusercontent.com/open-mpi/ompi/v4.1.6/ompi/mca/coll/base/coll_base_allreduce.c">Open MPI v4.1.6 all-reduce implementation</a> — the ring's count-smaller-than-group fallback to recursive doubling.</li>
+</ol>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-14-mpi-processes-and-point-to-point-messages.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-16-domain-decomposition-mpi-solver-and-performance-analysis.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

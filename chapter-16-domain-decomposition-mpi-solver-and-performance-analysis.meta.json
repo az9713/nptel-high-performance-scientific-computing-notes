@@ -1,0 +1,378 @@
+{
+  "chapter": 16,
+  "title": "Domain decomposition, an MPI solver, and performance analysis",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "kKmAqFDJNc0",
+      "label": "W5L4",
+      "playlist_index": 30,
+      "duration_seconds": 1666
+    },
+    {
+      "video_id": "FSUT2kW66cA",
+      "label": "W5L5",
+      "playlist_index": 31,
+      "duration_seconds": 1608
+    },
+    {
+      "video_id": "l6HVISG9f_M",
+      "label": "W5L6",
+      "playlist_index": 32,
+      "duration_seconds": 1637
+    }
+  ],
+  "frames_viewed": {
+    "kKmAqFDJNc0": [
+      "f0002",
+      "f0013",
+      "f0021",
+      "f0026",
+      "f0034",
+      "f0042",
+      "f0047",
+      "f0052"
+    ],
+    "FSUT2kW66cA": [
+      "f0011",
+      "f0021",
+      "f0025",
+      "f0033",
+      "f0041",
+      "f0044",
+      "f0047",
+      "f0052"
+    ],
+    "l6HVISG9f_M": [
+      "f0011",
+      "f0017",
+      "f0023",
+      "f0029",
+      "f0035",
+      "f0041",
+      "f0045",
+      "f0049",
+      "f0053"
+    ]
+  },
+  "source_uncertainties": [
+    "All three assigned machine transcripts were read completely and the 25 listed frames inspected. No complete independent audio review was performed. Public corrections about Jacobi, send ordering and Karp–Flatt are supported by viewed slides/code rather than garbled speech.",
+    "The chapter changes the lecture heat boundaries, precision, hard-coded process count and unsafe exchange to the canonical top-one double-precision model with configurable strips/tiles. The lecture temperature trace and approximately 2.61-second example are not local reproduction targets.",
+    "METIS was not installed or executed. The graph listing checks CSR and explicit candidate partitions; it neither runs the package nor proves global partition optimality.",
+    "Gustafson 1988 was opened through a university-hosted primary-paper copy with three PDF pages and a typographic 1088 footer. The bibliographic year 1988 and CACM volume 31 issue 5 are distinguished from that footer. The original Amdahl 1967 paper was not independently opened; the chapter reconstructs the fixed-size bound and relies on Gustafson for its contrast and attribution.",
+    "Karp and Flatt 1990 was opened as a five-page scan hosted by a parallel-computing course/repository. The metric derivation and discussion on printed pages 539–540 were read. No unique causal-identification claim is inferred from its examples.",
+    "MPI 4.1 is the normative reference, while the installed library reports MPI 3.1. All listed routines predate MPI 4.1; this is not an exhaustive comparison of wording across editions.",
+    "Four timing captures were serialized in an exclusive agent slot, using TCP loopback plus self transport and no binding. OS services, CPU frequency and migration on the hybrid CPU remained uncontrolled. These are neither shared-memory-transport nor inter-node measurements.",
+    "Serial reference timing in multi-rank jobs occurs while peers wait at a barrier and can consume CPU progress resources; serial_over_mpi is not an isolated serial-process benchmark. Strong-scaling ratios consistently use the one-rank MPI kernel in the same capture.",
+    "Weak scaling has only two process counts, holds cells per rank and sweep count fixed, and does not establish time-to-solution scaling for a converged finer-grid solve. Fixed update tolerance does not enforce a fixed PDE residual threshold across N.",
+    "The surface model uses explicitly hypothetical coefficients, bidirectional per-face costs, serialized faces, interior ranks and no contention. The isoefficiency extension is original teaching material, not presented as developed lecture content. No empirical protocol crossover is inferred.",
+    "Open MPI emitted debugger_attach_fifo errno 95 on the Windows-mounted workspace. Raw stderr is retained. All numerical jobs exited 0, but debugger attachment was not tested or claimed supported.",
+    "The final structured checker reran the complete listing once after the reported four captures. Its variable timing output is functional verification evidence and is not included in the four-capture ranges.",
+    "A pre-review local-PDF citation audit corrected the null-process reference from §3.11 to the actual official-PDF §3.10 (printed p.111). Collective Chapter 6, Cartesian Chapter 8 and all audited printed page references were confirmed directly against the local official PDF; executable listing and output contracts were unchanged."
+  ],
+  "lecture_corrections": [
+    "The displayed heat update reads told and writes t using four-neighbour averaging: Jacobi, not a general SOR recurrence.",
+    "Blocking sends before receives can depend on standard-mode buffering; an end barrier cannot repair that deadlock risk. The safe implementation uses Sendrecv or posted requests.",
+    "A barrier every sweep is not independently necessary once data dependencies and common stopping decisions are established by the implemented exchanges and Allreduce.",
+    "Karp–Flatt inversion gives e=f+kappa/[T1(1−1/p)], not generally (sigma+kappa)/(sigma+phi). Both conflicting slide definitions were inspected.",
+    "Constant effective serial fraction is consistent with genuine serial work but does not uniquely establish it; an overhead-only model reproduces the curve.",
+    "Rounded lecture speedups give approximately constant 0.1 in table 1, not exactly 0.1 at every printed point.",
+    "An unstructured face-adjacent tetrahedral dual graph has at most four neighbours per tetrahedron; this does not extend to every mesh-derived graph."
+  ],
+  "sections": [
+    {
+      "id": "model",
+      "section": "The numerical state and its owner",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Steady heat problem, stencil, distributed ownership and performance vocabulary.",
+      "research_extension": "MPI process/communicator model; numerical derivations use the stated five-point model.",
+      "teaching_construction": "Canonical top-one boundaries; Jacobi recurrence, exact-arithmetic update/PDE-residual relation and local TCP measurement scope.",
+      "evidence_class": "definition"
+    },
+    {
+      "id": "patches",
+      "section": "From a global grid to local patches and halos W5L4 1:15",
+      "video_id": "kKmAqFDJNc0",
+      "start": 75,
+      "end": 733,
+      "lecture_material": "Regular decomposition, local arrays plus halos, face transfers, nonblocking overlap, basic and derived datatypes.",
+      "research_extension": "MPI Cartesian shifts, null processes, vector datatypes and request/buffer lifetimes.",
+      "teaching_construction": "Remainder-aware two-dimensional partition proof; stride explanation; halo-generation invariant and empty-interior overlap cases.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "graphs",
+      "section": "Irregular meshes become weighted graph problems W5L4 12:13",
+      "video_id": "kKmAqFDJNc0",
+      "start": 733,
+      "end": 1666,
+      "lecture_material": "Irregular tetrahedral meshes, graph representation, weights, balancing vertex counts and minimizing cut edges, CSR and METIS.",
+      "research_extension": "Karypis METIS manual §§3, 5.5 and 5.7.",
+      "teaching_construction": "Distinguish dual graph degree, vertex work weights, cut/volume/message objectives; reconstruct 3×5 CSR and compare explicit candidate partitions.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "id": "solver",
+      "section": "A distributed Jacobi sweep must preserve the serial recurrence W5L5 3:54",
+      "video_id": "FSUT2kW66cA",
+      "start": 234,
+      "end": 1343,
+      "lecture_material": "Four-strip Laplace program, distinct local arrays, boundary setup, iteration broadcast, send/receive directions and copying arrays.",
+      "research_extension": "MPI 4.1 Sendrecv, nonblocking completion, Cartesian topology, vector types, Allreduce and Gatherv.",
+      "teaching_construction": "Configurable canonical double-precision solver in four modes; complete pointwise serial comparison; nonfinite and iteration/norm checks.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "id": "timing",
+      "section": "Time the operation the speedup is meant to describe W5L5 22:23",
+      "video_id": "FSUT2kW66cA",
+      "start": 1343,
+      "end": 1608,
+      "lecture_material": "Trace output, barrier each iteration, per-rank wall time and consistency with other programming models.",
+      "research_extension": "MPI barrier and local wall-clock timer semantics.",
+      "teaching_construction": "Necessary halo/termination dependencies versus an extra barrier; four sequential captures, paired one-rank MPI baseline, maximum rank duration and limited weak-scaling pair.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "id": "cost",
+      "section": "Surface, volume and the terms that stop scaling W5L6 4:45",
+      "video_id": "l6HVISG9f_M",
+      "start": 79,
+      "end": 557,
+      "lecture_material": "Sequential/parallel/overhead time decomposition, bag of integers and nine-contribution image-template example.",
+      "research_extension": "Earlier alpha–beta communication model; no network coefficients assumed from literature measurements.",
+      "teaching_construction": "Surface/volume derivation for strips and tiles, explicit full-duplex/serialized-face assumptions, global norm cost, hypothetical coefficient program and crossover.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "amdahl",
+      "section": "Amdahl bounds one fixed problem under a stated baseline W5L6 9:17",
+      "video_id": "l6HVISG9f_M",
+      "start": 557,
+      "end": 946,
+      "lecture_material": "Fixed problem Amdahl bound, serial fractions 0.5/0.1, eight-process example and size-dependent sigma=18000+n and phi=n²/100.",
+      "research_extension": "Gustafson 1988 first text page states fixed-size formula and cites Amdahl.",
+      "teaching_construction": "Time-based derivation, endpoint cases and checked limiting speedup 36.714286; baseline and unchanged-rate assumptions.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "gustafson",
+      "section": "Scaled work and weak scaling require the work to be specified W5L6 15:46",
+      "video_id": "l6HVISG9f_M",
+      "start": 946,
+      "end": 1182,
+      "lecture_material": "Scaled problem interpretation, scaled serial fraction, strong versus weak scaling and 64-process 5% example.",
+      "research_extension": "Gustafson original paper second text page and its Barsis attribution.",
+      "teaching_construction": "Derive scaled speedup, translate serial fraction denominators, distinguish fixed-sweep weak work from full Jacobi convergence work and mesh-scaled residual accuracy.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "karp",
+      "section": "Effective serial fractions diagnose symptoms, not unique causes W5L6 19:42",
+      "video_id": "l6HVISG9f_M",
+      "start": 1182,
+      "end": 1637,
+      "lecture_material": "Overhead-aware serial fraction, inverse-speedup derivation and two illustrative tables. Isoefficiency is announced at the opening but not developed.",
+      "research_extension": "Karp–Flatt 1990 pp.539–540; explicit algebra rather than causal identification from timing alone.",
+      "teaching_construction": "Correct missing overhead factor; recompute rounded lecture tables; indistinguishable serial/overhead countermodels; original strip/tile isoefficiency extension.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "limits",
+      "section": "Claims, evidence and limits",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Claims table follows lecture sequence.",
+      "research_extension": "Previously cited references.",
+      "teaching_construction": "Scope of pointwise checks, changed boundary conditions, local transport, solver and asymptotic limitations.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "id": "exercises",
+      "section": "Exercises",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Practice grounded in all three recordings.",
+      "research_extension": "Previously established models and MPI semantics.",
+      "teaching_construction": "Exactly six full worked solutions: d-dimensional ratio, Karp overhead arithmetic, countermodel, tolerance diagnosis, protocol design and implementation test plan with actual results.",
+      "evidence_class": "derivation"
+    },
+    {
+      "id": "primary-sources",
+      "section": "Primary sources",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "All three recordings listed first.",
+      "research_extension": "All four relied-upon external primary sources.",
+      "teaching_construction": "Claim-specific reference descriptions and bibliographic uncertainty.",
+      "evidence_class": "definition"
+    }
+  ],
+  "references": [
+    {
+      "title": "METIS 5.1.0 Manual, George Karypis (30 March 2013)",
+      "url": "https://karypis.github.io/glaros/files/sw/metis/manual.pdf",
+      "supports": "Weighted graph partitioning and workload balance, CSR offsets/adjncy representation, vertex/edge weights, distinction of edge-cut and total communication-volume objectives.",
+      "page_checked": "Opened manual; §§3, 5.5 and 5.7, especially printed pp.23–25; CSR figure on printed p.24."
+    },
+    {
+      "title": "MPI: A Message-Passing Interface Standard, Version4.1 (2 November 2023)",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report.pdf",
+      "supports": "Sendrecv and nonblocking buffer completion, null-process receives, vector stride, Cartesian dimensions/coordinates/shifts, broadcasts, maximum reductions, Gatherv counts/displacements and local timers.",
+      "page_checked": "Actual local official PDF SHA-256 f32920662645ed9e51ce7ba266f10b4832d5f612ea14be698169cd6a81f1fee5 checked with PyMuPDF text extraction: zero-based PDF pages 84, 110, 152, 172, 241, 242, 446, 447 and 511. Printed §3.2.7 p.43, §3.7 p.69, §3.10 p.111, §5.1 p.131, Chapter 6 and §6.5 pp.200–201, Chapter 8 pp.405–406, §9.6 p.470. Earlier pass used the official-PDF web extractor, not unofficial HTML."
+    },
+    {
+      "title": "John L. Gustafson, Reevaluating Amdahl’s Law, CACM31(5),532–533 (1988)",
+      "url": "https://users.cs.utah.edu/~hari/teaching/paralg/Gustafson88.pdf",
+      "supports": "Fixed-size versus scaled-size speedup, parallel-run serial fraction denominator and E.Barsis attribution.",
+      "page_checked": "All three PDF pages; scaled formula on second text page; footer-year issue recorded."
+    },
+    {
+      "title": "Alan H. Karp and Horace P. Flatt, Measuring Parallel Processor Performance, CACM33(5),539–543 (1990)",
+      "url": "https://parallelcomp.github.io/speedup-karp-flatt-cacm90.pdf",
+      "supports": "Effective serial-fraction inversion, interpretation as diagnostic of timing curves and sensitivity to imbalance, synchronization and baseline choice.",
+      "page_checked": "Opened five-page primary-paper scan; printed pp.539–540, especially New Metric."
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "N,h,i,j,k",
+      "first_section": "model",
+      "definition": "Interior grid points per side; spacing1/(N+1); row/column indices and sweep index."
+    },
+    {
+      "symbol": "u,unew,delta_k,Delta_h",
+      "first_section": "model",
+      "definition": "Old/new temperature arrays; maximum update; discrete Laplacian."
+    },
+    {
+      "symbol": "p,T1,Tp,Sp,Ep,W",
+      "first_section": "model",
+      "definition": "Number of processes; stated baseline and parallel wall times; speedup; efficiency; operation-count work."
+    },
+    {
+      "symbol": "m,alpha,beta,c",
+      "first_section": "model",
+      "definition": "Payload bytes; startup seconds; transfer seconds per byte; model seconds per cell update."
+    },
+    {
+      "symbol": "p_r,p_c,a,z",
+      "first_section": "patches",
+      "definition": "Number of process rows/columns and row/column logical coordinates."
+    },
+    {
+      "symbol": "q,r,b_a,o_a,b_r,b_c,o_r,o_c,d",
+      "first_section": "patches",
+      "definition": "One-dimensional quotient/remainder, coordinate block length/offset; row/column patch dimensions/offsets; number of parts."
+    },
+    {
+      "symbol": "G,V,mathcal E,n_v,n_e,P",
+      "first_section": "graphs",
+      "definition": "Graph, vertices, undirected edges, their counts and owner-label partition map."
+    },
+    {
+      "symbol": "a_v,A_k,w_vw",
+      "first_section": "graphs",
+      "definition": "Vertex modeled work weight, process modeled load and edge cut penalty."
+    },
+    {
+      "symbol": "sigma,phi,kappa",
+      "first_section": "cost",
+      "definition": "Reference serial time, divisible parallel time and added parallel elapsed overhead."
+    },
+    {
+      "symbol": "n,t_c,b,H_strip,H_tile,tau",
+      "first_section": "cost",
+      "definition": "Lecture illustrative size/contribution time; bytes per double8; halo time models and per-reduction-level model seconds."
+    },
+    {
+      "symbol": "f",
+      "first_section": "amdahl",
+      "definition": "True serial fraction relative to fixed one-process execution."
+    },
+    {
+      "symbol": "t_s,t_q,f_s,S_scaled,rho",
+      "first_section": "gustafson",
+      "definition": "Parallel-run serial/parallel durations; scaled serial fraction; scaled speedup; Jacobi spectral radius cos(pi/(N+1))."
+    },
+    {
+      "symbol": "e_p,E_star,Omega",
+      "first_section": "karp",
+      "definition": "Karp–Flatt effective serial fraction; desired fixed efficiency; asymptotic lower-bound notation."
+    },
+    {
+      "symbol": "d,epsilon_r",
+      "first_section": "exercises",
+      "definition": "General spatial dimension in Exercise1; target discrete-Laplacian residual norm in Exercise4."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B tools/check_chapter_code.py --file ../work/ch16-sol/chapter-16-domain-decomposition-mpi-solver-and-performance-analysis.html --report ../work/ch16-sol/code-validation.json",
+    "listings": 4,
+    "all_passed": true,
+    "checks": {
+      "exact": 3,
+      "returncode": 1
+    },
+    "checked_at_utc": "2026-10-28T06:00:57.231429+00:00",
+    "notes": "The single self-checking MPI listing executes 17 independent invocations; every run validates all owned unknowns, finite values, iteration count and update norm against serial. Timing output varies."
+  },
+  "measurement_provenance": {
+    "capture_date_utc": "2026-10-28",
+    "capture_utc_start": "2026-10-28T05:50:40.419030+00:00",
+    "capture_utc_end": "2026-10-28T05:50:58.510966+00:00",
+    "builds": 1,
+    "python_program_runs": 3,
+    "dedicated_correctness_invocations": 9,
+    "timing_invocations": 32,
+    "timing_captures": 4,
+    "configurations_per_capture": 8,
+    "displayed_capture": 4,
+    "transport": "Open MPI ob1; tcp,self; btl_tcp_if_include=lo; bind-to none; oversubscribe enabled",
+    "exclusive_agent_slot": true,
+    "claim_scope": "One hybrid laptop, TCP loopback, fixed-sweep kernels with Allreduce every sweep. No inter-node or shared-memory-transport claim.",
+    "evidence": "Private capture-index.json records command arrays,source SHA-256,return codes,UTC and monotonic endpoints,environment; raw stdout/stderr retained separately. benchmark-summary.json retains derived paired-capture data."
+  },
+  "author_validation": {
+    "prose_words": 7131,
+    "content_sections": 9,
+    "total_h2": 12,
+    "static_issues": [],
+    "dedicated_pointwise_cases": 9,
+    "all_captured_pointwise_errors_printed_zero": true
+  },
+  "citation_audit": {
+    "source_format": "Official MPI 4.1 PDF, not unofficial HTML",
+    "sha256": "f32920662645ed9e51ce7ba266f10b4832d5f612ea14be698169cd6a81f1fee5",
+    "method": "Local PyMuPDF text extraction and direct reading of selected page headers/passages",
+    "utc": "2026-10-28T06:12:59.723Z",
+    "correction": "Null processes §3.11 → §3.10; all executable contracts preserved."
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch16-r1.md",
+      "changes": "Full independent source, mathematical, code, worked-solution and raw-capture review; no findings."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch16-r2.md",
+      "changes": "A fresh independent whole-chapter review checked source fidelity, domain/solver reasoning, scaling arithmetic, all four listing contracts, raw captures and six solutions; no findings."
+    }
+  ]
+}
