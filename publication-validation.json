@@ -1,11 +1,11 @@
 {
-  "checked_at_utc": "2026-10-28T08:09:31.730203+00:00",
+  "checked_at_utc": "2026-10-28T12:37:58.686966+00:00",
   "status": "passed",
-  "tested_commit": "68e939f2d83180837929b87bbd60fe8aab4e8db4",
+  "tested_commit": "2a50fdadbb9658ce9017de691e435e30f2aa5dc5",
   "live_url": "https://az9713.github.io/nptel-high-performance-scientific-computing-notes/",
   "scope": "Actual served-file byte agreement and focused live reader controls; not a scientific review",
   "byte_reference": "Canonical blobs from the pinned commit via git cat-file --batch; no archive line-ending conversion",
-  "public_files_checked": 72,
+  "public_files_checked": 82,
   "all_served_bytes_match_git": true,
   "mismatched_files": [],
   "browser": [
@@ -224,6 +224,96 @@
       "file": "chapter-20-cuda-programming-tools-kernels-and-launch-configuration.html",
       "viewport": 390,
       "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 10,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-21-gpu-memory-types-and-memory-management.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 10,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-21-gpu-memory-types-and-memory-management.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 158,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-22-thread-divergence-and-memory-layouts.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 158,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-22-thread-divergence-and-memory-layouts.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 73,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-23-cuda-compilation-and-execution.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 73,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-23-cuda-compilation-and-execution.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 122,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-24-openacc-directives-loops-data-management.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 122,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-24-openacc-directives-loops-data-management.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 75,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-25-openacc-loop-optimization-asynchrony-multiple-devices.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 75,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-25-openacc-loop-optimization-asynchrony-multiple-devices.html",
+      "viewport": 390,
+      "status": "passed"
     }
   ],
   "served_files": [
@@ -245,12 +335,12 @@
     {
       "file": "README.md",
       "bytes_match_git": true,
-      "sha256": "e46c847d4de13eeba4313281ee7fc44217fa88d273ced59a6ba24dc0fad9d21a"
+      "sha256": "e75c52db66ddff696f4d9b12379ebe3335fb519e58a1b086f01b07ad85f5169b"
     },
     {
       "file": "WORKFLOW.md",
       "bytes_match_git": true,
-      "sha256": "4a0ce5a1cd48d0e830c2c5d442f7e470664e88c20df8b0cb07287893d90aee19"
+      "sha256": "0842b2bd9cbc4663ba2f45d6fe70055a6eef27d728f82d05af2e15012f2e2786"
     },
     {
       "file": "assets/book.css",
@@ -275,12 +365,12 @@
     {
       "file": "assets/preview-mobile.png",
       "bytes_match_git": true,
-      "sha256": "212cc62deb5fd50694009e7b041aafa557443abe47b2e9e334cc5bf972ac6a36"
+      "sha256": "e77375e2ea01514f3539b02f38b3d7b9d0918740674fa411006e327d6f8cd7af"
     },
     {
       "file": "assets/preview.png",
       "bytes_match_git": true,
-      "sha256": "d44cc182ef69dae0f7bc439ea1d6dd18cb27d8736b89cf7a0bae25e42c4f13d0"
+      "sha256": "7b19e1495aca1140ccbd3a1b199c57f218a08397aaf1627bd317c3caf54140e1"
     },
     {
       "file": "assets/site-preview.png",
@@ -485,7 +575,7 @@
     {
       "file": "chapter-20-cuda-programming-tools-kernels-and-launch-configuration.html",
       "bytes_match_git": true,
-      "sha256": "033b7d08702c08cc9155e504b0fdfcbcb1fd4b095f8eed5c3a69c33bdca6c8ae"
+      "sha256": "240ca7759813f484763b240bd9296ca0ed7d52389883a49a8bcde7a23b4e1382"
     },
     {
       "file": "chapter-20-cuda-programming-tools-kernels-and-launch-configuration.meta.json",
@@ -493,14 +583,64 @@
       "sha256": "f75abea443e9bc1ad7f3bb3a86ec2116b7cc8b3780c0f4bee069364fe5e22359"
     },
     {
+      "file": "chapter-21-gpu-memory-types-and-memory-management.html",
+      "bytes_match_git": true,
+      "sha256": "b97d560e59290701924342e52a7f4dd352305b08d538ffa822f73b4404ba4ce0"
+    },
+    {
+      "file": "chapter-21-gpu-memory-types-and-memory-management.meta.json",
+      "bytes_match_git": true,
+      "sha256": "b4fdc47fa692beef937106cb173340dedf1e1e9ea8ce6ae96ee0eb4c22f17aa8"
+    },
+    {
+      "file": "chapter-22-thread-divergence-and-memory-layouts.html",
+      "bytes_match_git": true,
+      "sha256": "882091bbc36cf2157b28b5afbf5ab1658105b120e6baef78836f99a8035e4d56"
+    },
+    {
+      "file": "chapter-22-thread-divergence-and-memory-layouts.meta.json",
+      "bytes_match_git": true,
+      "sha256": "dd14666c2c4fbb812a35e5c03442240c204d151e20adcdab64bbc48e734e50e0"
+    },
+    {
+      "file": "chapter-23-cuda-compilation-and-execution.html",
+      "bytes_match_git": true,
+      "sha256": "d2c1427935093c3a4cc9e7e1d21a7446f005847e225e6fdd79e37cb11951e66a"
+    },
+    {
+      "file": "chapter-23-cuda-compilation-and-execution.meta.json",
+      "bytes_match_git": true,
+      "sha256": "d9c5d1f3593c5be9a6ead68a9487d29be227ac1d011595e0a2167cfcda4cb7dd"
+    },
+    {
+      "file": "chapter-24-openacc-directives-loops-data-management.html",
+      "bytes_match_git": true,
+      "sha256": "7fa91ff06d999bbc9c62c16ce78fd3a80ba9aaa81a344d2afb3bd8134fba8f2d"
+    },
+    {
+      "file": "chapter-24-openacc-directives-loops-data-management.meta.json",
+      "bytes_match_git": true,
+      "sha256": "2613d14ac2d9cda1811f5b52e0522d3ab35dbf27de9b0b4a3ca148fdad8b4f74"
+    },
+    {
+      "file": "chapter-25-openacc-loop-optimization-asynchrony-multiple-devices.html",
+      "bytes_match_git": true,
+      "sha256": "609971ebe4a81af06506985ce9e84fb12eb783289174a59d1e728400bbcf5aef"
+    },
+    {
+      "file": "chapter-25-openacc-loop-optimization-asynchrony-multiple-devices.meta.json",
+      "bytes_match_git": true,
+      "sha256": "55e2b27fea79623f570601f059d16ca3fb1b65ddcd77433c6258382f4944b200"
+    },
+    {
       "file": "chapter-code-validation.json",
       "bytes_match_git": true,
-      "sha256": "5f87f1a6746aa273166669746594f5872cf0d47f09e19b32c86ca4b35b63a5fb"
+      "sha256": "7ba729ce7cb376211487504b06e8972b01f793d7d5788308eeab88e851dd6560"
     },
     {
       "file": "code-lab.html",
       "bytes_match_git": true,
-      "sha256": "a49f554fc87452ec353d2855ebd6442ab89937ae9b71f0905f3a783d633fbb99"
+      "sha256": "a0251a1d65855356246e5105b841b6551770e36c5baab7f4603e851ba16ee141"
     },
     {
       "file": "code_lab.py",
@@ -510,62 +650,62 @@
     {
       "file": "completion.json",
       "bytes_match_git": true,
-      "sha256": "5f3312182c6be655ccfc7e3f44e601af034fd282b0e831eac06cde99f1c17a1e"
+      "sha256": "659fd6fce3cade89b291a13bfcab5a3c2fff5c0f8c5d857b0e92327f03d775b9"
     },
     {
       "file": "editorial-review-summary.json",
       "bytes_match_git": true,
-      "sha256": "2d6901b285505c3f386245218f35c3f6b72c96e94727eb7ed182b14163b6902e"
+      "sha256": "5df3efbf0febe7642fcf93250e55ccea7e06e8bbf1ac7c4a2fad1063b0c29fa4"
     },
     {
       "file": "index.html",
       "bytes_match_git": true,
-      "sha256": "58535bf598e8bb839c26a8176aead1d8907bf59560bf8d31c8722bd20ae6384b"
+      "sha256": "ba79bb216f17816232e9ebb4457bf6d1ba69e45dd8b879dc01fdd484700a7fdc"
     },
     {
       "file": "package-validation.json",
       "bytes_match_git": true,
-      "sha256": "b24238187f2a03a0639771b9abcf8a6c3cf22d09d51580922b68547b6f0363f2"
+      "sha256": "7f4951355b81a56f154fd905ad64cd868b0cdda92e69a1c0ed9667018d97102c"
     },
     {
       "file": "publication-validation.json",
       "bytes_match_git": true,
-      "sha256": "42337db5392827ff02edfeead402901f36c5501879a0f9c753979981c7f4c7ce"
+      "sha256": "03b3a748b9bd4ebd56d6cf383d01dab6cf31c7602585f16b3238879eb1f5d126"
     },
     {
       "file": "reader-validation.json",
       "bytes_match_git": true,
-      "sha256": "f6b2a1ebc45f348e0778aa8d5fededafb7a819a979a8600c8d2104bd16f74f9f"
+      "sha256": "ba7629be842cc518038ce966db2c652cf3848bc89ea47211cc8b741ae2806e22"
     },
     {
       "file": "references.html",
       "bytes_match_git": true,
-      "sha256": "3af042ed5acdaac8064bd828d63106da2561a56244fbbf44b1b51408891d5f67"
+      "sha256": "b1bd079f9bb1c78391be3474e4cd7ae3436f427364017f0c59f9d056200a485b"
     },
     {
       "file": "source-free-validation.json",
       "bytes_match_git": true,
-      "sha256": "3fdf071ee837b86f4ce97f046f876c9aca8aa4d09db5349a813686cffbc1cd4d"
+      "sha256": "d87a9d269a0beca70e88b04ec5ba16822970f91a14b85e5ff43c9cac9f41aae5"
     },
     {
       "file": "source-manifest.json",
       "bytes_match_git": true,
-      "sha256": "88fd0e82e27401b97cada4aa79b52a1fe170d816ca5db5186245af22893e6d6a"
+      "sha256": "5aad3deca8fa6ddff84c01e233d8e1432f9d692dca95a08cdedc48393039060f"
     },
     {
       "file": "source-map.html",
       "bytes_match_git": true,
-      "sha256": "980e386317ae4423920b7f040948afa1619897ccceefc6a80798f18c34ff55c3"
+      "sha256": "a046b0277336ce83a72eefe28dc1525f576c479c7ec78292932e19ac998af281"
     },
     {
       "file": "source-map.json",
       "bytes_match_git": true,
-      "sha256": "627f70c5e4fa9312c400d1900c8e5a139e471daafc2661452a0895384cdceb4b"
+      "sha256": "d89e35e838886dff3dc522c4687aeaca01157cd01dfffc8c59258d90b7a20a96"
     },
     {
       "file": "source-validation-summary.json",
       "bytes_match_git": true,
-      "sha256": "36c33d3355e90aa8f94ffa10020f7ab656f62577165362135d96ee0179a6f49a"
+      "sha256": "512fc64194389a573f5a733d80336cf15cee46ee0dc4fb97079cac7100628b29"
     },
     {
       "file": "tools/build_book.py",
