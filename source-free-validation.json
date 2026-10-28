@@ -1,24 +1,24 @@
 {
-  "checked_at_utc": "2026-10-28T07:56:41.570262+00:00",
+  "checked_at_utc": "2026-10-28T12:33:50.160610+00:00",
   "status": "passed",
-  "base_commit": "e57d18a4b59a669f1a1b7a351b7cf899446b01bf",
+  "base_commit": "64d37c16adfbc8ee496de4cf09c9e5590d9fa6ef",
   "scope": "Actual Git archive rebuilt without private sources; all HTML hashes preserved; fresh static validation and workspace-contained chapter-13 launcher smoke.",
-  "html_files_rebuilt_byte_for_byte": 25,
+  "html_files_rebuilt_byte_for_byte": 30,
   "html_files_changed": [],
   "static": {
     "status": "passed",
-    "html_files": 25,
-    "local_links_checked": 320,
-    "timestamps_checked": 205,
+    "html_files": 30,
+    "local_links_checked": 390,
+    "timestamps_checked": 245,
     "chapter_pages_with_dollar_math": 0,
     "failures": [],
     "warnings": []
   },
-  "launcher_listed_chapters": 20,
+  "launcher_listed_chapters": 25,
   "launcher_smoke_test": "chapter 13; exit 0; 9 programs passed",
   "limitations": [
     "Browser checks were performed on byte-identical local reader files, not repeated in this export.",
-    "Execution evidence is cumulative: 144 historical listings retain original runs; 52 later listings have workspace-contained execution records. Only chapter 13 was executed again in this export.",
+    "Execution evidence is cumulative: 144 historical listings retain original runs; 77 later listings have workspace-contained execution records. Only chapter 13 was executed again in this export.",
     "Scientific review status is recorded in editorial-review-summary.json; no accepted chapter has pending independent sign-off."
   ]
 }
