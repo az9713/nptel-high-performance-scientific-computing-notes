@@ -1,12 +1,12 @@
 {
   "course": "High Performance Scientific Computing",
-  "checked_at_utc": "2026-10-27T19:05:43.564306+00:00",
+  "checked_at_utc": "2026-10-28T05:05:54.922946+00:00",
   "scope": "Reader mechanics only; does not certify chapter or course completion",
   "static": {
     "status": "passed",
-    "html_files": 16,
-    "local_links_checked": 194,
-    "timestamps_checked": 137,
+    "html_files": 17,
+    "local_links_checked": 208,
+    "timestamps_checked": 145,
     "chapter_pages_with_dollar_math": 0,
     "failures": [],
     "warnings": []
@@ -210,6 +210,24 @@
         "controls": true,
         "emptyToc": false,
         "file": "chapter-11-openmp-threads-and-work-distribution.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 385,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-12-openmp-synchronization-loops-data-sharing.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 385,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-12-openmp-synchronization-loops-data-sharing.html",
         "viewport": 390
       },
       {

@@ -1,12 +1,11 @@
 {
-  "checked_at_utc": "2026-10-27T19:05:42.990598+00:00",
+  "checked_at_utc": "2026-10-28T05:05:53.320896+00:00",
   "scope": "Curated review records, not a new scientific review or retrospective acceptance",
   "review_process": "Each written chapter: author draft; independent review round 1 against the authoring contract (correctness, lecture fidelity, rigor, sources, code, contract, prose); author repairs; independent review round 2; author repairs; lead spot-check. Chapters whose latest round still recorded a blocking finding received further independent rounds until one recorded zero blocking findings; the author repaired the remaining findings of that round. Review reports are private editorial records.",
   "all_chapters_written": false,
   "chapter_count": 31,
-  "written_chapters": 11,
+  "written_chapters": 12,
   "unwritten_chapters": [
-    12,
     13,
     14,
     15,
@@ -193,6 +192,21 @@
       "findings_repaired_by_author_and_checked_by_lead": true,
       "final_independent_signoff_pending": false,
       "runnable_listings": 11,
+      "worked_solution_disclosures": 6
+    },
+    {
+      "chapter": 12,
+      "file": "chapter-12-openmp-synchronization-loops-data-sharing.html",
+      "current_body_sha256": "b6bc5bcb598b97faf477cbe98f1533ff8104e1f3dde48e13c14c390d6ea57d69",
+      "review_rounds": 3,
+      "latest_recorded_review": "ch12-r3.md",
+      "latest_recorded_verdict": "ACCEPT",
+      "latest_recorded_blocking_findings": 0,
+      "latest_recorded_major_findings": 0,
+      "latest_recorded_minor_findings": 0,
+      "findings_repaired_by_author_and_checked_by_lead": true,
+      "final_independent_signoff_pending": false,
+      "runnable_listings": 19,
       "worked_solution_disclosures": 6
     }
   ]

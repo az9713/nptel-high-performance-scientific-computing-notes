@@ -1,0 +1,1505 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="b6bc5bcb598b97faf477cbe98f1533ff8104e1f3dde48e13c14c390d6ea57d69"><title>OpenMP II: synchronization, parallel loops, reductions and data-sharing attributes · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>OpenMP II: synchronization, parallel loops, reductions and data-sharing attributes</h1>
+<p class="lead">One Jacobi sweep on a 2000 × 2000 grid performs \(4\times10^6\) updates and takes 6.2–8.4 ms with the serial kernel in four captures. It must also return the update norm \(\max|u^{\text{new}}-u|\) for the convergence test. A critical region around every comparison makes the twelve-thread sweep 56–86 times slower than serial. Removing protection corrupts the norm in all 40 runs of a smaller test; one capture falls below \(10^{-21}\) instead of the correct \(2.42\times10^{-3}\). A private maximum merged once per thread, and <code>reduction(max:diff)</code>, reproduce the serial norm. At four threads they gain about 1.2–1.7 over serial. The sections below derive the ordering guarantees and costs behind these differences.</p>
+<p class="source-note">Grounded in two recordings of the NPTEL course <em>High Performance Scientific Computing</em> (Prof. Shivasubramanian Gopalakrishnan, IIT Bombay): <a href="https://www.youtube.com/watch?v=794Q2Vg6i_k">W4L2, Synchronization and Parallel Loops in OpenMP</a>, and <a href="https://www.youtube.com/watch?v=jLHvSnw68Pw">W4L3, Storage attributes of different variables in OpenMP</a>. <strong>Lecture material:</strong> the padded partial-sum array; <code>critical</code> and <code>barrier</code>; the \(\pi\) program with one critical update; the worksharing loop and <code>schedule</code>; loop-carried dependences; <code>reduction</code>; the cost of synchronization; <code>nowait</code>; default storage attributes and the clauses <code>shared</code>, <code>private</code>, <code>firstprivate</code>, <code>default(none)</code>. The lectures credit their slides to the Argonne Training Program on Exascale Computing, 2024. <strong>Research extensions:</strong> OpenMP 5.2 (the sections listed under primary sources); the libgomp manual of GCC; GCC’s floating-type documentation for the reference accumulator; Graham (1966) for the list-scheduling rule of dynamic scheduling. <strong>Original teaching constructions:</strong> the model of ordering edges, loop schedules and data environments; the cost model of a saturated critical region; the count of iterations that a split on a slide skips; the load-balance bound and chunk size; the hazard test for <code>nowait</code>; the Jacobi solver; all programs and measurements; the six exercises.</p>
+
+<h2 id="model">The objects of the chapter and the running case</h2>
+<p>Chapter 11 defined the team of \(p\) threads, the parallel region, program order, the fork and the join, and the data race: two operations on one memory unit by different threads, at least one a write, with no order between them. This chapter adds ways to create order, to divide the iterations of a loop, and to say which variables the threads share.</p>
+<p><strong>Ordering edges.</strong> For events \(a\) and \(b\) of different threads, \(a\prec b\) means that a construct forces \(a\) to complete before \(b\) begins. The fork and the join create such edges, and so do two more constructs. The executions of all <code>critical</code> constructs of one name, by all threads, form a sequence \(R_1,R_2,\dots\) in an order that the run chooses; every event of \(R_j\) precedes every event of \(R_{j+1}\). The specification words this as "as if only a single thread at a time … executes the region" and gives all constructs without a name one shared name (<a href="https://www.openmp.org/wp-content/uploads/OpenMP-API-Specification-5-2.pdf">OpenMP 5.2</a> §15.2, p. 300). A <code>barrier</code> orders every event that any thread executes before it ahead of every event that any thread executes after it (§15.3.1, p. 301). A pair of conflicting accesses ordered by such an edge is not a data race, and the edge makes the earlier writes visible to the later reads; Chapter 13 derives this from the flush operation.</p>
+<p><strong>Loop schedules.</strong> A worksharing loop has an iteration set \(\mathcal{J}=\{0,\dots,n-1\}\); the canonical form of the loop lets the runtime compute \(n\) before the first iteration (§4.4.2, p. 91). A <em>loop schedule</em> divides \(\mathcal{J}\) into <em>chunks</em>, contiguous non-empty sets, and assigns each chunk to a thread. The assignment is <em>static</em> if it is a function of \(n\), \(p\) and the chunk size alone, and <em>dynamic</em> if a thread that becomes idle takes the next unassigned chunk. Iteration \(i\) costs \(c(i)\) seconds, \(T_{\mathrm{work}}=\sum_ic(i)\), the total service time is measured on an identical reference processor; the load of thread \(t\) is \(w_t=\sum_{i\in\mathcal{J}_t}c(i)\), and \(E_{\text{dist}}=T_{\mathrm{work}}/(p\max_tw_t)\) is the efficiency of the assignment. Here \(T_{\mathrm{work}}\) is measured in seconds; the book-wide \(W\) remains an operation count.</p>
+<p><strong>Data environments.</strong> Inside a construct, a variable name \(x\) denotes a storage object \(\mathrm{obj}_t(x)\) for each thread \(t\). The variable is <em>shared</em> if the object is the same for every thread, <em>private</em> if the objects are pairwise different, and a <em>reduction variable</em> if they are pairwise different, start at the identity of an operator, and are combined into the original after the construct.</p>
+<p><strong>Cost symbols.</strong> Here \(p\) is the number of threads; \(T_1\) and \(T_p\) are wall-clock times on one and \(p\) threads; \(S_p=T_1/T_p\) is speedup; \(E_p=S_p/p\) is parallel efficiency; and \(f\) is the serial fraction of \(T_1\) in Amdahl’s model. Each experiment states which one-thread implementation supplies its baseline. New: \(k\) is the chunk size; \(\delta\) is the time that a thread spends taking one chunk from a shared queue; \(s\) is the time inside one execution of a critical region; \(t_{\text{crit}}(p)\) is the time between consecutive entries into a region that \(p\) threads keep busy; \(t_{\text{bar}}\) is the time of one barrier.</p>
+<p>The running cases are the midpoint-rule computation of \(\pi\) of Chapter 11 and the book's Jacobi iteration for the Laplace equation on an \(N\times N\) grid. One sweep computes</p>
+\[
+u^{\text{new}}_{i,j}=\tfrac14\bigl(u_{i-1,j}+u_{i+1,j}+u_{i,j-1}+u_{i,j+1}\bigr),\qquad r=\max_{1\le i,j\le N}\bigl|u^{\text{new}}_{i,j}-u_{i,j}\bigr|, \tag{12.1}
+\]
+<p>where \(r\) is the update norm, or fixed-point residual, that the driver compares with <code>tol</code>. It is not the differential-equation residual: for this Laplace stencil, the old grid’s discrete Laplacian has maximum norm \(4r/h_g^2\), with grid spacing \(h_g=1/(N+1)\). The update of cell \((i,j)\) writes one entry of <code>unew</code> and reads four entries of <code>u</code>, a different array, so the \(N^2\) updates are independent in the sense of Chapter 11. The residual is one value combined from all updates by the operator max: a reduction.</p>
+<p>All measurements use the machine of Chapter 11: an Intel Core i5-12450H with 4 performance cores of 2 hardware threads and 4 efficient cores, \(m=12\) unequal logical processors; gcc 13.3 in WSL 2 Ubuntu 24.04; times from <code>omp_get_wtime</code>. Nine timing or nondeterministic programs were captured four times in an exclusive benchmark session on 2026-10-28 UTC, with no other agent workloads running. Each output shown is capture 4; the prose gives ranges over captures 1–4. This controls competing experiments, not operating-system scheduling, processor frequency or background services. Timing and deliberately racy listings are checked by return code.</p>
+
+<h2 id="sync">Mutual exclusion and ordering: critical, atomic and barrier <a class="timestamp" href="https://www.youtube.com/watch?v=794Q2Vg6i_k&amp;t=278s">W4L2 4:38</a></h2>
+<p><strong>critical.</strong> The lecture defines a critical region as mutual exclusion: only one thread at a time can enter it. Its slide has each thread compute a private value <code>B</code> and then execute <code>res += consume(B);</code> on a variable <code>res</code> declared before the region, which is shared. The whole statement, including the call of <code>consume</code>, lies inside the region, so the time \(s\) during which no other thread can enter includes the time of <code>consume</code>. All unnamed <code>critical</code> constructs of a program have one name (§15.2, p. 300), so two unrelated unnamed regions exclude each other; <code>critical(name)</code> limits the exclusion to regions of that name.</p>
+<p><strong>atomic.</strong> The lecture lists <code>atomic</code> as a later topic; it protects a supported individual memory operation and may cost less than a critical region, depending on the operation, implementation and contention. Only the read and the write of the location are atomic, not the evaluation of the right-hand side (§15.8.4, p. 311). Exclusion holds only among <code>atomic</code> constructs on the same location, and there is none against accesses outside them, "even if those accesses occur during a critical or ordered region" (p. 313): an update of <code>x</code> under <code>atomic</code> in one place and under <code>critical</code> in another is a data race. The listing compiles three constructs and prints the assembly lines that carry a <code>lock</code> prefix or a call of <code>omp_get_…</code>, with the function that holds them.</p>
+<pre><code class="language-c" data-file="asm.c" data-build="gcc -O2 -fopenmp -S asm.c -o asm.s" data-run="awk &#x27;/^[a-z_][a-z_0-9.]*:/ {fn=$1} /lock|omp_get_/ {gsub(/[[:space:]]+/,&quot; &quot;); print fn $0}&#x27; asm.s">long cnt;
+double tot;
+
+void add_long(void)
+{
+    #pragma omp atomic
+    cnt += 1;
+}
+
+void add_double(double v)
+{
+    #pragma omp atomic
+    tot += v;
+}
+
+double sum(const double *a, int n)
+{
+    double s = 0.0;
+    #pragma omp parallel for reduction(+:s)
+    for (int i = 0; i &lt; n; i++) s += a[i];
+    return s;
+}
+
+void fill(double *a, long n)
+{
+    #pragma omp parallel for schedule(static)
+    for (long i = 0; i &lt; n; i++) a[i] = 2.0 * i;
+}
+</code></pre>
+<pre><code class="output">sum._omp_fn.0: call omp_get_num_threads@PLT
+sum._omp_fn.0: call omp_get_thread_num@PLT
+sum._omp_fn.0: lock cmpxchgq %rsi, (%rcx)
+fill._omp_fn.0: call omp_get_num_threads@PLT
+fill._omp_fn.0: call omp_get_thread_num@PLT
+add_long: lock addq $1, cnt(%rip)
+add_double: lock cmpxchgq %rcx, tot(%rip)</code></pre>
+<p>The <code>add_long</code> line is an integer increment, one locked instruction. The <code>add_double</code> line is a <code>double</code> addition, implemented here with compare-and-swap (<code>lock cmpxchg</code>), because x86-64 has no atomic floating-point add instruction: the thread reads the value, adds in a register, stores only if no other thread changed the location, and otherwise repeats. The <code>lock cmpxchgq</code> line in <code>sum._omp_fn.0</code>, the function that the compiler made from the parallel loop, shows that gcc 13.3 merges the partial result of a <code>reduction(+:s)</code> over a <code>double</code> in the same way, once per thread at the end of the loop. The two <code>fill._omp_fn.0</code> lines show that the code of a <code>schedule(static)</code> loop calls <code>omp_get_num_threads</code> and <code>omp_get_thread_num</code> to compute its range. OpenMP requires none of this (§5.5.6, p. 134).</p>
+<p><strong>barrier.</strong> The lecture describes a barrier as a point that all threads must reach before any proceeds, and as a standalone statement. Its slide computes <code>Arr[id] = big_ugly_calc(id, nthrds);</code> on 8 threads, then a barrier, then <code>Brr[id] = really_big_and_ugly(id, nthrds, Arr);</code>. The barrier is needed because the second call reads all of <code>Arr</code>: thread \(t\) writes <code>Arr[t]</code>, another thread reads it, and nothing else orders the two events. In general a barrier is needed between events of different threads that touch one memory unit, at least one writing it, when no other construct orders them. Every thread of the team must encounter each barrier, in the same sequence as the worksharing regions (§15.3.1, p. 302), so a barrier inside <code>if (id == 0)</code> is not conforming. The listing delays thread \(t\) by \(100\,\mathrm{ms}\times t\) and sums all of <code>arr</code> in the second step. The correct value is 36. Without the barrier the delays encourage thread \(t\) to observe only elements from threads \(0,\dots,t\), giving \((t+1)(t+2)/2\); that is a predicted sample pattern, not a guarantee for the racy program.</p>
+<pre><code class="language-c" data-file="barrier_demo.c" data-build="gcc -O2 -fopenmp barrier_demo.c -o barrier_demo" data-run="./barrier_demo" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;omp.h&gt;
+
+#define P 8
+
+static double arr[P], brr[P];
+
+static double slow_calc(int id)              /* thread id needs 100 ms times id: thread 7 is the slowest */
+{
+    usleep(100000 * id);
+    return id + 1.0;
+}
+
+static double sum_all(void)                  /* reads every element of arr */
+{
+    double s = 0.0;
+    for (int k = 0; k &lt; P; k++) s += arr[k];
+    return s;
+}
+
+static void run(int with_barrier)
+{
+    for (int k = 0; k &lt; P; k++) arr[k] = brr[k] = 0.0;
+    #pragma omp parallel num_threads(P)
+    {
+        int id = omp_get_thread_num();
+        arr[id] = slow_calc(id);
+        if (with_barrier) {
+            #pragma omp barrier
+        }
+        brr[id] = sum_all();
+    }
+    printf("%-16s", with_barrier ? "with barrier:" : "without barrier:");
+    for (int k = 0; k &lt; P; k++) printf(" %3.0f", brr[k]);
+    printf("\n");
+}
+
+int main(void)
+{
+    printf("every thread should read the sum 1 + 2 + ... + 8 = 36\n");
+    run(0);
+    run(1);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">every thread should read the sum 1 + 2 + ... + 8 = 36
+without barrier:   1   3   6  10  15  21  28  36
+with barrier:     36  36  36  36  36  36  36  36</code></pre>
+<p>This is a sample output. The sleep delays make the missing ordering visible in this run; the version without a barrier has a data race, so neither these values nor the order of its reads is guaranteed. The version with the barrier must return 36 in every slot.</p>
+<p>Two barriers are implicit: the end of a parallel region (§1.3, p. 24) and the end of a worksharing construct unless it carries <code>nowait</code>; a worksharing region has none on entry (§11, p. 240).</p>
+
+<h2 id="pi-critical">The \(\pi\) program with a private scalar and one critical update <a class="timestamp" href="https://www.youtube.com/watch?v=794Q2Vg6i_k&amp;t=487s">W4L2 8:07</a></h2>
+<p>Each thread declares a scalar <code>sum</code> inside the region, accumulates its cyclic share of the terms, and then executes <code>pi += sum * step;</code> inside a critical region, where <code>pi</code> is shared. The slide's reasons: no array, so no false sharing; the protected update cannot conflict.</p>
+<p><strong>The serial part.</strong> The region is entered \(p\) times. The synchronization experiment gives 14–15 ns per entry at \(p=1\) and 0.115–0.147 µs at \(p=12\): roughly 1.8 µs for twelve entries. Against even a 0.05 s integration, this is only \(3.6\times10^{-5}\) of the time. This is a scale estimate from another kernel, not a bound on each individual acquisition.</p>
+<p><strong>The lecture's tables.</strong> The slides give the time in seconds of the first SPMD program (an unpadded array), the padded program, the critical program and, in W4L3, the loop with a reduction, for 1 to 4 threads, measured with the Intel compiler <code>icpc</code> on Mac OS X 10.7.3 on a dual-core Intel Core i5 at 1.7 GHz with four hardware threads <a class="timestamp" href="https://www.youtube.com/watch?v=794Q2Vg6i_k&amp;t=6s">W4L2 0:06</a>. The padded program and the false sharing that it removes are treated in Chapter 11.</p>
+<div class="table-wrap"><table>
+<caption>Table 12.1. Times in seconds from the slides of W4L2 and W4L3, and the speedup \(S_p=T_1/T_p\) computed here.</caption>
+<thead><tr><th scope="col">threads</th><th scope="col">array</th><th scope="col">padded array</th><th scope="col">\(S_p\), padded</th><th scope="col">critical</th><th scope="col">\(S_p\), critical</th><th scope="col">loop with reduction</th><th scope="col">\(S_p\), reduction</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>1.86</td><td>1.86</td><td>1.00</td><td>1.87</td><td>1.00</td><td>1.91</td><td>1.00</td></tr>
+<tr><td>2</td><td>1.03</td><td>1.01</td><td>1.84</td><td>1.00</td><td>1.87</td><td>1.02</td><td>1.87</td></tr>
+<tr><td>3</td><td>1.08</td><td>0.69</td><td>2.70</td><td>0.68</td><td>2.75</td><td>0.80</td><td>2.39</td></tr>
+<tr><td>4</td><td>0.97</td><td>0.53</td><td>3.51</td><td>0.53</td><td>3.53</td><td>0.68</td><td>2.81</td></tr>
+</tbody></table></div>
+<p>The padded and the critical columns agree within 0.01 s at every team size, as the lecture says. The two-core model of Chapter 11 predicts \(S_4\le2\) and does not fit them. Two points need care. The slides disagree about the compiler setting: the padded-accumulator slide names <code>-O2</code>, and the false-sharing, critical and reduction slides name no optimization; Chapter 11 showed that gcc at <code>-O2</code> removes the false sharing of the unpadded program (the slides used <code>icpc</code>). And the lecture prefers the critical program because it uses less memory, which it says matters for large programs. The padded array holds \(64p\) bytes, 768 at \(p=12\), whatever \(N\) is.</p>
+<p>The listing runs the three programs at <code>-O0</code>, the setting named on the critical and reduction slides, and at <code>-O2</code>, the setting named on the padded slide.</p>
+<pre><code class="language-c" data-file="pi_variants.c" data-build="gcc -O0 -fopenmp pi_variants.c -o pi_O0 &amp;&amp; gcc -O2 -fopenmp pi_variants.c -o pi_O2" data-run="for b in ./pi_O0 ./pi_O2; do echo &quot;== $b&quot;; $b; done" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+#define MAXT 16
+#define PAD 8
+#define REPS 3
+
+static long num_steps = 200000000L;
+static double sum_arr[MAXT * PAD] __attribute__((aligned(64)));
+
+/* A: SPMD, cyclic distribution, partial sums in a padded array (the lecture's padded program). */
+static double pi_array(int p)
+{
+    double step = 1.0 / (double)num_steps, pi = 0.0;
+    int nthreads = 1;
+    omp_set_num_threads(p);
+    #pragma omp parallel
+    {
+        int id = omp_get_thread_num(), nt = omp_get_num_threads();
+        double x;
+        if (id == 0) nthreads = nt;
+        sum_arr[id * PAD] = 0.0;
+        for (long i = id; i &lt; num_steps; i += nt) {
+            x = (i + 0.5) * step;
+            sum_arr[id * PAD] += 4.0 / (1.0 + x * x);
+        }
+    }
+    for (int t = 0; t &lt; nthreads; t++) pi += sum_arr[t * PAD] * step;
+    return pi;
+}
+
+/* B: SPMD, cyclic distribution, private scalar, one critical update per thread. */
+static double pi_critical(int p)
+{
+    double step = 1.0 / (double)num_steps, pi = 0.0;
+    omp_set_num_threads(p);
+    #pragma omp parallel
+    {
+        int id = omp_get_thread_num(), nt = omp_get_num_threads();
+        double x, sum = 0.0;
+        for (long i = id; i &lt; num_steps; i += nt) {
+            x = (i + 0.5) * step;
+            sum += 4.0 / (1.0 + x * x);
+        }
+        #pragma omp critical
+        pi += sum * step;
+    }
+    return pi;
+}
+
+/* C: parallel for with reduction. */
+static double pi_reduction(int p)
+{
+    double step = 1.0 / (double)num_steps, sum = 0.0;
+    omp_set_num_threads(p);
+    #pragma omp parallel for reduction(+:sum)
+    for (long i = 0; i &lt; num_steps; i++) {
+        double x = (i + 0.5) * step;
+        sum += 4.0 / (1.0 + x * x);
+    }
+    return sum * step;
+}
+
+typedef double (*fn)(int);
+
+static double best(fn f, int p, double *val)
+{
+    double b = 1e30;
+    for (int r = 0; r &lt; REPS; r++) {
+        double t0 = omp_get_wtime();
+        *val = f(p);
+        double t = omp_get_wtime() - t0;
+        if (t &lt; b) b = t;
+    }
+    return b;
+}
+
+int main(void)
+{
+    fn f[3] = {pi_array, pi_critical, pi_reduction};
+    const char *name[3] = {"array,padded", "critical", "reduction"};
+    int ps[] = {1, 2, 4, 8, 12};
+    printf("N = %ld; best of %d; seconds (speedup)\n%-14s", num_steps, REPS, "variant");
+    for (int k = 0; k &lt; 5; k++) printf("   p=%-2d       ", ps[k]);
+    printf("\n");
+    for (int v = 0; v &lt; 3; v++) {
+        double t1 = 0, val = 0;
+        printf("%-14s", name[v]);
+        for (int k = 0; k &lt; 5; k++) {
+            double t = best(f[v], ps[k], &amp;val);
+            if (k == 0) t1 = t;
+            printf(" %6.3f (%5.2f)", t, t1 / t);
+        }
+        printf("  pi=%.10f\n", val);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">== ./pi_O0
+N = 200000000; best of 3; seconds (speedup)
+variant          p=1           p=2           p=4           p=8           p=12       
+array,padded    0.415 ( 1.00)  0.246 ( 1.69)  0.144 ( 2.88)  0.100 ( 4.13)  0.088 ( 4.74)  pi=3.1415926536
+critical        0.418 ( 1.00)  0.232 ( 1.80)  0.130 ( 3.21)  0.105 ( 3.97)  0.131 ( 3.20)  pi=3.1415926536
+reduction       0.411 ( 1.00)  0.193 ( 2.13)  0.125 ( 3.28)  0.087 ( 4.70)  0.084 ( 4.92)  pi=3.1415926536
+== ./pi_O2
+N = 200000000; best of 3; seconds (speedup)
+variant          p=1           p=2           p=4           p=8           p=12       
+array,padded    0.200 ( 1.00)  0.163 ( 1.23)  0.094 ( 2.13)  0.081 ( 2.46)  0.098 ( 2.04)  pi=3.1415926536
+critical        0.253 ( 1.00)  0.119 ( 2.12)  0.086 ( 2.93)  0.087 ( 2.92)  0.077 ( 3.30)  pi=3.1415926536
+reduction       0.253 ( 1.00)  0.116 ( 2.19)  0.070 ( 3.63)  0.062 ( 4.06)  0.057 ( 4.44)  pi=3.1415926536</code></pre>
+<p>At <code>-O2</code> the sample speedups at \(p=4\) are 2.13, 2.93 and 3.63 for the padded, critical and reduction versions. Across captures, reduction-to-critical time ratios at \(p=4\) are approximately 0.59–1.15 at <code>-O2</code> and 0.61–1.05 at <code>-O0</code>. Their performance order changes. The padded-to-critical ratio at \(p=4\), <code>-O2</code>, likewise spans 0.64–1.09. These measurements establish comparable costs with substantial variation, without a universal winner.</p>
+<p><strong>A critical region inside the loop.</strong> The lecture asks what happens if the critical region is put inside the loop. Suppose each iteration does work of time \(w\) and then enters one critical region of service time \(s\). The \(N\) entries are serialized, so they need at least \(Ns\) in all, and the threads cannot finish faster than \(N(w+s)/p\) either:</p>
+\[
+T_p\ \ge\ \max\Bigl(\frac{N(w+s)}{p},\ Ns\Bigr),\qquad S_p=\frac{T_1}{T_p}\ \le\ \min\Bigl(p,\ \frac{w+s}{s}\Bigr), \tag{12.2}
+\]
+<p>where \(T_1=N(w+s)\). Its limit \((w+s)/s\) is Amdahl's limit \(1/f\) with \(f=s/(w+s)\); for finite \(p\), (12.2) is weaker than Amdahl's formula \(T_p=fT_1+(1-f)T_1/p\), because the critical region of one thread can run while the other threads do their work. For the \(\pi\) loop \(w\) is about 1 ns and an uncontended region costs about 12 ns, so (12.2) bounds the speedup by \(13/12=1.08\) for every \(p\), and it assumes that the handoff of the region costs nothing. In practice the lock and the shared variable move between the caches of the cores, and \(t_{\text{crit}}(p)\) grows with \(p\); with \(w\) negligible, \(t_{\text{crit}}(p)\) is the time per iteration of the saturated loop. The listing measures it for <code>critical</code>, <code>atomic</code> and the reduction, with \(N=5\times10^{6}\).</p>
+<pre><code class="language-c" data-file="crit_loop.c" data-build="gcc -O2 -fopenmp crit_loop.c -o crit_loop" data-run="./crit_loop" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+#define REPS 3
+
+static long num_steps = 5000000L;
+
+static double pi_crit_in_loop(int p)
+{
+    double step = 1.0 / (double)num_steps, sum = 0.0;
+    #pragma omp parallel for num_threads(p)
+    for (long i = 0; i &lt; num_steps; i++) {
+        double x = (i + 0.5) * step, t = 4.0 / (1.0 + x * x);
+        #pragma omp critical
+        sum += t;
+    }
+    return sum * step;
+}
+
+static double pi_atomic_in_loop(int p)
+{
+    double step = 1.0 / (double)num_steps, sum = 0.0;
+    #pragma omp parallel for num_threads(p)
+    for (long i = 0; i &lt; num_steps; i++) {
+        double x = (i + 0.5) * step, t = 4.0 / (1.0 + x * x);
+        #pragma omp atomic
+        sum += t;
+    }
+    return sum * step;
+}
+
+static double pi_reduction(int p)
+{
+    double step = 1.0 / (double)num_steps, sum = 0.0;
+    #pragma omp parallel for num_threads(p) reduction(+:sum)
+    for (long i = 0; i &lt; num_steps; i++) {
+        double x = (i + 0.5) * step;
+        sum += 4.0 / (1.0 + x * x);
+    }
+    return sum * step;
+}
+
+typedef double (*fn)(int);
+
+int main(void)
+{
+    fn f[3] = {pi_crit_in_loop, pi_atomic_in_loop, pi_reduction};
+    const char *name[3] = {"critical in loop", "atomic in loop", "reduction"};
+    int ps[] = {1, 2, 4, 8, 12};
+    printf("N = %ld; best of %d; ns per iteration (total seconds)\n%-17s", num_steps, REPS, "variant");
+    for (int k = 0; k &lt; 5; k++) printf("   p=%-2d        ", ps[k]);
+    printf("\n");
+    for (int v = 0; v &lt; 3; v++) {
+        double val = 0;
+        printf("%-17s", name[v]);
+        for (int k = 0; k &lt; 5; k++) {
+            double b = 1e30;
+            for (int r = 0; r &lt; REPS; r++) {
+                double t0 = omp_get_wtime();
+                val = f[v](ps[k]);
+                double t = omp_get_wtime() - t0;
+                if (t &lt; b) b = t;
+            }
+            printf(" %7.1f (%5.3f)", b / num_steps * 1e9, b);
+        }
+        printf("  pi=%.9f\n", val);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">N = 5000000; best of 3; ns per iteration (total seconds)
+variant             p=1            p=2            p=4            p=8            p=12        
+critical in loop     12.6 (0.063)    35.2 (0.176)    71.9 (0.359)   110.8 (0.554)   114.1 (0.570)  pi=3.141592654
+atomic in loop       10.5 (0.053)    24.9 (0.124)    42.8 (0.214)    61.5 (0.307)    68.0 (0.340)  pi=3.141592654
+reduction             1.0 (0.005)     0.5 (0.003)     0.3 (0.001)     0.3 (0.002)     0.2 (0.001)  pi=3.141592654</code></pre>
+<p>The sample critical loop costs 12.6 ns per iteration at \(p=1\) and 114.1 ns at \(p=12\). Across captures the ranges are 11.7–13.0 ns at \(p=1\), 48.5–73.0 at \(p=4\) and 107.7–135.9 at \(p=12\). Its speedup is approximately 0.36–0.56 at \(p=2\) and 0.086–0.121 at \(p=12\). The atomic loop costs 9.4–10.6 ns at \(p=1\) and 54.6–73.3 at \(p=12\); the reduction costs 1.0–1.1 ns at \(p=1\). The twelve-thread critical loop is about 98–136 times slower per iteration than that one-thread reduction. A private sum with one entry per thread reduces the entry count from \(N\) to \(p\), a factor of \(4.2\times10^5\) at \(p=12\).</p>
+
+<h2 id="loops">Parallel loops: the worksharing construct <a class="timestamp" href="https://www.youtube.com/watch?v=794Q2Vg6i_k&amp;t=853s">W4L2 14:13</a></h2>
+<p>The lecture introduces <code>#pragma omp for</code> inside a parallel region. It splits the iterations of the loop that follows among the threads of the team, makes the loop index private, and ends with a barrier. For <code>a[i] = a[i] + b[i]</code> the SPMD version of Chapter 11 needs six or seven extra lines; the worksharing version needs one pragma. The lecture adds that <code>parallel</code> followed by <code>for</code> may be written <code>parallel for</code>.</p>
+<p><strong>What the construct guarantees.</strong> The iterations "are distributed across threads that already exist in the team", and the iterations of one chunk run in sequential order (§11.5, p. 247); nothing else about the order is guaranteed. The loop must have canonical form: <code>for (init; test; incr)</code> with a monotone variable, invariant bounds and no <code>break</code> that leaves the loop (§4.4.1, pp. 85–91), so that the runtime can compute the iteration count first (§4.4.2, p. 91). Only the outermost loop of a nest is divided unless <code>collapse(n)</code> adds inner loops. On the combined construct, <code>default</code> and <code>shared</code> go to the <code>parallel</code> part and <code>private</code> and <code>firstprivate</code> to the loop part (§17.2, pp. 339–340), so the lecture's equivalence holds for the clauses used here.</p>
+<p><strong>What the programmer guarantees.</strong> The construct does not check that the iterations are independent. A dependence between iterations is <em>loop-carried</em>: <em>flow</em> when iteration \(i\) writes what a later iteration reads, <em>anti</em> when it reads what a later iteration writes, <em>output</em> when both write. The lecture's recipe is: find the compute-intensive loops, make the iterations independent, place the directive, test. Its example removes a flow dependence: in <code>j = 5; for (i...) { j += 2; A[i] = big(j); }</code> each iteration reads the <code>j</code> that the previous one wrote. The repair substitutes the closed form \(j=5+2(i+1)\) and declares <code>j</code> inside the body, where it is private. Where no closed form exists, as in <code>a[i] = a[i-1] + b[i]</code>, the loop needs another algorithm, a prefix scan (§5.6).</p>
+<p><strong>A defect in the split on the slide.</strong> The slide writes the SPMD version with <code>istart = id * N / Nthrds; iend = (id+1) * (N / Nthrds); if (id == Nthrds-1) iend = N;</code>. The start uses \(\lfloor\mathrm{id}\,N/p\rfloor\) and the end of the previous thread uses \(\mathrm{id}\,\lfloor N/p\rfloor\), and these differ when \(p\nmid N\). Write \(N=qp+\rho\) with \(0\lt\rho\lt p\) and \(g=\gcd(p,\rho)\). Thread \(\mathrm{id}\ge1\) starts at \(\mathrm{id}\,q+\lfloor\mathrm{id}\,\rho/p\rfloor\), and thread \(\mathrm{id}-1\) ended at \(\mathrm{id}\,q\), so \(\lfloor\mathrm{id}\,\rho/p\rfloor\) iterations lie between them and no thread runs them. This needs every range \(1\le\mathrm{id}\le p-2\) to have its start no greater than its end, that is \(\mathrm{id}\,q+\lfloor\mathrm{id}\,\rho/p\rfloor\le(\mathrm{id}+1)q\). This holds when \(q\ge\rho-1\), because \(\lfloor\mathrm{id}\,\rho/p\rfloor\le\rho-1\); \(N\ge p^2\) gives \(q\ge p\gt\rho\). For \(q\ge\rho-1\) the gaps total</p>
+\[
+\sum_{\mathrm{id}=1}^{p-1}\Bigl\lfloor\frac{\mathrm{id}\,\rho}{p}\Bigr\rfloor=\frac{(p-1)(\rho-1)+g-1}{2}. \tag{12.3}
+\]
+<p>To prove (12.3), pair \(\mathrm{id}\) with \(p-\mathrm{id}\): the two floors add to \(\rho-1\) if \(p\nmid\mathrm{id}\,\rho\) and to \(\rho\) if \(p\mid\mathrm{id}\,\rho\), which holds for \(g-1\) values of \(\mathrm{id}\). Summing over all \(\mathrm{id}\) counts each term twice, so twice the sum is \((p-1)(\rho-1)+(g-1)\). The sum is zero exactly when \(\rho=1\); for \(\rho=0\) there is no gap. For \(N=10\), \(p=4\) (\(q=2\), \(\rho=2\)) it is \((3\cdot1+2-1)/2=2\): the ranges are \([0,2)\), \([2,4)\), \([5,6)\), \([7,10)\), and iterations 4 and 6 never run. For \(p=5\), \(N=9\) (\(q=1\), \(\rho=4\)) the condition fails: the split skips 5 iterations and (12.3) gives 6. The listing implements the slide's split and a tiling split whose end \((\mathrm{id}+1)N/p\) equals the next start. For \(2\le p\le12\) and \(p^2\le N\le400\) it checks (12.3) and counts the iterations that <code>omp for schedule(static)</code> runs other than once.</p>
+<pre><code class="language-c" data-file="loop_cover.c" data-build="gcc -O2 -fopenmp loop_cover.c -o loop_cover" data-run="./loop_cover">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+#define NMAX 400
+
+static int times[NMAX];                          /* times[i]: how often iteration i was executed */
+
+static int gcd(int a, int b) { return b ? gcd(b, a % b) : a; }
+
+/* The split on the slide: istart = id*N/p, iend = (id+1)*(N/p), the last thread ends at N. */
+static void slide_range(int n, int p, int id, int *lo, int *hi)
+{
+    *lo = id * n / p;
+    *hi = (id == p - 1) ? n : (id + 1) * (n / p);
+}
+
+/* A split that tiles [0, n): iend of thread id equals istart of thread id + 1. */
+static void tiling_range(int n, int p, int id, int *lo, int *hi)
+{
+    *lo = id * n / p;
+    *hi = (id + 1) * n / p;
+}
+
+typedef void (*range_fn)(int, int, int, int *, int *);
+
+/* Number of iterations that are executed zero times or more than once. */
+static int defects(range_fn f, int n, int p)
+{
+    int bad = 0;
+    for (int i = 0; i &lt; n; i++) times[i] = 0;
+    for (int id = 0; id &lt; p; id++) {
+        int lo, hi;
+        f(n, p, id, &amp;lo, &amp;hi);
+        for (int i = lo; i &lt; hi; i++) times[i]++;
+    }
+    for (int i = 0; i &lt; n; i++) bad += (times[i] != 1);
+    return bad;
+}
+
+int main(void)
+{
+    int lo, hi;
+    printf("N = 10, p = 4, the slide's ranges:");
+    for (int id = 0; id &lt; 4; id++) { slide_range(10, 4, id, &amp;lo, &amp;hi); printf(" [%d,%d)", lo, hi); }
+    printf("\nnever executed:");
+    defects(slide_range, 10, 4);
+    for (int i = 0; i &lt; 10; i++) if (times[i] == 0) printf(" %d", i);
+    printf("\n");
+
+    int pairs = 0, slide_bad = 0, tiling_bad = 0, omp_bad = 0, formula_ok = 1;
+    for (int p = 2; p &lt;= 12; p++)
+        for (int n = p * p; n &lt;= NMAX; n++) {
+            pairs++;
+            int skipped = defects(slide_range, n, p), rho = n % p;
+            slide_bad += (skipped &gt; 0);
+            tiling_bad += (defects(tiling_range, n, p) &gt; 0);
+            int predicted = rho ? ((p - 1) * (rho - 1) + gcd(p, rho) - 1) / 2 : 0;     /* derived in the text */
+            formula_ok &amp;= (skipped == predicted);
+            for (int i = 0; i &lt; n; i++) times[i] = 0;
+            #pragma omp parallel for num_threads(p) schedule(static)
+            for (int i = 0; i &lt; n; i++)
+                #pragma omp atomic
+                times[i]++;
+            for (int i = 0; i &lt; n; i++) omp_bad += (times[i] != 1);
+        }
+    printf("p = 2..12, N = p*p..%d: %d pairs\n", NMAX, pairs);
+    printf("pairs where the slide's split skips an iteration: %d\n", slide_bad);
+    printf("pairs where the tiling split has a defect: %d\n", tiling_bad);
+    printf("iterations not executed exactly once under schedule(static): %d\n", omp_bad);
+    printf("skipped count equals ((p-1)(rho-1) + gcd(p,rho) - 1)/2 in every pair: %s\n", formula_ok ? "yes" : "no");
+    return 0;
+}
+</code></pre>
+<pre><code class="output">N = 10, p = 4, the slide's ranges: [0,2) [2,4) [5,6) [7,10)
+never executed: 4 6
+p = 2..12, N = p*p..400: 3762 pairs
+pairs where the slide's split skips an iteration: 2221
+pairs where the tiling split has a defect: 0
+iterations not executed exactly once under schedule(static): 0
+skipped count equals ((p-1)(rho-1) + gcd(p,rho) - 1)/2 in every pair: yes</code></pre>
+<p>The slide's split is defective for 2221 of the 3762 pairs, 59 %, and every defective pair satisfies (12.3). The tiling split and <code>schedule(static)</code> have no defect.</p>
+
+<h2 id="schedules">Loop schedules and load balance <a class="timestamp" href="https://www.youtube.com/watch?v=794Q2Vg6i_k&amp;t=1015s">W4L2 16:55</a></h2>
+<p>The lecture presents <code>schedule(kind[,chunk])</code>: <code>static</code> deals out blocks of <code>chunk</code> iterations to the threads, <code>dynamic</code> lets each thread take <code>chunk</code> iterations from a queue. The slide advises <code>static</code> for predictable work and <code>dynamic</code> for highly variable work, and says that static scheduling is done at compile time and needs the least work at run time. The lecture's example has 10 000 iterations, 4 threads and chunks of 100: if one thread takes twice as long as another, a dynamic schedule may leave thread 1 with 50 chunks, thread 0 with 10 and threads 2 and 3 with 20 each. Those counts give five times as many completed chunks on thread 1 as on thread 0. Only if the chunks have equal cost and the threads have comparable active intervals does that imply five times the processing rate; with variable chunk costs, the counts alone do not determine the threads’ speeds.</p>
+<p><strong>The definitions</strong> (§11.5.3, pp. 248, 252–253). For <code>static</code> with chunk size \(k\), chunks of \(k\) iterations go to the threads round-robin in the order of the thread number; without \(k\) the iterations form chunks of approximately equal size, at most one per thread. For <code>dynamic</code> a thread takes a chunk, runs it and asks for another; the default chunk is 1. For <code>guided</code> the chunk size is proportional to the unassigned iterations divided by \(p\), decreasing to \(k\). With <code>runtime</code> the decision follows <code>run-sched-var</code>, which <code>omp_set_schedule</code> and <code>OMP_SCHEDULE</code> set. A loop with no clause has an implementation-defined schedule. With <code>static,</code>\(k\) the assignment is fully specified. With <code>static</code> alone the exact split is unspecified but the schedule is <em>reproducible</em>: two loops with consistent schedules, including identical iteration spaces and the same enclosing parallel region, get the same assignment (p. 248; consistent schedules, p. 95), and a program may rely on that, not on a particular split. The note on p. 253 shows that 3, 3, 3, 1 and 3, 3, 2, 2 are both compliant for 10 iterations on 4 threads. The listing prints the thread of each of 10 iterations.</p>
+<pre><code class="language-c" data-file="sched_map.c" data-build="gcc -O2 -fopenmp sched_map.c -o sched_map" data-run="./sched_map">#include &lt;stdio.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;omp.h&gt;
+
+#define N 10
+
+static int owner[N];                      /* owner[i]: number of the thread that ran iteration i */
+
+static void show(const char *name)
+{
+    printf("%-22s", name);
+    for (int i = 0; i &lt; N; i++) printf("%d", owner[i]);
+    printf("\n");
+}
+
+int main(void)
+{
+    printf("iteration:            0123456789\n");
+    #pragma omp parallel for num_threads(4) schedule(static)
+    for (int i = 0; i &lt; N; i++) owner[i] = omp_get_thread_num();
+    show("static");
+
+    #pragma omp parallel for num_threads(4) schedule(static, 1)
+    for (int i = 0; i &lt; N; i++) owner[i] = omp_get_thread_num();
+    show("static,1");
+
+    #pragma omp parallel for num_threads(4) schedule(static, 2)
+    for (int i = 0; i &lt; N; i++) owner[i] = omp_get_thread_num();
+    show("static,2");
+
+    #pragma omp parallel for num_threads(4)
+    for (int i = 0; i &lt; N; i++) owner[i] = omp_get_thread_num();
+    show("no schedule clause");
+
+    /* dynamic: which thread takes which chunk varies, but every chunk of 3 stays on one thread. */
+    #pragma omp parallel for num_threads(4) schedule(dynamic, 3)
+    for (int i = 0; i &lt; N; i++) { usleep(2000); owner[i] = omp_get_thread_num(); }
+    int whole = 1;
+    for (int c = 0; c &lt; N; c += 3)
+        for (int i = c; i &lt; c + 3 &amp;&amp; i &lt; N; i++) whole &amp;= (owner[i] == owner[c]);
+    printf("dynamic,3: each chunk {0-2}, {3-5}, {6-8}, {9} ran on one thread: %s\n", whole ? "yes" : "no");
+
+    omp_sched_t kind;
+    int chunk;
+    omp_get_schedule(&amp;kind, &amp;chunk);
+    printf("run-sched-var (used by schedule(runtime)): kind %d (1 static, 2 dynamic), chunk %d\n", (int)kind, chunk);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">iteration:            0123456789
+static                0001112233
+static,1              0123012301
+static,2              0011223300
+no schedule clause    0001112233
+dynamic,3: each chunk {0-2}, {3-5}, {6-8}, {9} ran on one thread: yes
+run-sched-var (used by schedule(runtime)): kind 2 (1 static, 2 dynamic), chunk 1</code></pre>
+<p>The libgomp of gcc 13.3 uses 3, 3, 2, 2 and treats a loop without a clause as <code>static</code>. Its default <code>run-sched-var</code> is <code>dynamic</code> with chunk 1, the value that the libgomp manual gives for an undefined <code>OMP_SCHEDULE</code> (<a href="https://gcc.gnu.org/onlinedocs/libgomp/OMP_005fSCHEDULE.html">libgomp manual</a>, retrieved 2026-10-27), so a loop without a clause and a loop with <code>schedule(runtime)</code> differ on this system. The specification fixes neither.</p>
+<p><strong>"Compile time" is not accurate.</strong> The compiler does not know the number of threads: the code that gcc 13.3 generates for <code>schedule(static)</code> calls <code>omp_get_num_threads</code> and <code>omp_get_thread_num</code> when the loop starts and computes its own range from them (listing <code>asm.c</code>); the current libgomp manual (<a href="https://gcc.gnu.org/onlinedocs/libgomp/Implementing-FOR-construct.html">§13.11</a>) describes a newer entry point that returns both values from one call. What matters for cost is that a static assignment needs no communication while the loop runs, and a dynamic assignment one access to shared state per chunk.</p>
+<p><strong>The price of a dynamic chunk.</strong> Taking a chunk is a critical region in the sense of (12.2): one thread at a time updates the shared counter. Let \(\delta_q(p)\) be the time between two takes when all threads are taking. A loop of \(N\) iterations in chunks of \(k\) needs \(N/k\) takes, so \(T_p\ge(N/k)\,\delta_q(p)\). The listing runs \(2\times10^{7}\) iterations of one integer update, about 0.4 ns each, under four schedules.</p>
+<pre><code class="language-c" data-file="dyn_cost.c" data-build="gcc -O2 -fopenmp dyn_cost.c -o dyn_cost" data-run="./dyn_cost" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+#define N 20000000L
+#define REPS 3
+
+static unsigned long run(int p, omp_sched_t kind, int chunk, double *best)
+{
+    unsigned long s = 0;
+    *best = 1e30;
+    omp_set_schedule(kind, chunk);
+    for (int r = 0; r &lt; REPS; r++) {
+        s = 0;
+        double t0 = omp_get_wtime();
+        #pragma omp parallel for num_threads(p) schedule(runtime) reduction(+:s)
+        for (long i = 0; i &lt; N; i++) s += (unsigned long)i * 3 ^ ((unsigned long)i &gt;&gt; 3);
+        double t = omp_get_wtime() - t0;
+        if (t &lt; *best) *best = t;
+    }
+    return s;
+}
+
+int main(void)
+{
+    printf("N = %ld iterations of one integer update; ns per iteration, best of %d\n", N, REPS);
+    printf("%-14s %8s %8s %8s\n", "schedule", "p=1", "p=4", "p=12");
+    struct { const char *n; omp_sched_t k; int c; } s[] = {
+        {"static", omp_sched_static, 0}, {"dynamic,1", omp_sched_dynamic, 1}, {"dynamic,16", omp_sched_dynamic, 16},
+        {"dynamic,256", omp_sched_dynamic, 256}, {"guided", omp_sched_guided, 1}};
+    unsigned long ref = 0;
+    for (int k = 0; k &lt; 5; k++) {
+        printf("%-14s", s[k].n);
+        int ps[3] = {1, 4, 12};
+        for (int q = 0; q &lt; 3; q++) {
+            double t;
+            unsigned long v = run(ps[q], s[k].k, s[k].c, &amp;t);
+            if (k == 0 &amp;&amp; q == 0) ref = v;
+            printf(" %8.2f%s", t / N * 1e9, v == ref ? " " : "!");
+        }
+        printf("\n");
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">N = 20000000 iterations of one integer update; ns per iteration, best of 3
+schedule            p=1      p=4     p=12
+static             0.39      0.11      0.07 
+dynamic,1          6.04     15.59     18.63 
+dynamic,16         0.78      1.38      1.42 
+dynamic,256        0.46      0.19      0.20 
+guided             0.43      0.11      0.29</code></pre>
+<p>Across captures the static loop costs 0.39–0.43 ns per iteration at \(p=1\) and 0.10–0.11 ns at \(p=4\). <code>dynamic,1</code> costs 6.04–6.83 ns at \(p=1\), 13.75–16.84 at \(p=4\) and 16.95–20.04 at \(p=12\). Interpreting the saturated loop time per iteration as an effective \(\delta_q\) gives approximately 14–20 ns between chunks, or \(5.0\times10^7\)–\(7.3\times10^7\) chunks/s. This is contended throughput, not an individual acquisition latency.</p>
+<p>For a uniform loop with iteration time \(c\), chunks of \(k\) iterations and a take cost \(\delta\) on the taking thread, ideal balanced threads need \(T_p=(N/p)(c+\delta/k)\). Taking \(T_1=Nc\) from a serial loop without scheduling overhead gives</p>
+\[
+S_p=\frac{p}{1+\delta/(k\,c)}. \tag{12.4}
+\]
+<p>The loss is small when \(k\,c\gg\delta\); the queue avoids saturation when \((N/k)\delta_q\le Nc/p\), or \(k\ge p\delta_q/c\). For the sample on one thread, \(\delta\approx6.04-0.39=5.65\) ns predicts \(0.39+5.65/16=0.74\) ns per iteration for <code>dynamic,16</code>, near its measured 0.78 ns (0.78–0.86 across captures). At four threads, \(13.75/16=0.86\) ns is the queue estimate for \(k=16\); measured times are 1.29–1.77 ns. The sample condition \(k\gtrsim4\times15.59/0.39\approx160\) is satisfied by 256, which takes 0.19 ns against 0.11 for static. Larger chunks amortize dispatch; static avoids the shared queue.</p>
+<p><strong>What dynamic scheduling achieves.</strong> Take chunks of cost \(C_1,\dots,C_M\) in order, each by the thread that becomes idle first. Graham (1966) defines this rule for an idle processor that scans a list of tasks (<a href="https://archive.org/details/bstj45-9-1563">Bell System Technical Journal 45(9), pp. 1563–1564</a>). Assume identical processing rates and no queue overhead. Let the chunk that finishes last start at time \(\sigma\). Before \(\sigma\) it was waiting, so no thread was idle, and the \(p\) threads had done work \(p\sigma\) that excludes it: \(p\sigma\le T_{\mathrm{work}}-C_{\text{last}}\). Hence</p>
+\[
+\max\Bigl(\frac{T_{\mathrm{work}}}{p},\ C_{\max}\Bigr)\ \le\ T\ \le\ \frac{T_{\mathrm{work}}}{p}+\Bigl(1-\frac1p\Bigr)C_{\max}, \tag{12.5}
+\]
+<p>with \(C_{\max}=\max_jC_j\). The lower bound holds for any assignment. The upper bound gives a factor \(2-1/p\) relative to the best possible time, which is at least \(\max(T_{\mathrm{work}}/p,C_{\max})\); Graham proves that ratio for lists in general (theorem, p. 1571; restated p. 1581). A take cost \(\delta\) can be added to every \(C_j\) only when those costs do not serialize at a saturated queue; the separate queue condition above must also hold. If the iteration costs rise to \(c_{\text{hi}}\) at the end, the last chunk costs about \(kc_{\text{hi}}\) and the smooth bound, taking \(N/k\) as the chunk count, is \(T_{\mathrm{work}}/p+N\delta/(kp)+(1-1/p)(k\,c_{\text{hi}}+\delta)\). The final \(\delta\) term is independent of \(k\), so the optimum remains</p>
+\[
+k^{*}=\sqrt{\frac{N\delta}{(p-1)\,c_{\text{hi}}}}. \tag{12.6}
+\]
+<p>The takes favour large chunks and the last chunk favours small ones. The bound depends on the largest chunk cost; the actual makespan also depends on the order of the chunks. With rising iteration costs, the largest chunks arrive last and can leave a long tail; reversing the loop hands them out first. The column "model S" below is \(T_{\mathrm{work}}\) divided by the finish time of the greedy assignment without take cost (2.29 for static blocks, as in equation (11.4) of Chapter 11). The next listing measures the loop \(c(i)=i+1\), \(N=20\,000\), on 4 threads under each schedule, beside the model value. The reference \(T_1\) is the static loop on one thread, and the integer checksum is the same for every schedule.</p>
+<pre><code class="language-c" data-file="imbalance.c" data-build="gcc -O2 -fopenmp imbalance.c -o imbalance" data-run="./imbalance" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+#define N 20000L
+#define REPS 3
+
+/* Iteration i costs i + 1 steps of a dependent integer recurrence. */
+static unsigned long work(long i)
+{
+    unsigned long acc = (unsigned long)i;
+    for (long j = 0; j &lt;= i; j++) acc = acc * 6364136223846793005UL + (unsigned long)j;
+    return acc;
+}
+
+/* schedule(runtime) takes its kind and chunk from run-sched-var, which omp_set_schedule sets.
+   reversed = 1 hands out the expensive iterations first. */
+static double run(int p, omp_sched_t kind, int chunk, int reversed, unsigned long *check)
+{
+    double best = 1e30;
+    omp_set_schedule(kind, chunk);
+    for (int r = 0; r &lt; REPS; r++) {
+        unsigned long s = 0;
+        double t0 = omp_get_wtime();
+        #pragma omp parallel for num_threads(p) schedule(runtime) reduction(+:s)
+        for (long i = 0; i &lt; N; i++) s += work(reversed ? N - 1 - i : i);
+        double t = omp_get_wtime() - t0;
+        if (t &lt; best) best = t;
+        *check = s;                                  /* integer sum: the same for every schedule */
+    }
+    return best;
+}
+
+/* Model S = W / (makespan): chunks of cost i + 1 go to a fixed thread (static) or to the thread
+   that is idle first (dynamic), with no overhead. */
+static double model(int p, int dynamic, long chunk, int reversed)
+{
+    double load[16] = {0}, total = 0.0;
+    long nchunks = (N + chunk - 1) / chunk;
+    for (long c = 0; c &lt; nchunks; c++) {
+        double cost = 0.0;
+        for (long i = c * chunk; i &lt; (c + 1) * chunk &amp;&amp; i &lt; N; i++) cost += (double)((reversed ? N - 1 - i : i) + 1);
+        total += cost;
+        int w = (int)(c % p);
+        if (dynamic) { w = 0; for (int k = 1; k &lt; p; k++) if (load[k] &lt; load[w]) w = k; }
+        load[w] += cost;
+    }
+    double mx = 0.0;
+    for (int k = 0; k &lt; p; k++) if (load[k] &gt; mx) mx = load[k];
+    return total / mx;
+}
+
+int main(void)
+{
+    unsigned long c1, c;
+    const int p = 4;
+    double t1 = run(1, omp_sched_static, 0, 0, &amp;c1);
+    printf("N = %ld, p = %d, T_1 = %.3f s (one sample run; best of %d)\n", N, p, t1, REPS);
+    printf("%-18s %7s %9s  %s\n", "schedule", "S", "model S", "checksum");
+    struct { const char *name; omp_sched_t kind; int chunk, dyn, rev; long mchunk; } s[] = {
+        {"static",          omp_sched_static,  0,    0, 0, N / p},
+        {"static,1",        omp_sched_static,  1,    0, 0, 1},
+        {"static,100",      omp_sched_static,  100,  0, 0, 100},
+        {"dynamic,1",       omp_sched_dynamic, 1,    1, 0, 1},
+        {"dynamic,16",      omp_sched_dynamic, 16,   1, 0, 16},
+        {"dynamic,256",     omp_sched_dynamic, 256,  1, 0, 256},
+        {"dynamic,2500",    omp_sched_dynamic, 2500, 1, 0, 2500},
+        {"dynamic,2500 rev",omp_sched_dynamic, 2500, 1, 1, 2500},
+        {"guided",          omp_sched_guided,  1,    1, 0, 0},
+    };
+    for (int k = 0; k &lt; 9; k++) {
+        double t = run(p, s[k].kind, s[k].chunk, s[k].rev, &amp;c);
+        if (s[k].mchunk) printf("%-18s %7.2f %9.2f  %s\n", s[k].name, t1 / t, model(p, s[k].dyn, s[k].mchunk, s[k].rev), c == c1 ? "equal" : "DIFFER");
+        else printf("%-18s %7.2f %9s  %s\n", s[k].name, t1 / t, "-", c == c1 ? "equal" : "DIFFER");
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">N = 20000, p = 4, T_1 = 0.198 s (one sample run; best of 3)
+schedule                 S   model S  checksum
+static                2.15      2.29  equal
+static,1              3.67      4.00  equal
+static,100            3.76      3.94  equal
+dynamic,1             3.72      4.00  equal
+dynamic,16            3.67      3.99  equal
+dynamic,256           3.39      3.86  equal
+dynamic,2500          2.56      2.91  equal
+dynamic,2500 rev      3.35      4.00  equal
+guided                3.36         -  equal</code></pre>
+<p>Static blocks give speedups 2.15–2.20, against the equal-rate model’s 2.29. Dynamic chunks of 1 or 16 give 3.67–3.96; chunks of 2500 give 2.47–2.89, and reversing those chunks gives 3.30–3.81. Reversal improves the tail in every capture. Guided gives 3.36–4.05; a value above 4 reflects variation between separately timed serial and parallel runs, excluded from the ideal model. For known varying costs, try static cyclic assignment or expensive chunks first. For unknown costs, dynamic chunks must also avoid queue saturation; guided is an empirical candidate whose large early chunks contribute to \(C_{\max}\).</p>
+
+<h2 id="reduction">Reductions <a class="timestamp" href="https://www.youtube.com/watch?v=jLHvSnw68Pw&amp;t=6s">W4L3 0:06</a></h2>
+<p>The lecture starts from the serial average <code>for (i...) ave += A[i];</code>. Every iteration reads and writes <code>ave</code>: a true dependence, which the lecture names a <em>reduction</em>. The clause <code>reduction(op:list)</code> gives each thread a local copy of each list variable, initialized with a value that depends on the operator, and combines the copies into the original value. The list variables must be shared in the enclosing parallel region. For C and C++ the operators are <code>+ * - min max &amp; | ^ &amp;&amp; ||</code>, with the initial values 0 for sums, differences, <code>|</code>, <code>^</code> and <code>||</code>, 1 for products and <code>&amp;&amp;</code>, all bits set for <code>&amp;</code>, the largest number for a minimum and the most negative number for a maximum.</p>
+<p><strong>The definition in the specification.</strong> One private copy per implicit task is initialized with the initializer of the reduction identifier. After the construct "the original list item is updated by combining its original value with the final value of each of the private copies, using the combiner" (§5.5.8, pp. 134–135). Table 5.1 (p. 129) gives the lecture's initial values and marks the operator <code>-</code> as deprecated in version 5.2, with the combiner <code>+</code>. The combiner runs in an unspecified order and number of times (p. 126). A list item on a worksharing construct must be shared in the parallel region and must not be <code>const</code> (pp. 132, 135).</p>
+<p><strong>When the result does not depend on the schedule.</strong> Let \(\oplus\) be associative and commutative on a set \(V\) with identity \(e\), \(x_0\) the original value and \(a_i\) the update of iteration \(i\). The serial program computes \(x_0\oplus a_0\oplus\cdots\oplus a_{n-1}\). For any division into sets \(\mathcal{J}_1,\dots,\mathcal{J}_p\), with partial results \(P_t=e\oplus\bigoplus_{i\in\mathcal{J}_t}a_i\), and any order of combining \(x_0,P_1,\dots,P_p\), the parallel program computes the same operands regrouped and reordered, and associativity and commutativity make the values equal. Integer <code>+</code> and <code>*</code> qualify for unsigned arithmetic modulo its range, or for signed arithmetic when no intermediate result overflows; bitwise operators qualify on fixed-width values, logical operators on Boolean values, and <code>min</code> and <code>max</code> on ordered integers. Floating-point <code>max</code> and <code>min</code> return the same numerical value without NaNs; bitwise identity also needs a fixed convention for signed zero, satisfied by the nonnegative <code>fabs</code> differences and positive-zero initializer here; <code>+</code> and <code>*</code> do not, because rounding makes the grouping visible. The specification says that "bitwise-identical results are not guaranteed", even for one number of threads (§5.5.6, pp. 133–134). The Jacobi residual below is reproducible bit for bit for this reason, and a \(\pi\) sum is compared with a tolerance.</p>
+<p>For recursive summation of \(n\) already rounded terms, with round-to-nearest arithmetic and no overflow or underflow, the bound is \(|\mathrm{fl}(\sum x_i)-\sum x_i|\le\gamma_{n-1}\sum|x_i|\) with \(\gamma_\nu=\nu\epsilon/(1-\nu\epsilon)\) and \(\epsilon=2^{-53}\). To derive it, use \(\mathrm{fl}(a+b)=(a+b)(1+\delta)\), \(|\delta|\le\epsilon\), and expand the recurrence: each input receives a product of at most \(n-1\) factors. For \(\nu\epsilon\lt1\), any such product lies between \((1-\epsilon)^\nu\ge1-\nu\epsilon\) and \((1+\epsilon)^\nu\le1/(1-\nu\epsilon)\); the latter follows by comparing its binomial coefficients with the geometric series. Its distance from 1 is therefore at most \(\gamma_\nu\). The triangle inequality gives the stated bound. This controls accumulation error, not the earlier evaluation of the input terms. The listing sums \(n=10^{6}\) terms \(4/(1+x_i^{2})\) and compares each result with the sum of the same double-precision terms in GCC’s <a href="https://gcc.gnu.org/onlinedocs/gcc/Floating-Types.html"><code>__float128</code></a>. On this x86-64 build it has a 113-bit significand. Each positive term lies between 2 and 4 and is an integer multiple of \(2^{-51}\), so the sum of at most \(10^6\) terms requires at most 73 significant binary digits: its reference accumulation is exact. The program compares 300 runs with <code>schedule(static)</code> and with <code>schedule(dynamic, 1000)</code>.</p>
+<pre><code class="language-c" data-file="fp_red.c" data-build="gcc -O2 -fopenmp fp_red.c -o fp_red -lm" data-run="./fp_red" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;math.h&gt;
+#include &lt;omp.h&gt;
+
+#define N 1000000L
+#define RUNS 300
+#define MAXSEEN 400
+
+static double term(long i) { double x = (i + 0.5) / (double)N; return 4.0 / (1.0 + x * x); }
+
+static double reduce(int p, int dynamic)
+{
+    double s = 0.0;
+    if (!dynamic) {
+        #pragma omp parallel for num_threads(p) schedule(static) reduction(+:s)
+        for (long i = 0; i &lt; N; i++) s += term(i);
+    } else {
+        #pragma omp parallel for num_threads(p) schedule(dynamic, 1000) reduction(+:s)
+        for (long i = 0; i &lt; N; i++) s += term(i);
+    }
+    return s;
+}
+
+int main(void)
+{
+    __float128 exact = 0;   /* sum of these positive double inputs needs at most 73 bits; binary128 has 113 */
+    double serial = 0.0, absum = 0.0;
+    for (long i = 0; i &lt; N; i++) { exact += term(i); serial += term(i); absum += term(i); }
+    const double epsilon = 0x1p-53;                                /* unit roundoff of double */
+    double bound = (N - 1) * epsilon / (1 - (N - 1) * epsilon) * absum;  /* |fl(sum) - sum| &lt;= gamma_{n-1} sum |x_i| */
+    printf("serial sum: error %.2e, bound %.2e\n", (double)(serial &gt; exact ? serial - exact : exact - serial), bound);
+    for (int dyn = 0; dyn &lt; 2; dyn++)
+        for (int p = 4; p &lt;= 12; p += 4) {
+            double seen[MAXSEEN], worst = 0.0;
+            int ns = 0;
+            for (int r = 0; r &lt; RUNS; r++) {
+                double s = reduce(p, dyn);
+                double e = (double)(s &gt; exact ? s - exact : exact - s);
+                if (e &gt; worst) worst = e;
+                int found = 0;
+                for (int k = 0; k &lt; ns; k++) found |= (seen[k] == s);
+                if (!found &amp;&amp; ns &lt; MAXSEEN) seen[ns++] = s;
+            }
+            printf("%-8s p=%2d: %3d distinct sums in %d runs; largest error %.2e\n",
+                   dyn ? "dynamic" : "static", p, ns, RUNS, worst);
+        }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">serial sum: error 1.12e-07, bound 3.49e-04
+static   p= 4:   2 distinct sums in 300 runs; largest error 1.13e-09
+static   p= 8:   3 distinct sums in 300 runs; largest error 5.79e-09
+static   p=12:   4 distinct sums in 300 runs; largest error 1.13e-09
+dynamic  p= 4: 107 distinct sums in 300 runs; largest error 7.06e-08
+dynamic  p= 8: 101 distinct sums in 300 runs; largest error 5.10e-08
+dynamic  p=12:  61 distinct sums in 300 runs; largest error 2.77e-08</code></pre>
+<p>The serial error is \(1.12\times10^{-7}\), against the bound \(3.49\times10^{-4}\). Static scheduling gives 2 distinct sums at \(p=4\), and 4 at \(p=12\), both with largest error \(1.13\times10^{-9}\). At \(p=8\) it gives 3–4 sums with largest error \(5.79\times10^{-9}\)–\(6.26\times10^{-9}\). Dynamic scheduling gives 61–111 sums, with largest errors \(2.77\times10^{-8}\)–\(8.87\times10^{-8}\).</p>
+<p>Every observed error is below the bound by a factor exceeding 3100, and all 24 parallel configurations have a smaller largest error than serial. Shorter partial-sum chains help here. With a fixed partition the partials are unchanged; the 2–4 static results arise from their variable merge order in the compare-and-swap loop. Neither the bound nor these positive inputs guarantee that parallel summation is more accurate for arbitrary data. Tests therefore compare with a justified tolerance, not equality.</p>
+<p><strong>The clause in use.</strong> The listing checks statements of the lecture on 4 threads, with the schedule fixed where the result depends on it.</p>
+<pre><code class="language-c" data-file="reduction_sem.c" data-build="gcc -O2 -fopenmp reduction_sem.c -o reduction_sem" data-run="./reduction_sem">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+#define N 1000
+
+int main(void)
+{
+    int a[N];
+    for (int i = 0; i &lt; N; i++) a[i] = i + 1;            /* 1, 2, ..., 1000 */
+
+    /* The original value takes part: 100 + (1 + ... + 1000). */
+    long sum = 100;
+    #pragma omp parallel for num_threads(4) reduction(+:sum)
+    for (int i = 0; i &lt; N; i++) sum += a[i];
+    printf("+ with original 100        : %ld (serial %d)\n", sum, 100 + 500500);
+
+    /* Subtraction: the private copies start at 0 and are combined by addition. */
+    long diff = 1000;
+    #pragma omp parallel for num_threads(4) reduction(-:diff)
+    for (int i = 0; i &lt; 10; i++) diff -= a[i];
+    printf("- with original 1000        : %ld (serial %d)\n", diff, 1000 - 55);
+
+    /* max and min: the identities are the least and the greatest representable values. */
+    int hi = 5, lo = 5000;
+    #pragma omp parallel for num_threads(4) reduction(max:hi) reduction(min:lo)
+    for (int i = 0; i &lt; N; i++) {
+        if (a[i] &gt; hi) hi = a[i];
+        if (a[i] &lt; lo) lo = a[i];
+    }
+    printf("max / min with originals 5 / 5000: %d / %d\n", hi, lo);
+    int hi2 = 5000;
+    #pragma omp parallel for num_threads(4) reduction(max:hi2)
+    for (int i = 0; i &lt; N; i++) if (a[i] &gt; hi2) hi2 = a[i];
+    printf("max with original 5000     : %d (the original value is a candidate)\n", hi2);
+
+    /* A mismatch between the operator and the update: the slide's reduction(*:x) with x += ... */
+    long x = 1;
+    #pragma omp parallel for num_threads(2) schedule(static, 4) reduction(*:x)
+    for (int i = 0; i &lt; 8; i++) x += a[i];
+    printf("reduction(*:x) with x += a[i]: %ld (serial %d)\n", x, 1 + 36);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">+ with original 100        : 500600 (serial 500600)
+- with original 1000        : 945 (serial 945)
+max / min with originals 5 / 5000: 1000 / 1
+max with original 5000     : 5000 (the original value is a candidate)
+reduction(*:x) with x += a[i]: 297 (serial 37)</code></pre>
+<p>The original value takes part: \(100+500\,500=500\,600\). The operator <code>-</code> combines the private copies by addition: \(1000-55=945\). With <code>hi = 5000</code> the maximum stays 5000, because the original value is a candidate. The last line is the slide of the data-sharing section: <code>reduction(*:x)</code> with the update <code>x += a[i]</code>. With <code>schedule(static, 4)</code> on 2 threads, thread 0 sums iterations 0 to 3 and thread 1 sums 4 to 7, each from the identity of the product, 1. The copies are 11 and 27, and the product with the original value is \(1\cdot11\cdot27=297\), against the serial 37. The compiler does not compare the operator of the clause with the operator of the update.</p>
+<p><strong>The \(\pi\) program.</strong> The lecture’s reduction table gives 1.91, 1.02, 0.80 and 0.68 s, against 1.87, 1.00, 0.68 and 0.53 s for the critical program. It attributes the last differences, 0.12 and 0.15 s, to the merge. This gcc build merges each partial with one successful compare-and-swap, possibly retried under contention; the synchronization experiment puts a few such operations on a microsecond scale. This does not measure the older slide compiler, but supplies no support for an intrinsic 0.15 s merge penalty. Our four-thread reduction-to-critical ratio spans 0.59–1.15 at <code>-O2</code>, with neither consistently faster. Different loop code, placement and run conditions remain possible explanations; the slide compiler output is unavailable.</p>
+
+<h2 id="nowait">What synchronization costs, and the nowait clause <a class="timestamp" href="https://www.youtube.com/watch?v=jLHvSnw68Pw&amp;t=533s">W4L3 8:53</a></h2>
+<p>The lecture states that critical regions and barriers are expensive: one thread at a time works in a critical region, and at a barrier the first arrival waits for the slowest. The statement has two parts, the cost of the operation and the cost of waiting. The listing measures the first.</p>
+<pre><code class="language-c" data-file="sync_cost.c" data-build="gcc -O2 -fopenmp sync_cost.c -o sync_cost" data-run="./sync_cost" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+#define REPS 3
+#define REGIONS 2000
+
+/* One parallel region with a loop of K constructs; the time is divided by K. */
+static double barrier_us(int p, int K)
+{
+    double t0 = omp_get_wtime();
+    #pragma omp parallel num_threads(p)
+    {
+        for (int k = 0; k &lt; K; k++) {
+            #pragma omp barrier
+        }
+    }
+    return (omp_get_wtime() - t0) / K * 1e6;
+}
+
+static double critical_us(int p, int K)       /* every thread enters K times; per entry of one thread */
+{
+    long x = 0;
+    double t0 = omp_get_wtime();
+    #pragma omp parallel num_threads(p)
+    {
+        for (int k = 0; k &lt; K; k++) {
+            #pragma omp critical
+            x++;
+        }
+    }
+    double t = omp_get_wtime() - t0;
+    if (x != (long)p * K) printf("lost updates\n");
+    return t / ((double)p * K) * 1e6;
+}
+
+int main(void)
+{
+    printf("microseconds, best of %d (sample run on a shared machine)\n", REPS);
+    printf("%4s %10s %22s\n", "p", "barrier", "critical, per entry");
+    int ps[] = {1, 2, 4, 8, 12};
+    for (int q = 0; q &lt; 5; q++) {
+        int p = ps[q];
+        double b = 1e30, c = 1e30;
+        for (int r = 0; r &lt; REPS; r++) {
+            double t = barrier_us(p, p &lt; 12 ? 20000 : 2000); if (t &lt; b) b = t;
+            t = critical_us(p, 200000); if (t &lt; c) c = t;
+        }
+        printf("%4d %10.3f %22.3f\n", p, b, c);
+    }
+    return 0;
+}
+</code></pre>
+<pre><code class="output">microseconds, best of 3 (sample run on a shared machine)
+   p    barrier    critical, per entry
+   1      0.113                  0.015
+   2      0.153                  0.019
+   4      0.205                  0.044
+   8      0.399                  0.077
+  12      0.563                  0.119</code></pre>
+<p>Across four exclusive captures a critical entry costs 14–15 ns at \(p=1\), 39–66 ns at \(p=4\) and 115–147 ns at \(p=12\). Barriers cost 0.111–0.114 µs at \(p=1\), 0.205–0.266 at \(p=4\) and 0.337–0.443 at \(p=8\). At \(p=12\) the consecutive values are 1.617, 56.273, 0.696 and 0.563 µs; the sample is the last. The header says “shared machine”; other agent benchmarks were suspended, but processor scheduling was not controlled. A preempted participant can delay a spinning barrier, yet the cause of this hundredfold variation was not isolated.</p>
+<p>A cheap iteration of this chapter takes about 1 ns, so a barrier at \(p=4\) costs a few hundred iterations and an entry at \(p=12\) about a hundred: the operations are expensive for iterations of nanoseconds and negligible for iterations of microseconds. The second part, waiting, depends on the loads. Let \(w_{t,\ell}\) be the time of thread \(t\) in phase \(\ell\) of \(K\) phases. With a barrier after every phase, each phase lasts as long as its slowest thread; with every barrier but the last removed, only the slowest total counts:</p>
+\[
+T_{\text{barrier}}=\sum_{\ell=1}^{K}\max_t w_{t,\ell}+Kt_{\text{bar}},\qquad
+T_{\text{nowait}}=\max_t\sum_{\ell=1}^{K}w_{t,\ell}+t_{\text{bar}}. \tag{12.7}
+\]
+<p>For each thread, \(\sum_\ell w_{t,\ell}\le\sum_\ell\max_uw_{u,\ell}\), so \(T_{\text{nowait}}\le T_{\text{barrier}}\), the load terms are equal when one thread is the slowest in every phase, and the barrier version still pays \((K-1)t_{\text{bar}}\) more.</p>
+<p><strong>When the barrier may go.</strong> The clause <code>nowait</code> "overrides any synchronization that would otherwise occur at the end of a construct" (§15.6, p. 308), and an implementation may then omit the barrier (§11, p. 240). The lecture's slide has, in one region: <code>A[id] = big_calc1(id);</code>, an explicit barrier, a loop <code>C[i] = big_calc3(i,A);</code> with its implicit barrier, a loop <code>B[i] = big_calc2(C,i);</code> with <code>nowait</code>, and <code>A[id] = big_calc4(id);</code>; it argues that <code>big_calc4</code> does not depend on <code>big_calc2</code>. The complete test checks every pair of an event before the removed barrier on thread \(t\) and an event after it on thread \(u\ne t\) for a flow, anti or output dependence on one memory unit. The slide passes if <code>big_calc2</code> reads only <code>C</code> and <code>big_calc4</code> reads only <code>id</code>, because the barrier of the first loop orders the write <code>A[id]</code> after every read of <code>A</code> and the reads of <code>C</code> after its writes. The explicit barrier at the top stays: <code>big_calc3</code> reads all of <code>A</code>.</p>
+<p>A weaker test suffices for loops with <em>consistent schedules</em>: here, two <code>for</code> constructs bound to the same parallel region, with the same reproducible <code>static</code> schedule and identical rectangular iteration spaces. Then "the memory effects of a logical iteration in the first loop nest happen before the execution of the same logical iteration in the second loop nest" (§4.4.5, p. 95), so iteration \(j\) of the second loop may use what iteration \(j\) of the first produced, and nothing else. In the listing, loop 1 writes <code>a[i]</code>, and its iterations 4 to 7, which <code>schedule(static)</code> gives to thread 1 on 4 threads, sleep 100 ms each. Loop 2 starts after 50 ms of other work and computes <code>c[i]</code> from <code>a[i]</code> only in the first run, and from <code>a[i]</code> and <code>a[i+4]</code>, an element of the next chunk, in the other two.</p>
+<pre><code class="language-c" data-file="nowait_demo.c" data-build="gcc -O2 -fopenmp nowait_demo.c -o nowait_demo" data-run="./nowait_demo" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;omp.h&gt;
+
+#define N 16
+#define P 4
+
+static int a[N], c[N];
+
+/* Loop 1 writes a[i]; the iterations 4..7 (thread 1 under schedule(static)) are slow. */
+static int produce(int i)
+{
+    if (i &gt;= 4 &amp;&amp; i &lt; 8) usleep(100000);
+    return 10 * i;
+}
+
+/* next = 0: c[i] needs a[i] only; next = 1: c[i] needs a[i] and a[i+4], an element of the next chunk. */
+static int run(int next, int use_nowait)
+{
+    int wrong = 0, first_wrong = -1;
+    for (int i = 0; i &lt; N; i++) a[i] = c[i] = 0;
+    #pragma omp parallel num_threads(P)
+    {
+        if (use_nowait) {
+            #pragma omp for schedule(static) nowait
+            for (int i = 0; i &lt; N; i++) a[i] = produce(i);
+        } else {
+            #pragma omp for schedule(static)
+            for (int i = 0; i &lt; N; i++) a[i] = produce(i);
+        }
+        usleep(50000);                       /* 50 ms of other work between the loops */
+        #pragma omp for schedule(static)
+        for (int i = 0; i &lt; N; i++) c[i] = next ? a[i] + a[(i + 4) % N] : a[i];
+    }
+    for (int i = 0; i &lt; N; i++) {
+        int want = next ? 10 * i + 10 * ((i + 4) % N) : 10 * i;
+        if (c[i] != want) { wrong++; if (first_wrong &lt; 0) first_wrong = i; }
+    }
+    printf("c[i] uses %-12s %-9s wrong elements: %d", next ? "a[i], a[i+4]," : "a[i] only,",
+           use_nowait ? "nowait," : "barrier,", wrong);
+    if (wrong) printf(" (first: c[%d] = %d, expected %d)", first_wrong, c[first_wrong], 10 * first_wrong + 10 * ((first_wrong + 4) % N));
+    printf("\n");
+    return wrong;
+}
+
+int main(void)
+{
+    run(0, 1);
+    run(1, 1);
+    run(1, 0);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">c[i] uses a[i] only,   nowait,   wrong elements: 0
+c[i] uses a[i], a[i+4], nowait,   wrong elements: 4 (first: c[0] = 0, expected 40)
+c[i] uses a[i], a[i+4], barrier,  wrong elements: 0</code></pre>
+<p>This is a sample output. The missing cross-thread ordering makes the second run a data race; sleep delays do not turn its output into a guarantee. The first and third runs have the required ordering and must return zero wrong elements.</p>
+<p>The first run is correct with <code>nowait</code>. In the second, thread 0 reads <code>a[4]</code> to <code>a[7]</code> at about 50 ms, before thread 1 writes them at 100 to 400 ms, so <code>c[0]</code> to <code>c[3]</code> are wrong; <code>c[0]</code> is 0 and should be 40. With the barrier, the third run is correct. For example, if iteration \(t\) of both loops runs on thread \(t\) (<code>schedule(static,1)</code>, four threads) with loads \(w_{\cdot,1}=(40,10,10,10)\) ms and \(w_{\cdot,2}=(10,40,10,10)\) ms, (12.7) gives \(40+40=80\) ms with the barrier and \(\max(50,50,20,20)=50\) ms without it, a saving of 38 %.</p>
+<p>With <code>nowait</code> a <code>lastprivate</code> or <code>reduction</code> variable receives its final value after the construct, and an access to the original variable before a synchronization "may create a data race" (§5.4.5, p. 116; §5.5.6, p. 133).</p>
+
+<h2 id="data">Data-sharing attributes <a class="timestamp" href="https://www.youtube.com/watch?v=jLHvSnw68Pw&amp;t=760s">W4L3 12:40</a></h2>
+<p>The lecture states the defaults. Most variables are shared: Fortran common blocks and module variables, C file-scope and static variables, statically and dynamically allocated memory. Stack variables of subprograms called from a region, and automatic variables within a statement block, are usually private. The slide's example has a global array <code>A</code>, an array <code>index</code> in <code>main</code>, and a function <code>work</code>, called in the region, that declares <code>double temp[10]</code> and <code>static int count</code>; <code>A</code>, <code>index</code> and <code>count</code> are shared and <code>temp</code> is local to each thread.</p>
+<p><strong>The rules, tested.</strong> The specification fixes the attribute by predetermined rules, which a clause overrides only in the cases listed on p. 98, by explicit clauses, and by implicit rules (§5.1.1, pp. 96–100). Automatic variables declared in a scope inside the construct are private; objects with dynamic storage and static variables declared inside the construct are shared; the iteration variable of an associated loop is private (pp. 97–98). A variable that is only referenced is shared in a <code>parallel</code> construct without <code>default</code> (p. 99); variables in called routines follow p. 100. The listing converts each variable’s address to <code>uintptr_t</code> while the object is alive, then counts distinct integer address representations on this x86-64 target: one means shared, four means private. It never dereferences an expired local object or changes the shared inner index.</p>
+<pre><code class="language-c" data-file="storage.c" data-build="gcc -O2 -fopenmp storage.c -o storage" data-run="./storage">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;omp.h&gt;
+
+#define P 4
+#define NVAR 13
+
+int global_var;                              /* file scope */
+static int file_static;                      /* file scope, static */
+static int tp_var;                           /* threadprivate */
+#pragma omp threadprivate(tp_var)
+
+static uintptr_t seen[NVAR][P];                  /* seen[v][t]: address of variable v as thread t sees it */
+
+static void callee(int t)
+{
+    int local_in_callee;                     /* automatic variable of a called function */
+    static int static_in_callee;             /* static variable of a called function */
+    seen[6][t] = (uintptr_t)&amp;local_in_callee;
+    seen[7][t] = (uintptr_t)&amp;static_in_callee;
+}
+
+int main(void)
+{
+    static const char *name[NVAR] = {
+        "file-scope variable",
+        "file-scope static variable",
+        "automatic, declared before the region",
+        "object from malloc, pointer declared before",
+        "automatic, declared inside the region",
+        "static, declared inside the region",
+        "automatic in a called function",
+        "static in a called function",
+        "threadprivate variable",
+        "listed in private(...)",
+        "index i of the omp for loop",
+        "inner index j, declared before the region",
+        "inner index jj, declared in its for statement"};
+    int before = 0, listed = 0, i, j;
+    int *heap = malloc(sizeof *heap);
+
+    #pragma omp parallel num_threads(P) private(listed)
+    {
+        int t = omp_get_thread_num();
+        int inside = 0;
+        static int static_inside;
+        seen[0][t] = (uintptr_t)&amp;global_var;
+        seen[1][t] = (uintptr_t)&amp;file_static;
+        seen[2][t] = (uintptr_t)&amp;before;
+        seen[3][t] = (uintptr_t)heap;
+        seen[4][t] = (uintptr_t)&amp;inside;
+        seen[5][t] = (uintptr_t)&amp;static_inside;
+        callee(t);
+        seen[8][t] = (uintptr_t)&amp;tp_var;
+        seen[9][t] = (uintptr_t)&amp;listed;
+    }
+    #pragma omp parallel for num_threads(P) schedule(static, 1)
+    for (i = 0; i &lt; P; i++) {                /* iteration i runs on thread i */
+        seen[10][i] = (uintptr_t)&amp;i;
+        seen[11][i] = (uintptr_t)&amp;j;      /* inspect its address without racing on its value */
+        for (int jj = 0; jj &lt; 1; jj++) seen[12][i] = (uintptr_t)&amp;jj;
+    }
+    printf("%-46s %9s  %s\n", "variable", "addresses", "attribute");
+    for (int v = 0; v &lt; NVAR; v++) {
+        int d = 0;                           /* distinct addresses among the 4 threads */
+        for (int a = 0; a &lt; P; a++) {
+            int dup = 0;
+            for (int b = 0; b &lt; a; b++) dup |= (seen[v][a] == seen[v][b]);
+            d += !dup;
+        }
+        printf("%-46s %9d  %s\n", name[v], d, d == 1 ? "shared" : d == P ? "private" : "mixed");
+    }
+    free(heap);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">variable                                       addresses  attribute
+file-scope variable                                    1  shared
+file-scope static variable                             1  shared
+automatic, declared before the region                  1  shared
+object from malloc, pointer declared before            1  shared
+automatic, declared inside the region                  4  private
+static, declared inside the region                     1  shared
+automatic in a called function                         4  private
+static in a called function                            1  shared
+threadprivate variable                                 4  private
+listed in private(...)                                 4  private
+index i of the omp for loop                            4  private
+inner index j, declared before the region              1  shared
+inner index jj, declared in its for statement          4  private</code></pre>
+<p>Every line of the output agrees with the rules cited; the threadprivate variable, which the lecture does not cover, has one copy per thread (p. 97), and the slide's defaults agree with the rules.</p>
+<p><strong>The clauses.</strong> The lecture introduces <code>shared</code>, <code>private</code> and <code>firstprivate</code> and says that they apply to <code>parallel</code> and <code>for</code>, except <code>shared</code>, which applies only to <code>parallel</code>. The specification allows <code>shared</code> and <code>default</code> on <code>parallel</code>, <code>task</code>, <code>taskloop</code> and <code>teams</code> (pp. 109–110), and <code>private</code> and <code>firstprivate</code> also on <code>for</code> (pp. 111–112); <code>lastprivate</code>, which the lecture omits, applies to <code>for</code> but not to <code>parallel</code> (p. 115). <code>private(x)</code> creates a new object for each thread, initialized "as if it had been locally declared without an initializer" (§5.3, p. 106), so its initial value is undefined; the original keeps its value, unless it is reached through a pointer, in the region outside the construct, or as a side effect of a directive (p. 106). <code>firstprivate(x)</code> adds an initialization from the value of the original just before the construct (p. 112), and <code>lastprivate(x)</code> an assignment to the original of the value of the sequentially last iteration (p. 115). The listing runs the lecture's test (<code>A=B=C=1</code>, <code>private(B)</code>, <code>firstprivate(C)</code>), <code>lastprivate</code>, the <code>firstprivate(incr)</code> slide, and the last slide, in which a called function writes a global that the construct lists as <code>private</code>.</p>
+<pre><code class="language-c" data-file="data_clauses.c" data-build="gcc -O2 -fopenmp data_clauses.c -o data_clauses" data-run="./data_clauses">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+#define MAX 16
+
+int tmp;                                     /* file scope */
+
+static void set_tmp(void) { tmp = 5; }       /* a called function: outside the lexical extent of the construct */
+
+int main(void)
+{
+    /* 1. The lecture's test: a is shared, b is private, c is firstprivate. */
+    int a = 1, b = 1, c = 1;
+    int c_at_entry[4];
+    #pragma omp parallel num_threads(4) private(b) firstprivate(c)
+    {
+        int t = omp_get_thread_num();
+        c_at_entry[t] = c;                   /* every thread starts from the original value */
+        b = 100 + t;                         /* b had no defined initial value; assign before use */
+        c += 10 * t;                         /* changes the private copy only */
+        if (t == 0) a = 7;                   /* a is the one shared object; one writer, so no race */
+    }
+    printf("c at entry: %d %d %d %d\n", c_at_entry[0], c_at_entry[1], c_at_entry[2], c_at_entry[3]);
+    printf("after the region: a = %d, b = %d, c = %d\n", a, b, c);
+
+    /* 2. lastprivate: the value of the sequentially last iteration reaches the original variable. */
+    int last = -1;
+    #pragma omp parallel for num_threads(4) schedule(static, 3) lastprivate(last)
+    for (int i = 0; i &lt; 10; i++)
+        last = i * i;
+    printf("lastprivate(last) after i = 0..9: %d\n", last);
+
+    /* 3. The lecture's firstprivate(incr) example: the loop-carried dependence is still there. */
+    int serial[MAX + 1], par[MAX + 1], incr = 0;
+    for (int i = 0; i &lt;= MAX; i++) {
+        if (i % 2 == 0) incr++;
+        serial[i] = incr;
+    }
+    incr = 0;
+    #pragma omp parallel for num_threads(4) schedule(static, 4) firstprivate(incr)
+    for (int i = 0; i &lt;= MAX; i++) {
+        if (i % 2 == 0) incr++;
+        par[i] = incr;
+    }
+    printf("serial       :");
+    for (int i = 0; i &lt;= MAX; i++) printf(" %d", serial[i]);
+    printf("\nfirstprivate :");
+    for (int i = 0; i &lt;= MAX; i++) printf(" %d", par[i]);
+    printf("\n");
+    /* The repair removes the dependence: incr is a function of i. */
+    int fixed[MAX + 1], bad = 0;
+    #pragma omp parallel for num_threads(4) schedule(static, 4)
+    for (int i = 0; i &lt;= MAX; i++)
+        fixed[i] = i / 2 + 1;
+    for (int i = 0; i &lt;= MAX; i++) bad += (fixed[i] != serial[i]);
+    printf("closed form i/2 + 1 differs from serial in %d places\n", bad);
+
+    /* 4. The lecture's last slide: private(tmp) on the construct, a called function writes the global tmp. */
+    tmp = 0;
+    #pragma omp parallel num_threads(4) private(tmp)
+    {
+        #pragma omp single
+        set_tmp();                           /* one call avoids concurrent writes to the global */
+    }
+    printf("global tmp after private(tmp) and a call that writes it: %d\n", tmp);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">c at entry: 1 1 1 1
+after the region: a = 7, b = 1, c = 1
+lastprivate(last) after i = 0..9: 81
+serial       : 1 1 2 2 3 3 4 4 5 5 6 6 7 7 8 8 9
+firstprivate : 1 1 2 2 1 1 2 2 1 1 2 2 1 1 2 2 3
+closed form i/2 + 1 differs from serial in 0 places
+global tmp after private(tmp) and a call that writes it: 5</code></pre>
+<p>Each thread starts with \(C=1\), and after the region \(B\) and \(C\) are 1 again, as the slide says; \(A=7\) is the value that thread 0 wrote. The <code>lastprivate</code> variable holds 81, the value of iteration 9. The <code>firstprivate(incr)</code> slide does not repair a loop-carried dependence: the serial loop gives <code>A[i]</code> = 1 1 2 2 3 3 …, but each parallel thread starts from 0 and counts only the even iterations that it runs, so the thread that runs iterations 4 to 7 starts again at 1. The repair is the closed form <code>A[i] = i/2 + 1</code>. The last line is the value that the lecture and the specification call unspecified: "whether references are to a new list item or the original list item is unspecified" (§5.3, p. 105). With gcc 13.3 at <code>-O2</code> the global holds 5 after the region. Only one thread calls <code>set_tmp</code> here, using <code>single</code>, to separate this storage question from concurrent writes. Calling it from every thread, as on the slide, would additionally race on the global in this implementation.</p>
+<p><strong>default(none).</strong> The lecture recommends <code>default(none)</code>, which forces the programmer to list every variable; on a combined <code>parallel for</code> it applies to the <code>parallel</code> part (§17.2, p. 340). The compiler reports <code>j</code> and <code>y</code>, as the lecture says (<code>N</code> is a macro here). The slide has two further defects: the operator <code>*</code> does not match the update <code>x += …</code>, which no compiler checks, and <code>x = 0.0</code> would make a product 0 anyway. The fixed pragma lists <code>shared(y)</code>, <code>private(j)</code> and <code>reduction(+:x)</code>, and the program prints \(x=42\sum_{i=0}^{9}\sum_{j=0}^{2}ij=42\cdot45\cdot3=5670\).</p>
+<pre><code class="language-c" data-file="defnone.c" data-run="LC_ALL=C gcc -fopenmp -Wall -c defnone.c -o /dev/null 2&gt;&amp;1 | grep error | sed &#x27;s/^defnone.c:[0-9]*:[0-9]*: //&#x27;; gcc -DFIXED -fopenmp -Wall defnone.c -o defnone &amp;&amp; ./defnone">#include &lt;stdio.h&gt;
+
+#define N 10
+
+double foobar(int i, int j, double y) { return i * j * y; }
+
+int main(void)
+{
+    int i, j = 5;
+    double x = 0.0, y = 42.0;
+
+#ifdef FIXED
+    #pragma omp parallel for default(none) shared(y) private(j) reduction(+:x)
+#else
+    #pragma omp parallel for default(none) reduction(*:x)
+#endif
+    for (i = 0; i &lt; N; i++) {
+        for (j = 0; j &lt; 3; j++)
+            x += foobar(i, j, y);
+    }
+    printf("x is %f\n", (float)x);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">error: 'j' not specified in enclosing 'parallel'
+error: 'y' not specified in enclosing 'parallel'
+x is 5670.000000</code></pre>
+<p><strong>The index of an inner loop.</strong> The lecture states that the index of the divided loop is private by default and the index of a nested loop is not; the remedy on the slide is <code>private(j)</code>. The private index belongs to the associated loop (p. 97), and an inner loop is associated only through <code>collapse</code>; an inner index declared before the region is only referenced, so it is shared (p. 99). The trap is specific to C and C++: in Fortran such variables are private (p. 97). The listing adds two matrices with three forms of the inner index at <code>-O0</code> and <code>-O2</code>.</p>
+<pre><code class="language-c" data-file="jshared.c" data-build="gcc -O0 -fopenmp jshared.c -o j_O0 &amp;&amp; gcc -O2 -fopenmp jshared.c -o j_O2" data-run="for b in ./j_O0 ./j_O2; do echo &quot;== $b&quot;; $b; done" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+#define N 200
+
+static double A[N][N], B[N][N], C[N][N];
+
+static int count_wrong(void)
+{
+    int wrong = 0;
+    for (int i = 0; i &lt; N; i++)
+        for (int k = 0; k &lt; N; k++)
+            wrong += (C[i][k] != A[i][k] + B[i][k]);
+    return wrong;
+}
+
+int main(void)
+{
+    int i, j;
+    for (i = 0; i &lt; N; i++)
+        for (j = 0; j &lt; N; j++) { A[i][j] = i; B[i][j] = j; }
+
+    for (i = 0; i &lt; N; i++) for (j = 0; j &lt; N; j++) C[i][j] = -1.0;
+    #pragma omp parallel for num_threads(4)                 /* j is shared */
+    for (i = 0; i &lt; N; i++)
+        for (j = 0; j &lt; N; j++)
+            C[i][j] = A[i][j] + B[i][j];
+    printf("j shared    : %5d of %d elements wrong\n", count_wrong(), N * N);
+
+    for (i = 0; i &lt; N; i++) for (j = 0; j &lt; N; j++) C[i][j] = -1.0;
+    #pragma omp parallel for num_threads(4) private(j)
+    for (i = 0; i &lt; N; i++)
+        for (j = 0; j &lt; N; j++)
+            C[i][j] = A[i][j] + B[i][j];
+    printf("private(j)  : %5d of %d elements wrong\n", count_wrong(), N * N);
+
+    for (i = 0; i &lt; N; i++) for (j = 0; j &lt; N; j++) C[i][j] = -1.0;
+    #pragma omp parallel for num_threads(4)
+    for (i = 0; i &lt; N; i++)
+        for (int jj = 0; jj &lt; N; jj++)                      /* declared in the for statement: private */
+            C[i][jj] = A[i][jj] + B[i][jj];
+    printf("int jj in for: %3d of %d elements wrong\n", count_wrong(), N * N);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">== ./j_O0
+j shared    :  2002 of 40000 elements wrong
+private(j)  :     0 of 40000 elements wrong
+int jj in for:   0 of 40000 elements wrong
+== ./j_O2
+j shared    :     0 of 40000 elements wrong
+private(j)  :     0 of 40000 elements wrong
+int jj in for:   0 of 40000 elements wrong</code></pre>
+<p>The sample shared-index run at <code>-O0</code> has 2002 of 40 000 elements wrong. All four <code>-O2</code> captures happen to give zero wrong elements, consistent with gcc keeping the index in a register; the assembly was not inspected. The shared-index source still has a data race. Success at one optimization level does not establish correctness.</p>
+
+<h2 id="jacobi">The running case: Jacobi with a parallel loop</h2>
+<p>The row loop of the Jacobi sweep (12.1) is divided with <code>parallel for</code>. The index \(i\) is private as the associated loop, \(j\) is declared in its own <code>for</code> statement and is private, and the arrays and \(N\) are shared. The residual is <code>reduction(max:diff)</code>, and <code>default(none)</code> makes the compiler check the list. The serial driver exchanges the pointers <code>u</code> and <code>unew</code> and stops when the residual is below <code>tol</code>. The listing solves the Laplace problem (\(u=1\) on the top edge, 0 elsewhere, \(N=48\)) with the serial kernel and the parallel kernel on 1, 2, 4 and 12 threads, and compares the sweeps, the residual and the final grid.</p>
+<pre><code class="language-c" data-file="jacobi_omp.c" data-build="gcc -O2 -fopenmp jacobi_omp.c -o jacobi_omp -lm" data-run="./jacobi_omp">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;math.h&gt;
+#include &lt;omp.h&gt;
+
+#define IDX(i, j) ((i) * (N + 2) + (j))
+
+/* Serial kernel: 5-point average into the interior of unew; returns max |unew - u| over the interior. */
+static double jacobi_step(int N, const double *u, double *unew)
+{
+    double diff = 0.0;
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            unew[IDX(i, j)] = 0.25 * (u[IDX(i - 1, j)] + u[IDX(i + 1, j)] + u[IDX(i, j - 1)] + u[IDX(i, j + 1)]);
+            double d = fabs(unew[IDX(i, j)] - u[IDX(i, j)]);
+            if (d &gt; diff) diff = d;
+        }
+    return diff;
+}
+
+/* Parallel kernel: the rows are shared out; the residual is a max reduction. default(none) makes the
+   compiler check that every variable the loop uses has been given an attribute. */
+static double jacobi_step_omp(int N, const double *u, double *unew)
+{
+    double diff = 0.0;
+    #pragma omp parallel for default(none) shared(N, u, unew) reduction(max:diff)
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {                 /* j is declared in its for statement: private */
+            unew[IDX(i, j)] = 0.25 * (u[IDX(i - 1, j)] + u[IDX(i + 1, j)] + u[IDX(i, j - 1)] + u[IDX(i, j + 1)]);
+            double d = fabs(unew[IDX(i, j)] - u[IDX(i, j)]);
+            if (d &gt; diff) diff = d;
+        }
+    return diff;
+}
+
+/* Laplace problem: u = 1 on the top edge (i = 0), 0 on the other edges, 0 inside at the start.
+   Returns the number of sweeps; the final grid is copied to out. */
+static int solve(int N, int parallel, int p, double tol, int max_iter, double *final_diff, double *out)
+{
+    size_t n = (size_t)(N + 2) * (N + 2);
+    double *u = calloc(n, sizeof *u), *unew = calloc(n, sizeof *unew);
+    for (int j = 0; j &lt; N + 2; j++) u[IDX(0, j)] = unew[IDX(0, j)] = 1.0;
+    omp_set_num_threads(p);
+    int it = 0;
+    double diff = 1.0;
+    while (diff &gt; tol &amp;&amp; it &lt; max_iter) {
+        diff = parallel ? jacobi_step_omp(N, u, unew) : jacobi_step(N, u, unew);
+        double *tmp = u; u = unew; unew = tmp;
+        it++;
+    }
+    memcpy(out, u, n * sizeof *u);
+    *final_diff = diff;
+    free(u); free(unew);
+    return it;
+}
+
+int main(void)
+{
+    const int N = 48;
+    const double tol = 1e-6;
+    size_t n = (size_t)(N + 2) * (N + 2);
+    double *ref = malloc(n * sizeof *ref), *g = malloc(n * sizeof *g), d0, d;
+    int it0 = solve(N, 0, 1, tol, 100000, &amp;d0, ref);
+    printf("serial     : %4d sweeps, residual %.6e, u(N/2,N/2) = %.12f\n", it0, d0, ref[IDX(N / 2, N / 2)]);
+    int ps[] = {1, 2, 4, 12};
+    for (int k = 0; k &lt; 4; k++) {
+        int it = solve(N, 1, ps[k], tol, 100000, &amp;d, g);
+        printf("%2d threads : %4d sweeps, residual %.6e, grid bitwise equal to serial: %s\n", ps[k], it, d,
+               (it == it0 &amp;&amp; d == d0 &amp;&amp; memcmp(ref, g, n * sizeof *g) == 0) ? "yes" : "no");
+    }
+    free(ref); free(g);
+    return 0;
+}
+</code></pre>
+<pre><code class="output">serial     : 3270 sweeps, residual 9.995464e-07, u(N/2,N/2) = 0.258025856954
+ 1 threads : 3270 sweeps, residual 9.995464e-07, grid bitwise equal to serial: yes
+ 2 threads : 3270 sweeps, residual 9.995464e-07, grid bitwise equal to serial: yes
+ 4 threads : 3270 sweeps, residual 9.995464e-07, grid bitwise equal to serial: yes
+12 threads : 3270 sweeps, residual 9.995464e-07, grid bitwise equal to serial: yes</code></pre>
+<p>All four parallel runs reproduce the serial run exactly: 3270 sweeps, the same residual, a bitwise equal grid. Each cell is computed by the same expression from the same four inputs whichever thread computes it, and the maximum is associative and commutative, so the reduction returns the same value for every division of the rows. A sum of the residuals would differ in the last bits.</p>
+<p>The next listing measures four versions of the residual on a grid with \(N=2000\) (two arrays of 64 MB in all, above the 12 MB last-level cache): <code>reduction(max:diff)</code>; a private maximum per thread merged by one <code>critical</code> after a loop with <code>nowait</code>; the comparison inside <code>critical</code> in the inner loop; and an unprotected update of a shared variable. For each version a problem of \(N=100\) runs 10 times on 8 threads to compare the residual of sweep 100 with the serial one. The last row is a streaming copy, which gives the memory bandwidth.</p>
+<pre><code class="language-c" data-file="jacobi_time.c" data-build="gcc -O2 -fopenmp jacobi_time.c -o jacobi_time -lm" data-run="./jacobi_time" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+#include &lt;omp.h&gt;
+
+#define IDX(i, j) ((i) * (N + 2) + (j))
+#define UPD(i, j) 0.25 * (u[IDX(i - 1, j)] + u[IDX(i + 1, j)] + u[IDX(i, j - 1)] + u[IDX(i, j + 1)])
+
+static double step_reduction(int N, const double *restrict u, double *restrict unew)
+{
+    double diff = 0.0;
+    #pragma omp parallel for reduction(max:diff)
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            double v = UPD(i, j), d = fabs(v - u[IDX(i, j)]);
+            unew[IDX(i, j)] = v;
+            if (d &gt; diff) diff = d;
+        }
+    return diff;
+}
+
+static double step_local_critical(int N, const double *restrict u, double *restrict unew)
+{
+    double diff = 0.0;
+    #pragma omp parallel
+    {
+        double mine = 0.0;
+        #pragma omp for nowait
+        for (int i = 1; i &lt;= N; i++)
+            for (int j = 1; j &lt;= N; j++) {
+                double v = UPD(i, j), d = fabs(v - u[IDX(i, j)]);
+                unew[IDX(i, j)] = v;
+                if (d &gt; mine) mine = d;
+            }
+        #pragma omp critical
+        if (mine &gt; diff) diff = mine;
+    }
+    return diff;
+}
+
+static double step_critical_in_loop(int N, const double *restrict u, double *restrict unew)
+{
+    double diff = 0.0;
+    #pragma omp parallel for
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            double v = UPD(i, j), d = fabs(v - u[IDX(i, j)]);
+            unew[IDX(i, j)] = v;
+            #pragma omp critical
+            if (d &gt; diff) diff = d;
+        }
+    return diff;
+}
+
+static double step_unprotected(int N, const double *restrict u, double *restrict unew)
+{
+    double diff = 0.0;                          /* shared, updated by all threads without synchronization */
+    #pragma omp parallel for
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            double v = UPD(i, j), d = fabs(v - u[IDX(i, j)]);
+            unew[IDX(i, j)] = v;
+            if (d &gt; diff) diff = d;
+        }
+    return diff;
+}
+
+static double step_serial(int N, const double *restrict u, double *restrict unew)
+{
+    double diff = 0.0;
+    for (int i = 1; i &lt;= N; i++)
+        for (int j = 1; j &lt;= N; j++) {
+            double v = UPD(i, j), d = fabs(v - u[IDX(i, j)]);
+            unew[IDX(i, j)] = v;
+            if (d &gt; diff) diff = d;
+        }
+    return diff;
+}
+
+/* Streaming copy b[i] = a[i] over 2 x 128 MB: 16 bytes per element moved (write-allocate traffic not counted). */
+static double copy_gbps(int p)
+{
+    long n = 16000000L;
+    double *a = malloc(n * sizeof *a), *b = malloc(n * sizeof *b), best = 1e30;
+    #pragma omp parallel for num_threads(p)
+    for (long i = 0; i &lt; n; i++) { a[i] = (double)i; b[i] = 0.0; }
+    for (int r = 0; r &lt; 5; r++) {
+        double t0 = omp_get_wtime();
+        #pragma omp parallel for num_threads(p)
+        for (long i = 0; i &lt; n; i++) b[i] = a[i];
+        double t = omp_get_wtime() - t0;
+        if (t &lt; best) best = t;
+    }
+    double check = b[n - 1];
+    free(a); free(b);
+    return check == (double)(n - 1) ? 16.0 * n / best / 1e9 : -1.0;
+}
+
+typedef double (*step_fn)(int, const double *restrict, double *restrict);
+
+/* Residual returned by sweep number nsweep, starting from the initial grid. */
+static double residual_after(step_fn f, int N, int p, int nsweep)
+{
+    size_t n = (size_t)(N + 2) * (N + 2);
+    double *u = calloc(n, sizeof *u), *unew = calloc(n, sizeof *unew), diff = 0.0;
+    for (int j = 0; j &lt; N + 2; j++) u[IDX(0, j)] = unew[IDX(0, j)] = 1.0;
+    omp_set_num_threads(p);
+    for (int k = 0; k &lt; nsweep; k++) { diff = f(N, u, unew); double *t = u; u = unew; unew = t; }
+    free(u); free(unew);
+    return diff;
+}
+
+static double sweeps(step_fn f, int N, int p, int nsweep, double *last)
+{
+    size_t n = (size_t)(N + 2) * (N + 2);
+    double *u = calloc(n, sizeof *u), *unew = calloc(n, sizeof *unew);
+    for (int j = 0; j &lt; N + 2; j++) u[IDX(0, j)] = unew[IDX(0, j)] = 1.0;
+    omp_set_num_threads(p);
+    double best = 1e30;
+    int reps = nsweep &gt; 2 ? 9 : 3;
+    for (int r = 0; r &lt; reps; r++) {
+        double t0 = omp_get_wtime();
+        for (int k = 0; k &lt; nsweep; k++) { *last = f(N, u, unew); double *t = u; u = unew; unew = t; }
+        double t = (omp_get_wtime() - t0) / nsweep;
+        if (t &lt; best) best = t;
+    }
+    free(u); free(unew);
+    return best;
+}
+
+int main(void)
+{
+    int N = 2000, ps[] = {1, 2, 4, 8, 12};
+    double last;
+    printf("N = %d; milliseconds per sweep, best of 9 (3 for critical in the loop) batches (speedup against the same variant at p = 1)\n", N);
+    printf("%-24s", "variant");
+    for (int k = 0; k &lt; 5; k++) printf("   p=%-2d        ", ps[k]);
+    printf("\n");
+    struct { const char *name; step_fn f; int nsweep; } v[] = {
+        {"reduction(max:diff)", step_reduction, 5},
+        {"local max + critical", step_local_critical, 5},
+        {"critical in the loop", step_critical_in_loop, 2}};
+    for (int a = 0; a &lt; 3; a++) {
+        printf("%-24s", v[a].name);
+        double t1 = 0;
+        for (int k = 0; k &lt; 5; k++) {
+            double t = sweeps(v[a].f, N, ps[k], v[a].nsweep, &amp;last);
+            if (k == 0) t1 = t;
+            printf(" %8.2f (%4.2f)", t * 1e3, t1 / t);
+        }
+        printf("\n");
+    }
+    printf("%-24s %8.2f\n", "serial kernel", sweeps(step_serial, N, 1, 5, &amp;last) * 1e3);
+    /* Residual returned by sweep 100 from the initial state (N = 100, 8 threads), 10 runs per variant. */
+    struct { const char *name; step_fn f; } c[] = {{"reduction(max:diff)", step_reduction},
+        {"local max + critical", step_local_critical}, {"critical in the loop", step_critical_in_loop},
+        {"unprotected shared max", step_unprotected}};
+    double ref = residual_after(step_serial, 100, 1, 100);
+    printf("residual of sweep 100 (N = 100): serial kernel %.6e; in 10 runs on 8 threads:\n", ref);
+    for (int a = 0; a &lt; 4; a++) {
+        int wrong = 0;
+        double smallest = 1e30;
+        for (int r = 0; r &lt; 10; r++) {
+            double d = residual_after(c[a].f, 100, 8, 100);
+            wrong += (d != ref);
+            if (d &lt; smallest) smallest = d;
+        }
+        printf("  %-24s differs from serial in %2d runs, smallest value returned %.3e\n", c[a].name, wrong, smallest);
+    }
+    printf("%-24s", "copy bandwidth, GB/s");
+    for (int k = 0; k &lt; 5; k++) printf(" %8.1f        ", copy_gbps(ps[k]));
+    printf("\n");
+    return 0;
+}
+</code></pre>
+<pre><code class="output">N = 2000; milliseconds per sweep, best of 9 (3 for critical in the loop) batches (speedup against the same variant at p = 1)
+variant                    p=1            p=2            p=4            p=8            p=12        
+reduction(max:diff)          7.30 (1.00)     5.91 (1.24)     4.89 (1.49)     4.91 (1.49)     5.67 (1.29)
+local max + critical         7.40 (1.00)     6.40 (1.16)     5.17 (1.43)     4.77 (1.55)     5.95 (1.24)
+critical in the loop        53.24 (1.00)    87.55 (0.61)   235.99 (0.23)   441.85 (0.12)   652.49 (0.08)
+serial kernel                8.41
+residual of sweep 100 (N = 100): serial kernel 2.421391e-03; in 10 runs on 8 threads:
+  reduction(max:diff)      differs from serial in  0 runs, smallest value returned 2.421e-03
+  local max + critical     differs from serial in  0 runs, smallest value returned 2.421e-03
+  critical in the loop     differs from serial in  0 runs, smallest value returned 2.421e-03
+  unprotected shared max   differs from serial in 10 runs, smallest value returned 1.115e-03
+copy bandwidth, GB/s         10.6             10.8             14.9             12.7             13.7</code></pre>
+<p>In the sample, a critical comparison inside the loop takes 53.24 ms at one thread and 652.49 ms at twelve, against 8.41 ms for serial. Across captures its twelve-thread time is approximately 6.5–12.3 times its own one-thread time and 56–86 times serial. The correct parallel variants gain 1.29–1.74 over their own one-thread time at their best team size. The unprotected norm differs from serial in all 40 tests: the smallest returned values in the four captures are \(1.753\times10^{-9}\), \(5.013\times10^{-15}\), \(5.692\times10^{-22}\) and \(1.115\times10^{-3}\), against \(2.421391\times10^{-3}\). Three captures therefore contain false convergence candidates for tolerance \(10^{-6}\); the fourth still underestimates the norm.</p>
+<p>A critical comparison requires \(N^2\) serialized entries. The unprotected version lacks the required ordering and has no correctness guarantee. A private maximum needs only \(p\) entries, roughly 1.8 µs in aggregate at \(p=12\) using the synchronization experiment’s largest per-entry average, small beside millisecond sweeps.</p>
+<p>A streaming model estimates \(8+8+8=24\) bytes per update: one input loaded after row reuse, a destination write-allocate read and eventual writeback. It assumes ordinary cached stores and cache space for neighboring rows; it is not a universal lower bound. The fastest correct variant and team size in each capture takes 3.83–4.77 ms, or 20.1–25.1 GB/s under that model. The copy kernel’s best rate in each capture, scaled from its printed 16 bytes to 24-byte accounting, is 21.5–24.3 GB/s; paired sweep-to-copy ratios are 0.90–1.15. Comparable rates support a memory-throughput explanation but neither prove exact traffic nor bound speedup by the copy-rate ratio. With five floating-point operations per update, arithmetic intensity \(I=F/Q\), where \(F\) counts operations and \(Q\) bytes moved, is about 0.21 flop/B. Chapter 10 measured a ridge \(I^*=9.3\) flop/B, about 45 times larger.</p>
+
+<h2 id="limits">What the models establish and what they do not</h2>
+<div class="table-wrap"><table>
+<caption>Table 12.2. Statements of the lectures and their status in this chapter.</caption>
+<thead><tr><th scope="col">Statement of the lecture</th><th scope="col">Status</th><th scope="col">Evidence</th></tr></thead>
+<tbody>
+<tr><td>The critical program is preferable because it uses less memory, which matters for large programs.</td><td>Not supported</td><td>The padded array holds \(64p\) bytes, independent of \(N\).</td></tr>
+<tr><td>Open question: what if the critical region is in the loop?</td><td>Answered: slower than serial</td><td>Equation (12.2); <code>crit_loop.c</code>.</td></tr>
+<tr><td>The SPMD split on the slide divides the work equally.</td><td>Defective unless \(N\bmod p\in\{0,1\}\)</td><td>Equation (12.3); <code>loop_cover.c</code>.</td></tr>
+<tr><td>Static scheduling is done at compile time; use <code>static</code> for uniform and <code>dynamic</code> for variable work.</td><td>Second part confirmed and quantified; first part refined</td><td>Computed at loop entry from \(n\), \(p\), \(k\); (12.4)–(12.6); <code>dyn_cost.c</code>, <code>imbalance.c</code>.</td></tr>
+<tr><td>Reduction overhead explains the slower "PI loop" times.</td><td>Not supported</td><td>Local synchronization measurements put a few merge operations on a microsecond scale; they do not measure the slide compiler. The slide difference is 0.12 s at 3 threads and 0.15 s at 4; the relative performance order varies across our captures.</td></tr>
+<tr><td><code>nowait</code> is safe where there is no dependence.</td><td>Confirmed with a complete test</td><td>Three dependence kinds; consistent schedules (p. 95); <code>nowait_demo.c</code>.</td></tr>
+<tr><td>The index of an inner loop is not private by default.</td><td>True for C and C++, false for Fortran</td><td>p. 97; <code>jshared.c</code>.</td></tr>
+<tr><td>On the <code>default(none)</code> slide the compiler complains about <code>j</code> and <code>y</code>.</td><td>Confirmed; two other defects on the slide</td><td>The operator is <code>*</code>, the update <code>+=</code>, and <code>x = 0.0</code>; <code>defnone.c</code>.</td></tr>
+<tr><td>The <code>firstprivate(incr)</code> slide.</td><td>Initial value correct; result differs from serial</td><td><code>data_clauses.c</code>.</td></tr>
+</tbody></table></div>
+<p>The models leave out when a written value becomes visible without an edge (Chapter 13), tasks, nested parallelism, <code>ordered</code> loops and locks. Every timing is a sample, and the costs \(\delta\), \(s\) and \(t_{\text{crit}}(p)\) belong to gcc 13.3 and its libgomp. The cause of the reduction-versus-critical difference on the slide was not found, and the excess time of the chunked static schedules in exercise 6 has no tested explanation.</p>
+
+<h2 id="exercises">Exercises</h2>
+<p><strong>Exercise 1 (derive).</strong> A loop of \(N\) iterations has costs that rise to \(c_{\text{hi}}\) at the last iteration, handed out in order in chunks of \(k\). Using (12.5) with a take cost \(\delta\) added to each chunk, derive the \(k^*\) that minimizes the bound and show that at \(k^*\) the two terms that depend on \(k\) are equal. Compute \(k^*\) for \(N=10^{6}\), \(c_{\text{hi}}=2\ \mu\mathrm{s}\), \(\delta=25\) ns, \(p=8\), linear costs, so \(T_{\mathrm{work}}=Nc_{\text{hi}}/2\).</p>
+<details><summary>Solution</summary>
+<p>With \(\delta\) added to each of \(N/k\) chunks and \(C_{\max}\approx kc_{\text{hi}}\), the part of the bound that depends on \(k\) is \(g(k)=N\delta/(kp)+(1-1/p)kc_{\text{hi}}\). Its derivative is zero at \(k^{*2}=N\delta/((p-1)c_{\text{hi}})\), which is (12.6); multiplying that condition by \(k^*\) gives \(N\delta/(k^*p)=(1-1/p)k^*c_{\text{hi}}\), so the two terms are equal. Numbers: \(k^*=\sqrt{0.025\ \mathrm{s}/14\ \mu\mathrm{s}}=42.3\); \(g(k^*)=1.5\times10^{-4}\) s against \(T_{\mathrm{work}}/p=0.125\) s.</p>
+</details>
+<p><strong>Exercise 2 (compute).</strong> A loop does \(w=2\) ns of work per iteration and then executes <code>critical</code> around an update of \(s=12\) ns when uncontended. (a) Compute the speedup bound (12.2). (b) Assume a saturated service interval \(t_{\text{crit}}(8)=120\) ns, representative of <code>crit_loop.c</code>, and estimate \(S_8\). (c) How large must \(w\) be for the service-interval model to permit \(E_8\ge0.5\), assuming \(t_{\text{crit}}(8)=120\) ns stays fixed?</p>
+<details><summary>Solution</summary>
+<p>(a) \(S_p\le(w+s)/s=14/12=1.17\). (b) \(S_8=14/120=0.12\). (c) As a necessary condition under the assumed fixed service interval, \(E_8\ge0.5\) means \(S_8=(w+s)/t_{\text{crit}}\ge4\), so \(w\ge4t_{\text{crit}}-s=4\times120-12=468\) ns; with a free handoff (\(t_{\text{crit}}=s\)) \(w\ge36\) ns would do.</p>
+</details>
+<p><strong>Exercise 3 (counterexample).</strong> A student writes <code>a[i] = f(i);</code> with <code>schedule(static)</code> and <code>nowait</code> over \(i=0,\dots,8\), then <code>c[i] = a[i] + a[i-1];</code> with <code>schedule(static)</code> over \(i=1,\dots,8\), and argues that both loops have the same static schedule, so no barrier is needed. Give \(p\) and a timing with a stale read, and name the sentence that the argument misreads.</p>
+<details><summary>Solution</summary>
+<p>Take \(p=2\). In gcc 13.3 the first loop gives iterations 0 to 4 to thread 0 and 5 to 8 to thread 1; the second gives 1 to 4 and 5 to 8. Iteration 5 of the second loop, on thread 1, reads <code>a[4]</code>, which thread 0 writes; if thread 0 is descheduled, thread 1 reads the old value, and nothing orders the two events. The specification guarantees only that "the memory effects of a logical iteration in the first loop nest happen before the execution of the same logical iteration in the second loop nest" (§4.4.5, p. 95). Iteration 5 depends on iteration 4 of the first loop, and the iteration spaces differ.</p>
+</details>
+<p><strong>Exercise 4 (diagnose an assumption).</strong> On the slide of W4L3 the critical program takes 0.53 s and the reduction program 0.68 s on 4 threads, and the lecture attributes the difference to the overhead of the reduction. Use the local synchronization measurements to estimate the scale of a four-partial merge, state what this can establish about the slide, and design an experiment to distinguish code generation from placement.</p>
+<details><summary>Solution</summary>
+<p>Using 0.15 µs as a representative contended per-entry cost gives a scale estimate \(4\times0.15=0.6\) µs, about \(2.5\times10^5\) below the slide’s 0.15 s difference. This is neither an upper bound on compare-and-swap retries nor a measurement of the slide machine. It shows why attributing the entire difference to an intrinsic merge penalty needs evidence; the one-thread rows already differ by 0.04 s. Compile both programs with the same compiler and flags, inspect their loop and merge assembly, then repeat paired measurements at \(N\) and \(10N\) under fixed and deliberately varied affinity. A constant-cost merge does not scale with \(N\); loop-code differences can. Holding placement fixed tests whether the ranking persists. Scaling alone cannot distinguish them because placement can also change per-iteration throughput.</p>
+</details>
+<p><strong>Exercise 5 (design judgment).</strong> For \(N=10^{6}\), \(p=12\) and \(\delta=20\) ns, choose a schedule and chunk size, with reasons and numbers, for three loops. (a) Every iteration costs 5 ns. (b) The cost rises linearly from 1 µs to 10 µs. (c) 99 % of the iterations cost 1 µs and the other 1 %, at unknown positions, cost 1 ms.</p>
+<details><summary>Solution</summary>
+<p>(a) The queue does not saturate only for \(k\ge p\delta/c=48\), and dynamic scheduling never beats static here. Use <code>static</code>. (b) (12.6) gives \(k^*=\sqrt{10^{6}\times20\ \mathrm{ns}/(11\times10\ \mu\mathrm{s})}=13.5\). Use <code>dynamic,16</code>, a reversed loop with a larger chunk, or a static cyclic assignment with chunks of 8 or 16. (c) \(T_{\mathrm{work}}/p=0.92\) s. If heavy positions are uniformly random, a static share has about 833 heavy iterations with standard deviation 28, or about 28 ms of load variation; the slowest of 12 can be several standard deviations above the mean. This estimate does not cover adversarial clustering of unknown positions. For dynamic scheduling (12.5) bounds the loss by \((1-1/p)\,C_{\max}\) with \(C_{\max}\) up to \(k\) ms, so a loss of 9 ms (1 %) allows \(k\le9\). Use <code>dynamic,8</code>. Bound (12.5) still applies to the chunks actually produced by <code>guided</code>, but does not give the small bound based on \(k\): an early large chunk can cost about \(T_{\mathrm{work}}/p\).</p>
+</details>
+<p><strong>Exercise 6 (implementation and measurement).</strong> Write a loop <code>b[i] = 0.5 * i</code> over a 64-byte aligned array of doubles, \(N=4\times10^{7}\), 8 threads. Predict from the cache-line arithmetic of Chapter 11 which of <code>static</code>, <code>static,1</code>, <code>static,8</code>, <code>static,64</code> and <code>dynamic,1</code> suffer from false sharing, then measure.</p>
+<details><summary>Solution</summary>
+<p>Element \(i\) lies in line \(\lfloor i/8\rfloor\). With <code>static,1</code> the 8 elements of a line are written by 8 threads: false sharing is expected, and the same for <code>dynamic,1</code> plus the take cost. With <code>static,8</code> each chunk is one line with one writer, so no sharing is expected; the same holds for <code>static,64</code> and <code>static</code>.</p>
+<pre><code class="language-c" data-file="schedule_writes.c" data-build="gcc -O2 -fopenmp schedule_writes.c -o schedule_writes" data-run="./schedule_writes" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;omp.h&gt;
+
+#define N 40000000L
+#define P 8
+
+static double b[N] __attribute__((aligned(64)));      /* 64-byte aligned: 8 doubles per cache line */
+
+int main(void)
+{
+    struct { const char *name; omp_sched_t kind; int chunk; } s[] = {
+        {"static", omp_sched_static, 0},     {"static,1", omp_sched_static, 1},
+        {"static,8", omp_sched_static, 8},   {"static,16", omp_sched_static, 16},
+        {"static,64", omp_sched_static, 64}, {"dynamic,1", omp_sched_dynamic, 1},
+        {"dynamic,64", omp_sched_dynamic, 64}};
+    printf("b[i] = 0.5 i, N = %ld, p = %d, best of 5\n", N, P);
+    for (int q = 0; q &lt; 7; q++) {
+        omp_set_schedule(s[q].kind, s[q].chunk);
+        double best = 1e30;
+        for (int r = 0; r &lt; 5; r++) {
+            double t0 = omp_get_wtime();
+            #pragma omp parallel for num_threads(P) schedule(runtime)
+            for (long i = 0; i &lt; N; i++) b[i] = 0.5 * (double)i;
+            double t = omp_get_wtime() - t0;
+            if (t &lt; best) best = t;
+        }
+        printf("%-11s %7.1f ms  %6.2f ns per iteration\n", s[q].name, best * 1e3, best / N * 1e9);
+    }
+    return b[N - 1] != 0.5 * (double)(N - 1);       /* 0 when the last element is right */
+}
+</code></pre>
+<pre><code class="output">b[i] = 0.5 i, N = 40000000, p = 8, best of 5
+static         32.9 ms    0.82 ns per iteration
+static,1       90.4 ms    2.26 ns per iteration
+static,8       47.2 ms    1.18 ns per iteration
+static,16      50.5 ms    1.26 ns per iteration
+static,64      35.0 ms    0.87 ns per iteration
+dynamic,1     996.0 ms   24.90 ns per iteration
+dynamic,64     55.0 ms    1.38 ns per iteration</code></pre>
+<p>The sample costs are 0.82 ns per iteration for static, 2.26 for <code>static,1</code> and 24.90 for <code>dynamic,1</code>. Across captures <code>static,1</code> takes approximately 2.2–3.1 times the static time, consistent with predicted false sharing. <code>dynamic,1</code> takes 30–39 times as long; dispatch alone costs roughly 14–20 ns in <code>dyn_cost.c</code>, so this row cannot separate queue contention from false sharing. Line-aligned static chunks of 8, 16 and 64 take about 1.4–1.8, 1.5–1.9 and 1.1–1.7 times the static time despite one writer per line. Their excess needs a separate compiler/cache experiment; timings alone do not identify its cause.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li>Recordings: <a href="https://www.youtube.com/watch?v=794Q2Vg6i_k">W4L2, Synchronization and Parallel Loops in OpenMP</a> (slides: the padded accumulator, critical, barrier, the \(\pi\) program with critical, the worksharing loop, <code>schedule</code>, working with loops); <a href="https://www.youtube.com/watch?v=jLHvSnw68Pw">W4L3, Storage attributes of different variables in OpenMP</a> (slides: reduction, <code>nowait</code>, data sharing, <code>private</code>, <code>firstprivate</code>, <code>default</code>), NPTEL <em>High Performance Scientific Computing</em>, IIT Bombay, 2025.</li>
+<li>OpenMP Architecture Review Board, <a href="https://www.openmp.org/wp-content/uploads/OpenMP-API-Specification-5-2.pdf">OpenMP Application Programming Interface, Version 5.2 (November 2021)</a>, printed page numbers: §1.3 p. 24; §4.4 pp. 85–95; §5.1 pp. 96–100; §5.3–5.4 pp. 104–116; §5.5 pp. 126–136; §11 p. 240 and §11.5 pp. 247–253; §15.2–15.3 pp. 299–302; §15.6 p. 308; §15.8.4 pp. 311–313; §17.2 pp. 339–340.</li>
+<li>GNU Project, <a href="https://gcc.gnu.org/onlinedocs/libgomp/">libgomp manual</a>, online edition for the current GCC release, retrieved 2026-10-27; the online ABI description can differ from gcc 13.3, and the assembly listing distinguishes the implementation actually used here. <a href="https://gcc.gnu.org/onlinedocs/libgomp/OMP_005fSCHEDULE.html">OMP_SCHEDULE</a>: the default is dynamic with chunk 1. <a href="https://gcc.gnu.org/onlinedocs/libgomp/Implementing-CRITICAL-construct.html">§13.2</a>: <code>GOMP_critical_start</code> and <code>GOMP_critical_end</code>. <a href="https://gcc.gnu.org/onlinedocs/libgomp/Implementing-ATOMIC-construct.html">§13.3</a>: <code>atomic</code> uses the <code>__sync</code> builtins. <a href="https://gcc.gnu.org/onlinedocs/libgomp/Implementing-REDUCTION-clause.html">§13.9</a>: reduction values merged by an atomic update, a critical section or an array collected after a barrier. <a href="https://gcc.gnu.org/onlinedocs/libgomp/Implementing-FOR-construct.html">§13.11</a>: in the current release one call returns the thread number and the thread count; gcc 13.3 calls <code>omp_get_num_threads</code> and <code>omp_get_thread_num</code> (listing <code>asm.c</code>).</li>
+<li>R. L. Graham, <a href="https://archive.org/details/bstj45-9-1563">"Bounds for certain multiprocessing anomalies"</a>, Bell System Technical Journal 45(9) (1966) 1563–1581, read in the Internet Archive text of the scan. Pp. 1563–1564: list scheduling, in which an idle processor takes the first task of the list that has not begun. P. 1571: the theorem bounding the ratio of finishing times by \(1+(n-1)/n'\), which is \(2-1/n\) for one processor count (restated p. 1581).</li>
+<li>GNU Project, <a href="https://gcc.gnu.org/onlinedocs/gcc/Floating-Types.html">Additional Floating Types</a>, GCC online manual, retrieved 2026-10-28 UTC: <code>__float128</code> is available on x86-64 and aliases <code>_Float128</code>. The exactness of this particular reference sum is derived above.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-11-openmp-threads-and-work-distribution.html">Previous available chapter</a><a href="index.html">Lecture index</a><span>Further chapters pending</span></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

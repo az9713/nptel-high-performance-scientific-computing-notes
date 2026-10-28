@@ -4,7 +4,7 @@ The NPTEL IIT Bombay course recordings provide the chronological spine of this
 independent textbook rewrite. The plan groups playlist items 2–76 (75
 recordings) into 31 topic chapters; the Week 12 revision lectures (items 71–74)
 supply practice material, and the course trailer (item 1) is outside the
-selected scope. This edition contains chapters 1–11 (items 2–21).
+selected scope. This edition contains chapters 1–12 (items 2–23).
 
 1. Enumerate recordings and preserve lecture order, labels, durations, and source
    URLs in the source manifest.
@@ -38,10 +38,11 @@ selected scope. This edition contains chapters 1–11 (items 2–21).
    and publish only after explicit authorization. Raw sources and internal
    editorial material remain outside the repository.
 
-Chapters 1–11 are written; chapters 12–31 are not. The second-round reviews of
+Chapters 1–12 are written; chapters 13–31 are not. The second-round reviews of
 chapters 3, 9, 10 and 11 still recorded one blocking finding each. Those
 chapters received further independent rounds (3, 4, 5 and 4 rounds in all)
-until the latest round recorded zero blocking findings. The
+until the latest round recorded zero blocking findings. Chapter 12 reached
+ACCEPT with zero findings in round 3 after four local round-2 repairs. The
 [editorial record](editorial-review-summary.json) lists the rounds and verdicts. Historical review verdicts are not retrospectively
 rewritten, and content inventory or rendering success is not scientific
 acceptance.

@@ -1,10 +1,9 @@
 {
-  "checked_at_utc": "2026-10-27T19:05:42.990598+00:00",
-  "status": "partial edition: chapters 1-11 written; chapters 12-31 not written; every written chapter has an independent zero-blocking verdict",
+  "checked_at_utc": "2026-10-28T05:05:53.320896+00:00",
+  "status": "partial edition: chapters 1-12 written; chapters 13-31 not written; 22 recordings assigned to written chapters; every written chapter has an independent zero-blocking verdict",
   "chapter_count": 31,
-  "written_chapters": 11,
+  "written_chapters": 12,
   "unwritten_chapters": [
-    12,
     13,
     14,
     15,
@@ -37,7 +36,8 @@
     "chapter-08-concurrency-and-synchronization.html": "ef6b4bc0cab879e78bbcdccbabf25b2a8fcefef9294246f8596a694e0ffcb055",
     "chapter-09-parallel-computing-numerical-models-and-cost.html": "c14817b6c35bb3f14d6d57881dba34590e46413ee8376dbf9ba9934364dfb746",
     "chapter-10-memory-bottlenecks-hpc-systems-grace-hopper.html": "32fb15f302a95f837a8c23c1042d658461743966876f0e9d3aad3654197e6e88",
-    "chapter-11-openmp-threads-and-work-distribution.html": "d2eec49972640afcc355d00dc1060262cc552ee9971eeebb6e6992191b9978f8"
+    "chapter-11-openmp-threads-and-work-distribution.html": "d2eec49972640afcc355d00dc1060262cc552ee9971eeebb6e6992191b9978f8",
+    "chapter-12-openmp-synchronization-loops-data-sharing.html": "b6bc5bcb598b97faf477cbe98f1533ff8104e1f3dde48e13c14c390d6ea57d69"
   },
   "scope": "Content inventory and exact body preservation; does not certify full scientific acceptance"
 }

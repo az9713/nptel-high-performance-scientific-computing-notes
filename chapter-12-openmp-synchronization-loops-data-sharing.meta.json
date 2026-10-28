@@ -1,0 +1,358 @@
+{
+  "chapter": 12,
+  "title": "OpenMP II: synchronization, parallel loops, reductions and data-sharing attributes",
+  "status": "reviewed and locally validated; independent round 3 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "794Q2Vg6i_k",
+      "label": "W4L2",
+      "playlist_index": 22,
+      "duration_seconds": 1407
+    },
+    {
+      "video_id": "jLHvSnw68Pw",
+      "label": "W4L3",
+      "playlist_index": 23,
+      "duration_seconds": 1365
+    }
+  ],
+  "frames_viewed": {
+    "794Q2Vg6i_k": [
+      "f0001",
+      "f0007",
+      "f0009",
+      "f0011",
+      "f0013",
+      "f0015",
+      "f0019",
+      "f0024",
+      "f0027",
+      "f0030",
+      "f0031",
+      "f0033",
+      "f0034",
+      "f0036",
+      "f0038",
+      "f0041",
+      "f0042",
+      "f0043",
+      "f0045"
+    ],
+    "jLHvSnw68Pw": [
+      "f0004",
+      "f0006",
+      "f0010",
+      "f0011",
+      "f0013",
+      "f0016",
+      "f0017",
+      "f0019",
+      "f0021",
+      "f0023",
+      "f0026",
+      "f0027",
+      "f0028",
+      "f0029",
+      "f0031",
+      "f0033",
+      "f0035",
+      "f0037",
+      "f0039",
+      "f0041",
+      "f0043",
+      "f0045"
+    ]
+  },
+  "source_uncertainties": [
+    "OpenMP 5.2 (November 2021) was read from the PDF (text extraction); page numbers are the printed page numbers (PDF page minus 20). OpenMP 6.0 was not opened, so the chapter does not claim that any rule quoted is unchanged there. gcc 13.3 defines _OPENMP as 201511 (version 4.5, from chapter 11); every construct and clause used by the listings is accepted by it, and the statement that the reduction operator '-' is deprecated is a statement of version 5.2 only.",
+    "libgomp manual: the online edition for the current GCC release was read on 2026-10-27 (pages OMP_SCHEDULE, Implementing CRITICAL, ATOMIC, REDUCTION, FOR). It need not describe gcc 13.3 exactly. Section 13.11 (one call returns the thread number and the thread count for schedule(static)) is a newer entry point: gcc 13.3 emits calls of omp_get_num_threads and omp_get_thread_num instead (listing asm.c). Other behaviours that the chapter relies on (static split 3,3,2,2 for 10 iterations on 4 threads; a loop without a schedule clause is static; run-sched-var default dynamic,1 as shown by omp_get_schedule) were checked by listings on gcc 13.3.",
+    "Graham (1966) was read in the Internet Archive plain text of the scan (OCR, 19 pages). The statement of the theorem on p. 1571 (bound 1 + (n-1)/n') is reconstructed from garbled OCR and agrees with the well-known 2 - 1/n; the restatement of 2 - 1/n and the longest-first bound 4/3 - 1/(3n) on p. 1581 were read from the OCR, and the paper says that the proof of the second is deferred to a later paper, which was not opened. The chapter derives the bound W/p + (1 - 1/p) C_max itself (equation 12.5) and cites Graham for the system and the ratio. During the 2026-10-28 repair pass the Internet Archive pages were inaccessible through the web tool; the earlier author/reviewer page checks are retained as provenance, not claimed as a new access. The scheduling bound is fully derived in the chapter.",
+    "Slide numbers read from frames: Table 12.1 (W4L2 f0009, f0019, f0027; W4L3 f0017). The footnotes of those slides disagree about the optimization level (padded slide: default O2; the others: no optimization); the lecture does not reconcile them and the chapter says so. The SPMD split code of the worksharing-loop motivating slide was read from frames f0031-f0038 of W4L2.",
+    "The spoken dynamic-scheduling example has 100 chunks with counts 50/10/20/20. These counts determine completed chunks, not processing-speed ratios without equal chunk costs and comparable active intervals; the chapter states that qualification.",
+    "Higham was not opened or cited. The summation-error bound is derived explicitly from the relative-error model, assuming round-to-nearest, no overflow/underflow and (n-1)*epsilon < 1. The binary128 reference exactly accumulates the already rounded positive double inputs: each is a multiple of 2^-51 and the sum needs at most 73 bits, below 113.",
+    "Fresh timings: nine timing/nondeterministic programs were compiled and run four times sequentially during an exclusive 2026-10-28 UTC session. All 36 runs and 9 builds returned 0; complete stdout/stderr and command/time/machine metadata are retained privately. Printed outputs are capture 4; ranges use captures 1-4. Other agents suspended workloads, but background services, placement and frequency were not controlled. Twelve-thread barrier values 1.617, 56.273, 0.696 and 0.563 microseconds vary by about 100 times; cause unisolated. Earlier idle/loaded raw captures were unavailable and their numeric claims were replaced. Two initially overlapping runners were stopped and their outputs discarded; none are used.",
+    "The cause of the slide reduction-versus-critical difference remains unresolved. Fresh reduction/critical ratios at four threads are about 0.59-1.15 at -O2 and 0.61-1.05 at -O0, so the relative order varies. Local microsecond synchronization costs are a scale comparison, not a retry bound or a measurement of the older slide machine/compiler.",
+    "Guided dispatch counts were not measured. In fresh exercise 6 captures, aligned static chunks of 8, 16 and 64 take about 1.4-1.8, 1.5-1.9 and 1.1-1.7 times the unchunked static time. Their cause was not isolated. Dynamic,1 does not separate dispatch cost from false sharing.",
+    "Four fresh shared-inner-index captures have zero wrong elements at -O2; register retention is an inference without assembly inspection. All 40 unprotected Jacobi tests under-report the norm; smallest values across four captures range from 5.692e-22 to 1.115e-3. These racy programs have no general output guarantee.",
+    "The private(tmp) demonstration uses single to make one called-function write and avoid the extraneous all-writers race. Its gcc 13.3 -O2 output was verified by the full code-lab run; old ad-hoc optimization-level claims were removed.",
+    "Jacobi measurements use one grid size (N = 2000, 64 MB for two arrays, above the 12 MB last-level cache) and do not separate cache from memory effects; the copy-kernel bandwidth counts 16 bytes per element.",
+    "Timestamps are section anchors from local speech-recognition segment times and locate topic changes to within a few seconds.",
+    "Capture provenance: start_utc uses datetime.now(UTC), while recorded durations use perf_counter. Some adjacent UTC stamps and monotonic durations do not form disjoint apparent intervals. The retained runner uses blocking subprocess.run calls and an exclusive flock; coordination and one observed process inventory support sequential dispatch, but no continuous independent process monitoring or monotonic start/end record was retained. The mixed clocks establish neither concurrent benchmark execution nor clock drift; the cause of the timestamp discrepancies was not demonstrated."
+  ],
+  "lecture_corrections": [
+    "W4L2 SPMD split on the worksharing-loop slide (istart = id*N/Nthrds; iend = (id+1)*(N/Nthrds); last thread ends at N) skips iterations unless N mod p is 0 or 1; the number skipped is ((p-1)(rho-1)+gcd(p,rho)-1)/2 when q >= rho - 1, in particular for N >= p^2 (equation 12.3; for p = 5, N = 9 it fails), checked for p = 2..12, p^2 <= N <= 400 (2221 of 3762 pairs defective).",
+    "W4L2 slide: static scheduling 'done at compile time'. The static assignment is a function of n, p and the chunk size computed at loop entry; the compiler does not know p: gcc 13.3 emits calls of omp_get_num_threads and omp_get_thread_num for a schedule(static) loop (listing asm.c).",
+    "W4L2: the critical program is preferable because it uses less memory, which matters for large programs. The padded array holds 64p bytes independent of N, so the saving does not grow with the problem.",
+    "W4L2 and W4L3 slide footnotes disagree about the compiler optimization level of the timing tables (padded slide: default O2; false-sharing, critical and reduction slides: no optimization).",
+    "W4L3 attributes the four-thread 0.68 s versus 0.53 s difference to reduction overhead. Local assembly and synchronization costs give a microsecond merge estimate, not a universal upper bound or a measurement of the older compiler. Fresh reduction/critical ratios span about 0.59-1.15 at -O2 and 0.61-1.05 at -O0; neither version consistently wins.",
+    "W4L3 default(none) slide: the reduction operator * does not match the update +=, and x = 0.0 would make a product 0. The compiler reports j and y, as the lecture says (N is not declared on the slide; it is a macro in the listing).",
+    "W4L3 firstprivate(incr) slide: the loop result differs from the serial result because incr is still a recurrence; with schedule(static,4) on 4 threads the output is 1 1 2 2 1 1 2 2 ... against 1 1 2 2 3 3 ... serially.",
+    "W4L3: 'shared' and 'default' only on 'parallel': the specification allows parallel, task, taskloop and teams (pp. 109-110). The inner-loop-index trap is specific to C and C++ (Fortran: private, p. 97).",
+    "W4L3 reduction slide: confirmed (initial values, original value takes part); refinement: the operator - is deprecated in OpenMP 5.2 (Table 5.1, p. 129)."
+  ],
+  "sections": [
+    {
+      "section": "The objects of the chapter and the running case",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None; defines the objects used by all sections.",
+      "research_extension": "OpenMP 5.2 section 15.2 p. 300, 15.3.1 p. 301, 4.4.2 p. 91.",
+      "teaching_construction": "Ordering edges, loop schedules, data environments, cost symbols, the Jacobi sweep (12.1).",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "Mutual exclusion and ordering: critical, atomic and barrier",
+      "video_id": "794Q2Vg6i_k",
+      "start": 278,
+      "end": 487,
+      "lecture_material": "critical and barrier slides; atomic named as a later topic.",
+      "research_extension": "OpenMP 5.2 15.2, 15.3.1, 15.8.4; libgomp manual 13.2, 13.3; assembly of three constructs.",
+      "teaching_construction": "asm.c, barrier_demo.c, general rule for when a barrier is needed.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "The pi program with a private scalar and one critical update",
+      "video_id": "794Q2Vg6i_k",
+      "start": 487,
+      "end": 853,
+      "lecture_material": "pi with a private sum and one critical update; timing tables; the open question of a critical region inside the loop.",
+      "research_extension": "None beyond the specification.",
+      "teaching_construction": "Table 12.1 with speedups, serial-fraction estimate, equation (12.2), pi_variants.c, crit_loop.c.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "Parallel loops: the worksharing construct",
+      "video_id": "794Q2Vg6i_k",
+      "start": 853,
+      "end": 1015,
+      "lecture_material": "omp for, SPMD equivalent, combined construct, loop-carried dependences and their removal.",
+      "research_extension": "OpenMP 5.2 11.5, 4.4.1-4.4.2, 17.2.",
+      "teaching_construction": "Defect of the SPMD split on the slide, equation (12.3) and its proof, loop_cover.c.",
+      "evidence_class": "theorem"
+    },
+    {
+      "section": "Loop schedules and load balance",
+      "video_id": "794Q2Vg6i_k",
+      "start": 1015,
+      "end": 1407,
+      "lecture_material": "schedule(static) and schedule(dynamic), chunk sizes, when to use each.",
+      "research_extension": "OpenMP 5.2 11.5.3; libgomp manual (OMP_SCHEDULE, 13.11); Graham 1966; assembly of a schedule(static) loop.",
+      "teaching_construction": "sched_map.c, dyn_cost.c, equations (12.4)-(12.6), imbalance.c.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Reductions",
+      "video_id": "jLHvSnw68Pw",
+      "start": 6,
+      "end": 533,
+      "lecture_material": "reduction clause, operators, initial values, pi with a reduction.",
+      "research_extension": "OpenMP 5.2 section 5.5; GCC floating-type documentation; self-contained accumulation-error bound and exact binary128 reference argument.",
+      "teaching_construction": "Reproducibility condition, summation error bound, reduction_sem.c, fp_red.c.",
+      "evidence_class": "theorem"
+    },
+    {
+      "section": "What synchronization costs, and the nowait clause",
+      "video_id": "jLHvSnw68Pw",
+      "start": 533,
+      "end": 760,
+      "lecture_material": "critical and barrier are expensive; nowait slide.",
+      "research_extension": "OpenMP 5.2 15.6, 4.4.5, 11 (p. 240).",
+      "teaching_construction": "sync_cost.c, equation (12.7), hazard test, nowait_demo.c.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Data-sharing attributes",
+      "video_id": "jLHvSnw68Pw",
+      "start": 760,
+      "end": 1365,
+      "lecture_material": "default attributes, shared, private, firstprivate, default(none), inner loop index, private and the original variable.",
+      "research_extension": "OpenMP 5.2 5.1, 5.3, 5.4, 17.2.",
+      "teaching_construction": "storage.c, data_clauses.c, defnone.c, jshared.c.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "The running case: Jacobi with a parallel loop",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None; applies the chapter to the book's Jacobi iteration.",
+      "research_extension": "None.",
+      "teaching_construction": "jacobi_omp.c, jacobi_time.c.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "What the models establish and what they do not",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Table 12.2 lists the lecture statements tested.",
+      "research_extension": "None.",
+      "teaching_construction": "Scope and limits.",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "OpenMP Application Programming Interface, Version 5.2 (November 2021)",
+      "url": "https://www.openmp.org/wp-content/uploads/OpenMP-API-Specification-5-2.pdf",
+      "supports": "Printed pages: 1.3 p. 24; 4.4.1-4.4.2 pp. 85-91; 4.4.5 p. 95; 5.1 pp. 96-100; 5.3 pp. 104-108; 5.4 pp. 109-116; 5.5 pp. 126-136; 11 p. 240; 11.5 pp. 247-253; 15.2-15.3 pp. 299-302; 15.6 p. 308; 15.8.4 pp. 311-313; 17.2 pp. 339-340.",
+      "page_checked": "full text read for the sections listed"
+    },
+    {
+      "title": "libgomp manual, OMP_SCHEDULE",
+      "url": "https://gcc.gnu.org/onlinedocs/libgomp/OMP_005fSCHEDULE.html",
+      "supports": "If OMP_SCHEDULE is undefined, dynamic scheduling with chunk size 1 is used.",
+      "page_checked": "whole page, 2026-10-27"
+    },
+    {
+      "title": "libgomp manual, Implementing CRITICAL construct",
+      "url": "https://gcc.gnu.org/onlinedocs/libgomp/Implementing-CRITICAL-construct.html",
+      "supports": "Unnamed critical uses GOMP_critical_start and GOMP_critical_end; named critical uses a lock per name.",
+      "page_checked": "whole page, 2026-10-27"
+    },
+    {
+      "title": "libgomp manual, Implementing ATOMIC construct",
+      "url": "https://gcc.gnu.org/onlinedocs/libgomp/Implementing-ATOMIC-construct.html",
+      "supports": "atomic uses the __sync builtins where the target provides them; reductions use GOMP_reduction_start and GOMP_reduction_end.",
+      "page_checked": "whole page, 2026-10-27"
+    },
+    {
+      "title": "libgomp manual, Implementing REDUCTION clause",
+      "url": "https://gcc.gnu.org/onlinedocs/libgomp/Implementing-REDUCTION-clause.html",
+      "supports": "Reduction values are merged by an atomic update, a critical section, or an array collected by the primary thread after a barrier.",
+      "page_checked": "whole page, 2026-10-27"
+    },
+    {
+      "title": "libgomp manual, Implementing FOR construct",
+      "url": "https://gcc.gnu.org/onlinedocs/libgomp/Implementing-FOR-construct.html",
+      "supports": "In the current release, for schedule(static) without ordered, one call returns the thread number and the thread count; gcc 13.3 does not use it (it calls omp_get_num_threads and omp_get_thread_num).",
+      "page_checked": "whole page, 2026-10-27"
+    },
+    {
+      "title": "R. L. Graham, Bounds for certain multiprocessing anomalies, Bell System Technical Journal 45(9), 1966, 1563-1581",
+      "url": "https://archive.org/details/bstj45-9-1563",
+      "supports": "List scheduling (pp. 1563-1564); the ratio 2 - 1/n between finishing times of two lists (theorem p. 1571, restated p. 1581); longest-first bound 4/3 - 1/(3n) for independent tasks stated without proof (p. 1581).",
+      "page_checked": "Internet Archive OCR text of the scan, all pages"
+    },
+    {
+      "title": "GNU GCC manual, Additional Floating Types",
+      "url": "https://gcc.gnu.org/onlinedocs/gcc/Floating-Types.html",
+      "supports": "__float128 is supported on x86-64 and aliases _Float128 there; binary128 precision is checked on the local build. The exactness of this particular accumulation is derived in the chapter.",
+      "page_checked": "Whole page opened 2026-10-28 UTC; gcc 13.3 macro __FLT128_MANT_DIG__ verified as 113."
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "p, T_1, T_p, S_p, E_p, f",
+      "first_section": "model",
+      "definition": "p is the number of threads; T_1 and T_p are wall-clock times on one and p threads; S_p = T_1/T_p is speedup; E_p = S_p/p is parallel efficiency; f is the serial fraction of T_1 in Amdahl’s model. Each experiment identifies its one-thread baseline."
+    },
+    {
+      "symbol": "a ≺ b",
+      "first_section": "model",
+      "definition": "A construct forces event a to complete before event b begins."
+    },
+    {
+      "symbol": "J (calligraphic), J_t, n, chunk, k",
+      "first_section": "model",
+      "definition": "Iteration set {0..n-1} and the set of thread t; chunk = contiguous non-empty subset; k = chunk size."
+    },
+    {
+      "symbol": "c(i), T_work, w_t, E_dist",
+      "first_section": "model",
+      "definition": "Cost of iteration i in seconds; total service time in seconds on a reference processor; thread load; assignment efficiency T_work/(p max w_t). T_work avoids repurposing book-wide W (operation count)."
+    },
+    {
+      "symbol": "obj_t(x)",
+      "first_section": "model",
+      "definition": "Storage object that variable x denotes for thread t inside a construct."
+    },
+    {
+      "symbol": "delta, delta_q(p)",
+      "first_section": "model",
+      "definition": "Time to take one chunk; time between two takes when all threads are taking."
+    },
+    {
+      "symbol": "s, t_crit(p), t_bar",
+      "first_section": "model",
+      "definition": "Time inside one critical region; time between consecutive entries into a region kept busy by p threads; time of one barrier."
+    },
+    {
+      "symbol": "I = F/Q, I*",
+      "first_section": "jacobi",
+      "definition": "Arithmetic intensity of the Jacobi sweep (0.21 flop/B) and the ridge of chapter 10 (9.3 flop/B); book-wide meaning."
+    },
+    {
+      "symbol": "r",
+      "first_section": "model",
+      "definition": "Jacobi residual, max over interior cells of |unew - u| (equation 12.1)."
+    },
+    {
+      "symbol": "w, N (critical loop)",
+      "first_section": "pi-critical",
+      "definition": "Work per iteration outside the critical region; number of iterations."
+    },
+    {
+      "symbol": "q, rho, g",
+      "first_section": "loops",
+      "definition": "N = q p + rho with 0 < rho < p, and g = gcd(p, rho), in equation (12.3)."
+    },
+    {
+      "symbol": "C_j (j = 1..M), C_max, sigma",
+      "first_section": "schedules",
+      "definition": "Cost of chunk j; largest chunk cost; start time of the chunk that finishes last."
+    },
+    {
+      "symbol": "c_hi, k*",
+      "first_section": "schedules",
+      "definition": "Cost of the last (most expensive) iteration; chunk size that minimizes the bound (12.6)."
+    },
+    {
+      "symbol": "x_0, e, P_t",
+      "first_section": "reduction",
+      "definition": "Original value of the reduction variable; identity of the operator; partial result of thread t."
+    },
+    {
+      "symbol": "gamma_nu, epsilon",
+      "first_section": "reduction",
+      "definition": "nu epsilon / (1 - nu epsilon); unit roundoff 2^-53."
+    },
+    {
+      "symbol": "w_{t,l}, K",
+      "first_section": "nowait",
+      "definition": "Time of thread t in phase l (ell); number of phases separated by barriers (equation 12.7)."
+    },
+    {
+      "symbol": "h_g",
+      "first_section": "model",
+      "definition": "Grid spacing 1/(N+1); the discrete-Laplacian norm of the old grid is 4r/h_g^2, while r is its fixed-point update norm."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python code_lab.py --chapter 12",
+    "listings": 19,
+    "all_passed": true,
+    "verified_date_utc": "2026-10-28",
+    "note": "Full final-code run returned 0 with 19 listings passing. Nine nondeterministic programs also ran four times in an exclusive measurement session; printed samples are capture 4."
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "REVISE (4 blocking, 8 major, 20 minor)",
+      "changes": "Repaired the gcc 13.3 versus current libgomp ABI distinction; corrected observed reduction-error and queue-throughput claims; replaced the copy-bandwidth speedup bound with paired absolute throughput and explicit traffic assumptions. Stated the partition formula domain, distinguished its Amdahl limit from a finite-p formula, checked scheduling-cost predictions, qualified static schedule reproducibility and false-sharing attribution, reconciled lecture coverage, derived the floating-point accumulation bound and justified the exact binary128 reference, and repaired symbol collisions. Applied minor source, compiler-setting, output, barrier, data-sharing and exercise corrections. Replaced unavailable historical measurements with four retained exclusive-session capture sets. Current inventory and full code-lab run both contain 19 listings; the earlier review’s 21-count artifact was unavailable. Prior REVISE verdict is preserved."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT WITH FIXES (1 blocking, 1 major, 2 minor)",
+      "changes": "B1: atomic is no longer asserted to be universally cheaper; its relative cost depends on operation, implementation and contention. M1: defined p, T_1, T_p, S_p, E_p and f in the model section and symbol ledger, retaining explicit baseline distinctions. m1: Table 12.2 calls local synchronization costs a scale estimate that does not measure the slide compiler. m2: the split proof now requires each start to be no greater than its end, allowing harmless empty ranges. Added the mixed-clock capture-provenance limitation without asserting proven overlap or drift. No program or captured output changed; the retained full 19-listing pass remains applicable. Independent round 3 verification is pending."
+    },
+    {
+      "round": 3,
+      "verdict": "ACCEPT (0 blocking, 0 major, 0 minor)",
+      "changes": "Targeted independent verification confirmed all four round-2 repairs and adjacent consistency. All complete program and output blocks remained byte-for-byte unchanged from the round-2 baseline; the retained 19-listing execution record remains applicable within its execution-only limits. This was not a fresh full-chapter scientific review."
+    }
+  ]
+}

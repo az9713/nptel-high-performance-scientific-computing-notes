@@ -18,15 +18,16 @@ claims that could not be checked.
 
 **This is a partial edition.** The plan groups **75 recordings** (playlist items
 2–76) into **31 chronological topic chapters**; the 2-minute course trailer is
-outside the selected scope. **Chapters 1–11 are written.** They cover the first
-**20 recordings**, from Week 0 Lecture 0 to Week 4 Lecture 1: the Linux
+outside the selected scope. **Chapters 1–12 are written.** They cover the first
+**22 recordings**, from Week 0 Lecture 0 to Week 4 Lecture 3: the Linux
 environment, HPC hardware and memory, concurrency, the cost of numerical models,
-memory bottlenecks, and an introduction to OpenMP. **Chapters 12–31 (OpenMP II
-onward: MPI, GPUs and CUDA, OpenACC, profiling, libraries, schedulers) are not
-yet written**; the lecture index lists them as pending.
+memory bottlenecks, and OpenMP threads, synchronization, scheduling, reductions
+and data sharing. **Chapters 13–31 (OpenMP III onward: MPI, GPUs and CUDA,
+OpenACC, profiling, libraries, schedulers) are not yet written**; the lecture
+index lists them as pending.
 
-The written chapters contain **66 expandable solution disclosures** and **125
-runnable listings** (56 C, 43 Python, 26 Bash). Transcripts were produced
+The written chapters contain **72 expandable solution disclosures** and **144
+runnable listings** (75 C, 43 Python, 26 Bash). Transcripts were produced
 locally with faster-whisper `small.en`; they are machine transcriptions, not
 publisher captions. The NPTEL caption tracks on the playlist are attached to
 the wrong videos and were not used.
@@ -78,8 +79,10 @@ findings. Chapters 1, 2 and 4–8 reached that verdict in round 2. Chapters 3, 9
 10 and 11 needed more rounds: their round-2 reviews still recorded one blocking
 finding each, so each received further independent rounds until one recorded
 zero blocking findings (round 3 for chapter 3, round 4 for chapters 9 and 11,
-round 5 for chapter 10). The author then repaired the remaining major and minor
-findings of that round.
+round 5 for chapter 10). Chapter 12 reached ACCEPT with zero findings in round 3
+after the author repaired one blocking, one major and two minor round-2 findings.
+The author repaired the remaining major and minor findings of the other chapters’
+final rounds.
 
 The [workflow](WORKFLOW.md), [source record](source-validation-summary.json),
 [editorial record](editorial-review-summary.json), [content inventory](completion.json),

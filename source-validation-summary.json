@@ -1,16 +1,16 @@
 {
-  "checked_at_utc": "2026-10-27T19:05:42.990598+00:00",
+  "checked_at_utc": "2026-10-28T05:05:53.320896+00:00",
   "scope": "Manifest assignments and retained local transcript-file hashes; not a new source-content review",
   "chapter_count": 31,
-  "written_chapters": 11,
+  "written_chapters": 12,
   "recording_count": 75,
-  "recordings_used_by_written_chapters": 20,
+  "recordings_used_by_written_chapters": 22,
   "transcript_provenance": "Local machine transcription with faster-whisper small.en; not publisher captions",
   "limitations": [
     "The NPTEL caption tracks on the playlist are attached to the wrong videos (shifted by about one item); they were not used.",
     "Machine transcripts can contain recognition errors. Chapter source uncertainties and timestamped citations remain in the chapter sidecars.",
     "Raw media, transcripts, slide frames and private editorial records are excluded from the repository.",
-    "Recordings assigned to chapters 12-31 are transcribed but not yet used by a written chapter."
+    "Recordings assigned to chapters 13-31 are not yet used by a written chapter."
   ],
   "recordings": [
     {
@@ -260,7 +260,7 @@
       "kind": "lecture",
       "url": "https://www.youtube.com/watch?v=794Q2Vg6i_k",
       "chapter_order": 12,
-      "chapter_written": false,
+      "chapter_written": true,
       "manifest_duration_seconds": 1407,
       "transcript_provenance": "local machine transcription (faster-whisper small.en)",
       "transcript_json_sha256": "4cad383193235db61921de940333691224629c19f98b921907a895efc11b3534"
@@ -272,7 +272,7 @@
       "kind": "lecture",
       "url": "https://www.youtube.com/watch?v=jLHvSnw68Pw",
       "chapter_order": 12,
-      "chapter_written": false,
+      "chapter_written": true,
       "manifest_duration_seconds": 1365,
       "transcript_provenance": "local machine transcription (faster-whisper small.en)",
       "transcript_json_sha256": "6fb45cdad56ef8a14fbbec9662a6d780bb7eaa45b9fed3498b7a9b190b34254a"

@@ -1266,6 +1266,116 @@
       "teaching_construction": "Six exercises with full solutions: derive, compute, counterexample, diagnose an assumption, design judgment, implementation and measurement.",
       "evidence_class": "engineering check",
       "chapter": "chapter-11-openmp-threads-and-work-distribution.html"
+    },
+    {
+      "section": "The objects of the chapter and the running case",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None; defines the objects used by all sections.",
+      "research_extension": "OpenMP 5.2 section 15.2 p. 300, 15.3.1 p. 301, 4.4.2 p. 91.",
+      "teaching_construction": "Ordering edges, loop schedules, data environments, cost symbols, the Jacobi sweep (12.1).",
+      "evidence_class": "definition",
+      "chapter": "chapter-12-openmp-synchronization-loops-data-sharing.html"
+    },
+    {
+      "section": "Mutual exclusion and ordering: critical, atomic and barrier",
+      "video_id": "794Q2Vg6i_k",
+      "start": 278,
+      "end": 487,
+      "lecture_material": "critical and barrier slides; atomic named as a later topic.",
+      "research_extension": "OpenMP 5.2 15.2, 15.3.1, 15.8.4; libgomp manual 13.2, 13.3; assembly of three constructs.",
+      "teaching_construction": "asm.c, barrier_demo.c, general rule for when a barrier is needed.",
+      "evidence_class": "engineering check",
+      "chapter": "chapter-12-openmp-synchronization-loops-data-sharing.html"
+    },
+    {
+      "section": "The pi program with a private scalar and one critical update",
+      "video_id": "794Q2Vg6i_k",
+      "start": 487,
+      "end": 853,
+      "lecture_material": "pi with a private sum and one critical update; timing tables; the open question of a critical region inside the loop.",
+      "research_extension": "None beyond the specification.",
+      "teaching_construction": "Table 12.1 with speedups, serial-fraction estimate, equation (12.2), pi_variants.c, crit_loop.c.",
+      "evidence_class": "empirical result",
+      "chapter": "chapter-12-openmp-synchronization-loops-data-sharing.html"
+    },
+    {
+      "section": "Parallel loops: the worksharing construct",
+      "video_id": "794Q2Vg6i_k",
+      "start": 853,
+      "end": 1015,
+      "lecture_material": "omp for, SPMD equivalent, combined construct, loop-carried dependences and their removal.",
+      "research_extension": "OpenMP 5.2 11.5, 4.4.1-4.4.2, 17.2.",
+      "teaching_construction": "Defect of the SPMD split on the slide, equation (12.3) and its proof, loop_cover.c.",
+      "evidence_class": "theorem",
+      "chapter": "chapter-12-openmp-synchronization-loops-data-sharing.html"
+    },
+    {
+      "section": "Loop schedules and load balance",
+      "video_id": "794Q2Vg6i_k",
+      "start": 1015,
+      "end": 1407,
+      "lecture_material": "schedule(static) and schedule(dynamic), chunk sizes, when to use each.",
+      "research_extension": "OpenMP 5.2 11.5.3; libgomp manual (OMP_SCHEDULE, 13.11); Graham 1966; assembly of a schedule(static) loop.",
+      "teaching_construction": "sched_map.c, dyn_cost.c, equations (12.4)-(12.6), imbalance.c.",
+      "evidence_class": "derivation",
+      "chapter": "chapter-12-openmp-synchronization-loops-data-sharing.html"
+    },
+    {
+      "section": "Reductions",
+      "video_id": "jLHvSnw68Pw",
+      "start": 6,
+      "end": 533,
+      "lecture_material": "reduction clause, operators, initial values, pi with a reduction.",
+      "research_extension": "OpenMP 5.2 section 5.5; GCC floating-type documentation; self-contained accumulation-error bound and exact binary128 reference argument.",
+      "teaching_construction": "Reproducibility condition, summation error bound, reduction_sem.c, fp_red.c.",
+      "evidence_class": "theorem",
+      "chapter": "chapter-12-openmp-synchronization-loops-data-sharing.html"
+    },
+    {
+      "section": "What synchronization costs, and the nowait clause",
+      "video_id": "jLHvSnw68Pw",
+      "start": 533,
+      "end": 760,
+      "lecture_material": "critical and barrier are expensive; nowait slide.",
+      "research_extension": "OpenMP 5.2 15.6, 4.4.5, 11 (p. 240).",
+      "teaching_construction": "sync_cost.c, equation (12.7), hazard test, nowait_demo.c.",
+      "evidence_class": "engineering check",
+      "chapter": "chapter-12-openmp-synchronization-loops-data-sharing.html"
+    },
+    {
+      "section": "Data-sharing attributes",
+      "video_id": "jLHvSnw68Pw",
+      "start": 760,
+      "end": 1365,
+      "lecture_material": "default attributes, shared, private, firstprivate, default(none), inner loop index, private and the original variable.",
+      "research_extension": "OpenMP 5.2 5.1, 5.3, 5.4, 17.2.",
+      "teaching_construction": "storage.c, data_clauses.c, defnone.c, jshared.c.",
+      "evidence_class": "engineering check",
+      "chapter": "chapter-12-openmp-synchronization-loops-data-sharing.html"
+    },
+    {
+      "section": "The running case: Jacobi with a parallel loop",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "None; applies the chapter to the book's Jacobi iteration.",
+      "research_extension": "None.",
+      "teaching_construction": "jacobi_omp.c, jacobi_time.c.",
+      "evidence_class": "empirical result",
+      "chapter": "chapter-12-openmp-synchronization-loops-data-sharing.html"
+    },
+    {
+      "section": "What the models establish and what they do not",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Table 12.2 lists the lecture statements tested.",
+      "research_extension": "None.",
+      "teaching_construction": "Scope and limits.",
+      "evidence_class": "engineering check",
+      "chapter": "chapter-12-openmp-synchronization-loops-data-sharing.html"
     }
   ]
 }
