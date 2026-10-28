@@ -1,11 +1,11 @@
 {
-  "checked_at_utc": "2026-10-28T12:37:58.686966+00:00",
+  "checked_at_utc": "2026-10-28T14:22:02.299990+00:00",
   "status": "passed",
-  "tested_commit": "2a50fdadbb9658ce9017de691e435e30f2aa5dc5",
+  "tested_commit": "f3b7ecfc18e76400d96a0c82ee66deb166873fed",
   "live_url": "https://az9713.github.io/nptel-high-performance-scientific-computing-notes/",
   "scope": "Actual served-file byte agreement and focused live reader controls; not a scientific review",
   "byte_reference": "Canonical blobs from the pinned commit via git cat-file --batch; no archive line-ending conversion",
-  "public_files_checked": 82,
+  "public_files_checked": 94,
   "all_served_bytes_match_git": true,
   "mismatched_files": [],
   "browser": [
@@ -314,13 +314,121 @@
       "file": "chapter-25-openacc-loop-optimization-asynchrony-multiple-devices.html",
       "viewport": 390,
       "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 126,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-26-multi-device-profiling-mpi-cuda-openacc.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 126,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-26-multi-device-profiling-mpi-cuda-openacc.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 85,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-27-serial-profiling-debugging-gprof-valgrind-gdb.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 85,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-27-serial-profiling-debugging-gprof-valgrind-gdb.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 66,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-28-mpi-performance-analysis-and-debugging.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 66,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-28-mpi-performance-analysis-and-debugging.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 312,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-29-numerical-methods-scientific-libraries.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 312,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-29-numerical-methods-scientific-libraries.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 103,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-30-batch-schedulers-scientific-visualization.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 103,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-30-batch-schedulers-scientific-visualization.html",
+      "viewport": 390,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 155,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-31-heterogeneous-computing-processor-trends.html",
+      "viewport": 1280,
+      "status": "passed"
+    },
+    {
+      "mathErrors": 0,
+      "mathNodes": 155,
+      "overflow": false,
+      "controls": true,
+      "file": "chapter-31-heterogeneous-computing-processor-trends.html",
+      "viewport": 390,
+      "status": "passed"
     }
   ],
   "served_files": [
     {
       "file": ".gitattributes",
       "bytes_match_git": true,
-      "sha256": "8d300b4e4ee00127ac2af6b9b0733e2b10ac2636e608e75ce49581b93f17a9d4"
+      "sha256": "af8a2d5d2145eba297178a157bc6a65099b0b07a1f67d2cfb95c686e6e743ad1"
     },
     {
       "file": ".gitignore",
@@ -335,12 +443,12 @@
     {
       "file": "README.md",
       "bytes_match_git": true,
-      "sha256": "e75c52db66ddff696f4d9b12379ebe3335fb519e58a1b086f01b07ad85f5169b"
+      "sha256": "de0f2f32022f8991ec161ab5921169b5f91c8df0b92f0469e507e3484a3bd40d"
     },
     {
       "file": "WORKFLOW.md",
       "bytes_match_git": true,
-      "sha256": "0842b2bd9cbc4663ba2f45d6fe70055a6eef27d728f82d05af2e15012f2e2786"
+      "sha256": "951fb820c35f48f35a4325b7d71434310657013ed32e9cb5bb379b8c1e298cc3"
     },
     {
       "file": "assets/book.css",
@@ -365,12 +473,12 @@
     {
       "file": "assets/preview-mobile.png",
       "bytes_match_git": true,
-      "sha256": "e77375e2ea01514f3539b02f38b3d7b9d0918740674fa411006e327d6f8cd7af"
+      "sha256": "a9ce5f0486892ab5f4b2269758ba0d7d8d458076100456b0120eb13c89aeaf8e"
     },
     {
       "file": "assets/preview.png",
       "bytes_match_git": true,
-      "sha256": "7b19e1495aca1140ccbd3a1b199c57f218a08397aaf1627bd317c3caf54140e1"
+      "sha256": "98fe861d159f3055dc976f5d0ce226ea4335c747321a1e91382985f5edc0077f"
     },
     {
       "file": "assets/site-preview.png",
@@ -625,7 +733,7 @@
     {
       "file": "chapter-25-openacc-loop-optimization-asynchrony-multiple-devices.html",
       "bytes_match_git": true,
-      "sha256": "609971ebe4a81af06506985ce9e84fb12eb783289174a59d1e728400bbcf5aef"
+      "sha256": "81419a7607e240864789b224c47500bb34e653b11c9227bae7ef140a840d62c7"
     },
     {
       "file": "chapter-25-openacc-loop-optimization-asynchrony-multiple-devices.meta.json",
@@ -633,14 +741,74 @@
       "sha256": "55e2b27fea79623f570601f059d16ca3fb1b65ddcd77433c6258382f4944b200"
     },
     {
+      "file": "chapter-26-multi-device-profiling-mpi-cuda-openacc.html",
+      "bytes_match_git": true,
+      "sha256": "2f555b61efb225473ddb5c30c34aee8cd65d21fbb5339dd01dc49c23a3f64395"
+    },
+    {
+      "file": "chapter-26-multi-device-profiling-mpi-cuda-openacc.meta.json",
+      "bytes_match_git": true,
+      "sha256": "7abc1c2a5a3a3a614fc4ac523d651520f873a5bcb503ba238dc9c982c8914a23"
+    },
+    {
+      "file": "chapter-27-serial-profiling-debugging-gprof-valgrind-gdb.html",
+      "bytes_match_git": true,
+      "sha256": "cb1d1deee5802f78105c3d522716a15af996181b73aeefa571519fab12fc18c0"
+    },
+    {
+      "file": "chapter-27-serial-profiling-debugging-gprof-valgrind-gdb.meta.json",
+      "bytes_match_git": true,
+      "sha256": "8c84a8f222a48f928efd00b49e8a282bf041023c53eec5216d2def22ab82ec5a"
+    },
+    {
+      "file": "chapter-28-mpi-performance-analysis-and-debugging.html",
+      "bytes_match_git": true,
+      "sha256": "2be1860cec2dfa89c50c23a248104fefa162c46c6a1345e473a881eea562dfe4"
+    },
+    {
+      "file": "chapter-28-mpi-performance-analysis-and-debugging.meta.json",
+      "bytes_match_git": true,
+      "sha256": "e3aab2132dcee89091202f0e4377e3ca55c099260264a32344f8d780d74a4d59"
+    },
+    {
+      "file": "chapter-29-numerical-methods-scientific-libraries.html",
+      "bytes_match_git": true,
+      "sha256": "05f55d4bf5123c1c6e2f06ec9f3b1620f6f070747a7aba2ca766afde6e560a02"
+    },
+    {
+      "file": "chapter-29-numerical-methods-scientific-libraries.meta.json",
+      "bytes_match_git": true,
+      "sha256": "f09a0e41a0ca8b1341293978903c4a68397e8b628a4e29d96aa296ffecb6db26"
+    },
+    {
+      "file": "chapter-30-batch-schedulers-scientific-visualization.html",
+      "bytes_match_git": true,
+      "sha256": "500e8d1a17026db81c39a16373cbfe1ec9edadc64caa881756a441fe23c3823f"
+    },
+    {
+      "file": "chapter-30-batch-schedulers-scientific-visualization.meta.json",
+      "bytes_match_git": true,
+      "sha256": "dcad75403caf63dc11b5464998a5616c1d0ff0693587e43b0ed80bfe5117bdb2"
+    },
+    {
+      "file": "chapter-31-heterogeneous-computing-processor-trends.html",
+      "bytes_match_git": true,
+      "sha256": "69dfb2450b03459429206fd13b2a78589bc0b6b31464691bc9ad6257588d9e84"
+    },
+    {
+      "file": "chapter-31-heterogeneous-computing-processor-trends.meta.json",
+      "bytes_match_git": true,
+      "sha256": "24b624b94af06c14dca06759b602774e1b3b427ff317414703cbdcd5d95b06d1"
+    },
+    {
       "file": "chapter-code-validation.json",
       "bytes_match_git": true,
-      "sha256": "7ba729ce7cb376211487504b06e8972b01f793d7d5788308eeab88e851dd6560"
+      "sha256": "eb4e2cb17ccfc743cc9226aa6e101815142056a8cad6fe8bbf82e34ffafdb632"
     },
     {
       "file": "code-lab.html",
       "bytes_match_git": true,
-      "sha256": "a0251a1d65855356246e5105b841b6551770e36c5baab7f4603e851ba16ee141"
+      "sha256": "302cda274d8942f22d18408bbc736d7bb5a14b57507997fa03007fa47aac58be"
     },
     {
       "file": "code_lab.py",
@@ -650,62 +818,62 @@
     {
       "file": "completion.json",
       "bytes_match_git": true,
-      "sha256": "659fd6fce3cade89b291a13bfcab5a3c2fff5c0f8c5d857b0e92327f03d775b9"
+      "sha256": "6f3919544169d18a1f5a7be0b58c3b34920121c3c2e9cc2ad850ab9ba1a661a3"
     },
     {
       "file": "editorial-review-summary.json",
       "bytes_match_git": true,
-      "sha256": "5df3efbf0febe7642fcf93250e55ccea7e06e8bbf1ac7c4a2fad1063b0c29fa4"
+      "sha256": "34bd107701dd6707a2a2f0f19e7d2f823264b5908cd390a3e5cee835bebe9fad"
     },
     {
       "file": "index.html",
       "bytes_match_git": true,
-      "sha256": "ba79bb216f17816232e9ebb4457bf6d1ba69e45dd8b879dc01fdd484700a7fdc"
+      "sha256": "45c711bc5ad93c703abaf98f42aec6b787bb52ee84b50fcc61f4aa159e221014"
     },
     {
       "file": "package-validation.json",
       "bytes_match_git": true,
-      "sha256": "7f4951355b81a56f154fd905ad64cd868b0cdda92e69a1c0ed9667018d97102c"
+      "sha256": "083cf848f94e9245b331fcfe929c829504075b0805400424b1cb55726212ab4c"
     },
     {
       "file": "publication-validation.json",
       "bytes_match_git": true,
-      "sha256": "03b3a748b9bd4ebd56d6cf383d01dab6cf31c7602585f16b3238879eb1f5d126"
+      "sha256": "4d82f00a547312fdcc8d707a5c3cf984c3615c81c82d90f190f7476f829213ed"
     },
     {
       "file": "reader-validation.json",
       "bytes_match_git": true,
-      "sha256": "ba7629be842cc518038ce966db2c652cf3848bc89ea47211cc8b741ae2806e22"
+      "sha256": "cc9ce1d2586d2160fed47a1b943bf86a4db15953ce474e9ebe096c8e65f4105a"
     },
     {
       "file": "references.html",
       "bytes_match_git": true,
-      "sha256": "b1bd079f9bb1c78391be3474e4cd7ae3436f427364017f0c59f9d056200a485b"
+      "sha256": "7bb78babe6ad0c3e12b7d285e7da88ed6c1654dd318643f10c507ca83ca91c43"
     },
     {
       "file": "source-free-validation.json",
       "bytes_match_git": true,
-      "sha256": "d87a9d269a0beca70e88b04ec5ba16822970f91a14b85e5ff43c9cac9f41aae5"
+      "sha256": "a9f60cb4f40bebfdec1b256d369fbff08673d7f30a2cd0fe3917e18f348284fd"
     },
     {
       "file": "source-manifest.json",
       "bytes_match_git": true,
-      "sha256": "5aad3deca8fa6ddff84c01e233d8e1432f9d692dca95a08cdedc48393039060f"
+      "sha256": "3f9648521a2a70ee09b3ee0db8db216ae48feba7ed3802ed5f951751bee6e848"
     },
     {
       "file": "source-map.html",
       "bytes_match_git": true,
-      "sha256": "a046b0277336ce83a72eefe28dc1525f576c479c7ec78292932e19ac998af281"
+      "sha256": "231687e73b44fc37cc8e2e36bb8618049a6091e387fcb3e1a6630659fb2801b0"
     },
     {
       "file": "source-map.json",
       "bytes_match_git": true,
-      "sha256": "d89e35e838886dff3dc522c4687aeaca01157cd01dfffc8c59258d90b7a20a96"
+      "sha256": "466cd9df25d4b8363562a48565eff926960b7ea0a3795d56727d599fa2bbff05"
     },
     {
       "file": "source-validation-summary.json",
       "bytes_match_git": true,
-      "sha256": "512fc64194389a573f5a733d80336cf15cee46ee0dc4fb97079cac7100628b29"
+      "sha256": "843be7774c86cf9c39972ae6745d5175477e44ad44f28a18b419f487869a0783"
     },
     {
       "file": "tools/build_book.py",
@@ -725,7 +893,7 @@
     {
       "file": "tools/validate_books.py",
       "bytes_match_git": true,
-      "sha256": "6fa78a8d51ae65a4b70f35dd41953b534d8357317a011bf395d61b8dfdabfcea"
+      "sha256": "7de77f96b3ecc8216015137e08c2e770cf0eee70d4312f4df41efd4abb4151b3"
     }
   ]
 }
