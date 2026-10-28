@@ -7,10 +7,10 @@
   "playlist": "PLOzRYVm0a65fSrgx3kroerFJtFjGGIcXm",
   "format": "HTML",
   "publication": "GitHub Pages",
-  "status": "partial edition: chapters 1\u201325 of 31 written; every written chapter has an independent zero-blocking review verdict",
+  "status": "complete edition: all 31 chapters written; every written chapter has an independent zero-blocking review verdict",
   "scope_note": "75 recordings (playlist items 2-76) are grouped into 31 chapters. Week 12 revision lectures (items 71-74) supply practice material. The 2-minute course trailer (item 1) is out of scope.",
   "final_review_pending_chapters": [],
-  "edition_note": "25 reviewed chapters cover 56 source recordings. Chapters 26\u201331 remain pending.",
+  "edition_note": "31 reviewed chapters cover 75 source recordings. All 75 source recordings are covered; the course trailer is excluded.",
   "chapters": [
     {
       "order": 1,
@@ -245,23 +245,23 @@
     },
     {
       "order": 26,
-      "title": "Multi-device programs: profiling-driven OpenACC, MPI with CUDA, MPI with OpenACC",
+      "title": "Multi-device programs: profiling-driven OpenACC, MPI with CUDA, and MPI with OpenACC",
       "recordings": [
         58,
         59,
         60
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     },
     {
       "order": 27,
-      "title": "Profiling and debugging serial codes: gprof, Valgrind, GDB",
+      "title": "Profiling and debugging serial codes: gprof, Valgrind and GDB",
       "recordings": [
         61,
         62,
         63
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     },
     {
       "order": 28,
@@ -270,7 +270,7 @@
         64,
         65
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     },
     {
       "order": 29,
@@ -279,7 +279,7 @@
         66,
         67
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     },
     {
       "order": 30,
@@ -288,11 +288,11 @@
         68,
         69
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     },
     {
       "order": 31,
-      "title": "Heterogeneous computing, processor trends, and the road ahead (with revision)",
+      "title": "Heterogeneous computing: choosing resources under communication, power, and numerical constraints",
       "recordings": [
         70,
         71,
@@ -302,7 +302,7 @@
         75,
         76
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     }
   ],
   "lectures": [

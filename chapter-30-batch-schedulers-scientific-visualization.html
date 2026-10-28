@@ -1,0 +1,2427 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="ba701db7e816d2395aaa66da1bc9946f53d3cb7fda1eacdf2efdc1e171124e2d"><title>Batch schedulers and scientific visualization · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>Batch schedulers and scientific visualization</h1>
+<p class="lead">A heat calculation requests two nodes, four processes per node, two central processing unit (CPU) allocations per process, and ten minutes of wall time. That is sixteen allocated CPUs, not sixteen automatically running threads. Its 1024-by-1024 scalar field occupies 8 MiB as binary double-precision values; two solver buffers occupy 16 MiB before communication and library overhead. A successful batch exit still does not establish that the field is converged, correctly ordered in its output file, or honestly represented by its colors. The task is to carry a scientific result through all four boundaries: allocation, execution, data export, and interpretation.</p>
+<p class="source-note">Grounded in <a href="https://www.youtube.com/watch?v=TwuO7a5KvS8">W11L5: HPC schedulers using Slurm and PBS</a> and <a href="https://www.youtube.com/watch?v=VBnF4ZQaQtY">W11L6: scientific visualization</a>. <strong>Lecture material:</strong> shared-resource scheduling, Slurm commands and policies, PBS management, workflow features and comparison cautions, followed by visualization purposes, ParaView architecture, filters, annotation and VTK formats. <strong>Research extensions:</strong> SchedMD manuals establish command and dependency semantics; OpenPBS manuals establish PBS submission and status syntax; VTK documentation fixes storage conventions; ParaView documentation separates remote processing from rendering; Matplotlib documentation supports normalization and color-map choices. <strong>Original teaching constructions:</strong> the resource budget, reservation example, discrete maximum-principle error bound, VTK round-trip and corruption tests, plotted heat field, and six exercises. Scheduler templates below were not submitted; the verified programs are local arithmetic, scheduling models and data checks.</p>
+<h2 id="model">Objects of the calculation and its two pipelines</h2>
+<p>A batch job is a resource request together with a program and its execution instructions. A node is a machine in the cluster. A task is an application process, often one Message Passing Interface (MPI) rank, where a rank is a process identifier within an MPI communicator. A CPU allocation is the scheduler's configurable execution unit; it can correspond to a physical core or to a hardware thread, according to the site's configuration. It is not a portable synonym for either. A thread is a sequence of execution within a process. Keeping these objects distinct prevents a resource request from silently changing the application's parallel decomposition.</p>
+<p>Let \(n_n\) be the number of allocated nodes, \(r_n\) the number of tasks per node and \(c_r\) the number of allocated CPUs per task. The total number of tasks is \(p=n_n r_n\); the total CPU request is \(n_n r_n c_r\). Here \(p\) retains the book's meaning as a number of processing elements, specifically MPI processes. The requested wall limit \(\tau\) is elapsed time, in seconds or minutes, rather than a sum of CPU times. Memory is a separate constraint, expressed per node in our templates. These requests are a proposed contract with the resource manager; eligibility, placement, policy and hardware availability determine whether it can be granted.</p>
+<p>The scientific object is a dimensionless temperature \(u(x,y)\) on the unit square. The length unit is the square's side. It satisfies the Laplace equation \(\partial^2u/\partial x^2+\partial^2u/\partial y^2=0\) inside the square, with value one along the top edge and zero along the other three edges. We assign the two top corner values zero, consistent with the side boundaries. The boundary data are discontinuous at those corners; claims about smooth convergence near them require special care. For \(N\) interior points in each direction, the spacing is \(h=1/(N+1)\), and the array including boundary points has \((N+2)^2\) entries.</p>
+<p>The solver uses row index \(i\) downward from the top and column index \(j\) to the right, so the physical coordinates are \(x=jh\) and \(y=1-ih\). This distinction is deliberately explicit: array row zero is not physical coordinate zero in the vertical direction. The computational pipeline is request → allocation → launch → solve → validate → export. The visualization pipeline is read → filter → map → render → inspect. A validation decision connects them. A picture may be generated from unconverged data, while perfectly converged data may be rendered upside down. Neither pipeline inherits correctness from the other.</p>
+<p>The large resource example uses \(N=1022\), producing 1024 points per side including boundaries. The executable educational solve uses \(N=14\), producing sixteen points per side, to keep every check finite and transparent. These are different workloads. No timing or memory measurement of the tiny case is extrapolated to the large case. The large case supplies arithmetic and scheduling decisions; the small case supplies a fully checked data path.</p>
+<h2 id="shared">A shared machine needs an allocation policy <a class="timestamp" href="https://www.youtube.com/watch?v=TwuO7a5KvS8&amp;t=6s">W11L5 0:06</a></h2>
+<p>A large cluster is shared by jobs whose shapes differ. One may require many nodes for a short synchronized calculation; another may need one node for a long trajectory; a third may require a graphics processing unit (GPU), large memory or licensed software. Aggregate free CPU count does not decide feasibility. Eight free CPUs split across unsuitable nodes cannot necessarily satisfy a request for eight CPUs and a large contiguous memory allocation on one node. Resources therefore form a vector of constraints rather than one interchangeable scalar.</p>
+<p>Scheduling has competing objectives. Utilization is the fraction of available resource-time that is occupied, after specifying the resource and time interval. Throughput is completed jobs per unit time. Waiting time is start time minus eligible submission time. Turnaround time is completion time minus submission time. A policy can improve one and worsen another: completing ten tiny jobs raises job throughput even if a large scientific result waits longer. Fairness specifies whose work should receive service over time; it is a policy choice, not an inevitable consequence of keeping the machine busy.</p>
+<p>For a fixed observation interval of length \(H\) minutes and \(C\) identical nodes, let \(b(t)\) be the number of occupied nodes at minute \(t\). Node utilization is
+\[ U_{\mathrm{node}}=\frac{1}{CH}\int_0^H b(t)\,dt. \tag{30.1} \]
+The numerator has units node-minutes. It counts occupied nodes, not useful scientific progress. A spinning program can occupy every CPU while making no progress; an allocated node can contain idle cores. State whether a reported utilization measures allocation, active CPU execution or application throughput. These are different observables.</p>
+<p>For our proposed job, two nodes times four tasks per node gives eight MPI ranks. Two CPUs per task gives sixteen allocated CPUs. An MPI program with one thread per rank can leave half those CPU allocations unused unless another runtime uses them. Setting an OpenMP thread count to two only helps if the executable actually contains OpenMP parallel work; OpenMP is a shared-memory programming interface whose threads live within each process. The request, executable, thread configuration and binding must agree. Site guidance is needed to interpret whether sixteen allocated CPUs mean sixteen distinct cores.</p>
+<p>A MiB is \(2^{20}\) bytes. A double-precision scalar here uses the IEEE 754 binary64 format: 64 bits, comprising a sign bit, eleven exponent bits and 52 stored fraction bits. It occupies eight bytes. Its significand, the significant binary digits multiplying a power of two, has 53 bits of precision for normal finite values (<a href="https://docs.oracle.com/cd/E19957-01/806-3568/ncg_math.html">Oracle Numerical Computation Guide, Double Format</a>). The memory arithmetic uses this representation, not a promise about every language's type named double. One 1024-square field therefore occupies \(8(1024)^2=8\) MiB, and two fields occupy sixteen MiB. If every rank accidentally stores both full arrays, four ranks on a node consume 64 MiB just for those buffers. With a true distributed decomposition the owned interiors are smaller, but halo rows, communication buffers and runtime storage remain. An unexplained factor-of-eight difference can come from confusing the replicated model with the distributed model, not from a memory leak.</p>
+<p>The next program takes fixed example parameters and prints the request arithmetic. It writes no files and contacts no service. Its assertions check units and products, including an intentionally conservative replicated-array subtotal against a two-GiB-per-node request. A GiB is \(2^{30}\) bytes. This subtotal is neither a peak-memory measurement nor a proof that the proposed executable fits: interpreter, MPI, libraries, stacks and output buffers are excluded.</p>
+<pre><code class="language-python" data-file="resource_plan.py" data-run="python3 -B resource_plan.py" data-check="exact">"""A local arithmetic check; never contacts a scheduler."""
+N = 1022
+nodes, tasks_per_node, cpus_per_task = 2, 4, 2
+ranks = nodes * tasks_per_node
+requested_cpus = ranks * cpus_per_task
+scalar_bytes = 8 * (N + 2) ** 2
+buffers_bytes = 2 * scalar_bytes
+replicated_per_node = tasks_per_node * buffers_bytes
+MiB = 1024 ** 2
+assert scalar_bytes == 8 * MiB
+assert buffers_bytes == 16 * MiB
+assert replicated_per_node &lt; 2048 * MiB
+print(f"nodes={nodes} ranks={ranks} allocated_cpus={requested_cpus}")
+print(f"one_scalar_MiB={scalar_bytes // MiB} two_buffers_MiB={buffers_bytes // MiB}")
+print(f"replicated_buffers_per_node_MiB={replicated_per_node // MiB}")
+print("not included: halos, interpreter, MPI, libraries, file buffers")
+print("local arithmetic only; no scheduler submission")
+</code></pre>
+<pre><code class="output">nodes=2 ranks=8 allocated_cpus=16
+one_scalar_MiB=8 two_buffers_MiB=16
+replicated_buffers_per_node_MiB=64
+not included: halos, interpreter, MPI, libraries, file buffers
+local arithmetic only; no scheduler submission
+</code></pre>
+<p>The 64-MiB subtotal is small relative to the proposed 2048-MiB limit, but unused memory is not interchangeable with missing CPU capacity. Memory requests can also influence placement even when physical memory is free elsewhere. The practical next step on a real cluster is to measure the actual program at representative size and inspect its accounting, then choose justified margins. Raising every request to the maximum can increase waiting and reduce the set of feasible placements.</p>
+<h2 id="slurm">Slurm separates submission, allocation and launching <a class="timestamp" href="https://www.youtube.com/watch?v=TwuO7a5KvS8&amp;t=136s">W11L5 2:16</a></h2>
+<p>Slurm is a workload manager with a controller, node daemons and optional accounting services. A daemon is a background service. Administrators configure partitions, authentication, node descriptions and policy; a partition is a configured set of nodes with associated limits and access rules. Users submit requests against that configuration. The lecture's deployment discussion is administrative context, not a reason to install a scheduler on the analysis laptop. The local environment used for these notes has no Slurm or PBS commands and no configured cluster service.</p>
+<p>The <a href="https://slurm.schedmd.com/quickstart.html">SchedMD Quick Start User Guide, commands overview</a> distinguishes <code>sbatch</code> for batch submission, <code>srun</code> for launching work, <code>squeue</code> for queued/running job information, <code>scancel</code> for cancellation and <code>sinfo</code> for partition/node information. A job identifier returned after submission identifies an accepted request. It does not mean that the program has started, completed or passed its numerical checks. Pending and running are scheduler states; converged is an application property.</p>
+<p>The following is an <strong>unsubmitted template</strong> for a hypothetical prebuilt MPI/OpenMP executable named <code>jacobi_mpi_omp</code>. It has no code-lab filename because it is not a locally executed example. The directory, executable, input convention, installed MPI integration and any required partition/account must be supplied on the target cluster. The leading directives are parsed by <code>sbatch</code>; they are shell comments when Bash alone reads the file. The <a href="https://slurm.schedmd.com/sbatch.html">sbatch manual, description and resource options</a> documents this parsing and the distinction between CPU-per-task and task count.</p>
+<pre><code class="language-bash">#!/bin/bash
+#SBATCH --job-name=heat
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=4
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=2G
+#SBATCH --time=00:10:00
+#SBATCH --output=heat-%j.out
+set -euo pipefail
+ulimit -c 0
+cd "$SLURM_SUBMIT_DIR"
+export OMP_NUM_THREADS="$SLURM_CPUS_PER_TASK"
+srun ./jacobi_mpi_omp --N 1022 --output heat.vtk</code></pre>
+<p>The final command is an interface example, not an assertion that this exact executable exists. Its one output file presupposes coordinated output by the application, such as a single writer or a parallel file format; eight ranks independently truncating <code>heat.vtk</code> would corrupt it. Allocation does not solve file ownership. Similarly, two CPUs per task do not configure thread affinity by themselves. Launcher options and runtime binding must follow the site's MPI and core-sharing rules.</p>
+<p>Output/error files should retain enough information to diagnose the run: executable identity, grid parameters, tolerances, iteration count, residual, rank count and input identity. Avoid a script that runs the solver, ignores its failure, and finishes with a successful logging command. <a href="https://slurm.schedmd.com/job_exit_code.html">SchedMD's Job Exit Codes page</a> specifies that an <code>sbatch</code> job records the batch script's exit status, while job steps have their own status. A zero script status is still insufficient if the executable never tests its result. The numerical contract must be enforced by the program or an explicit validation stage.</p>
+<p>Fault tolerance also crosses this boundary. Recognizing a failed node and preventing new placements there is resource management. Restoring a numerical trajectory needs a valid checkpoint containing the application's necessary state and a tested restart procedure. A queued retry can rerun from the beginning without restoring anything. The <a href="https://slurm.schedmd.com/faq.html">Slurm FAQ, killed jobs and job management</a> treats failures and requeueing as separate operations; it does not promise transparent migration of arbitrary process memory. The broad advanced-feature slide should therefore be read as a list of mechanisms to configure, not automatic protection for every executable.</p>
+<h2 id="policy">Priority, fair share and backfilling answer different questions <a class="timestamp" href="https://www.youtube.com/watch?v=TwuO7a5KvS8&amp;t=365s">W11L5 6:05</a></h2>
+<p>Priority orders eligible candidates. Fair share adjusts service according to past consumption and assigned entitlement. Backfilling uses a gap that would otherwise remain idle while preserving a higher-priority reservation. These operations can coexist. They are not competing single algorithms with universal utilization percentages. The <a href="https://slurm.schedmd.com/priority_multifactor.html">multifactor priority manual, factors and configuration</a> describes configurable weighted factors; an age term can reward waiting and a fair-share term can reflect consumption. Disabled or differently weighted terms change behavior. A user's priority number alone does not reveal every eligibility and placement constraint.</p>
+<p>Consider four identical nodes. Two are busy until minute ten. A high-priority job needs all four for ten minutes, so its earliest feasible reservation is minute ten through twenty. A lower-priority job needs two nodes for six minutes. Starting it now uses the two free nodes and finishes before the reservation. An otherwise identical eleven-minute job crosses the reservation and fails that test. Under these assumptions the short job can run without delaying the protected job; the long job cannot.</p>
+<p>The mathematical hinge is a resource-time inequality. If \(a\) nodes are currently available until a reservation at \(t_r\), a candidate requiring \(n_j\) nodes for declared duration \(d_j\), starting at \(t_0\), fits this simple gap when
+\[ n_j\le a,\qquad t_0+d_j\le t_r. \tag{30.2} \]
+This is sufficient only for the deliberately uniform, fixed-reservation model. Real placements must also respect memory, GPU types, topology, licenses and overlapping reservations. An aggregate count can pass while every concrete node combination fails. <a href="https://slurm.schedmd.com/sched_config.html">SchedMD's Scheduling Configuration Guide, Backfill Scheduling</a> explains why reasonably accurate time limits matter: projected releases depend on them.</p>
+<p>The next self-contained program evaluates this constructed schedule, rather than querying Slurm. Inputs are integer node counts and minutes; outputs are exact reservation and occupancy arithmetic. It writes nothing. The observation interval is fixed at twenty minutes in both plans. Under strict priority the short job waits until minute twenty; under the constructed backfill plan it runs during minutes zero through six. Both plans start the protected job at minute ten.</p>
+<pre><code class="language-python" data-file="backfill_model.py" data-run="python3 -B backfill_model.py" data-check="exact">"""A fixed reservation toy model, not Slurm or PBS."""
+capacity, reservation = 4, 10
+running_nodes = 2
+head_nodes, head_duration = 4, 10
+short_nodes, short_duration = 2, 6
+long_duration = 11
+
+def fits(nodes, duration):
+    return nodes &lt;= capacity - running_nodes and duration &lt;= reservation
+
+assert fits(short_nodes, short_duration)
+assert not fits(short_nodes, long_duration)
+head_end = reservation + head_duration
+strict_busy = running_nodes * reservation + head_nodes * head_duration
+backfill_busy = strict_busy + short_nodes * short_duration
+assert strict_busy == 60 and backfill_busy == 72
+print("head starts at minute 10 in both plans")
+print("short: backfill [0,6); strict [20,26)")
+print("11-minute candidate rejected: would cross reservation")
+print(f"busy node-minutes in [0,20): strict={strict_busy} backfill={backfill_busy}")
+print(f"utilization in [0,20): strict={strict_busy/(capacity*head_end):.2f} backfill={backfill_busy/(capacity*head_end):.2f}")
+print("toy schedule only; no scheduler executed")
+</code></pre>
+<pre><code class="output">head starts at minute 10 in both plans
+short: backfill [0,6); strict [20,26)
+11-minute candidate rejected: would cross reservation
+busy node-minutes in [0,20): strict=60 backfill=72
+utilization in [0,20): strict=0.75 backfill=0.90
+toy schedule only; no scheduler executed
+</code></pre>
+<p>The utilization difference is 15 percentage points for this finite observation window: 72 versus 60 occupied node-minutes out of eighty. It is not a Slurm benchmark. Extending the interval to include every job's eventual execution changes the denominator and can remove the apparent utilization difference when the same work ultimately runs. The robust statements are the unchanged head-job start and earlier short-job completion. Accurate wall limits help expose gaps, but an unrealistically short limit risks termination before the calculation finishes.</p>
+<p>Dependencies create a directed graph of job prerequisites. A solve can require successful preprocessing; a rendering job can require successful solution and validation. An <code>afterok</code> dependency tests a predecessor's successful exit, not its physical accuracy. Arrays group indexed similar jobs, such as parameter sweeps; each element still consumes resources and needs a unique output name. A burst buffer is a fast staging storage tier, not extra solver memory. Preemption allows policy to interrupt lower-priority work; useful recovery depends on application restart capability. Requesting additional resources does not by itself make a fixed MPI program elastically resize.</p>
+
+<h2 id="pbs">PBS, policy comparisons and workflow integrity <a class="timestamp" href="https://www.youtube.com/watch?v=TwuO7a5KvS8&amp;t=490s">W11L5 8:10</a></h2>
+<p>The Portable Batch System (PBS) family also separates submission, queued state, allocation and execution. The <a href="https://raw.githubusercontent.com/openpbs/openpbs/master/doc/man1/qsub.1B">OpenPBS qsub manual, description and resource-list options</a> specifies submission using <code>qsub</code> and resource requests using <code>-l</code>. PBS dialects and site policies differ; a script adapted for OpenPBS/PBS Professional should not be assumed to work unchanged with every older PBS-derived system. A queue name is also a local configuration object, not a portable hardware specification.</p>
+<p>This <strong>unsubmitted PBS template</strong> expresses the same CPU arithmetic as the Slurm example. A resource chunk describes one requested grouping; two chunks each contain eight CPUs and four MPI processes, with two OpenMP threads per process. The application executable and its command-line interface remain hypothetical. The <code>mpiexec</code> command assumes a launcher integrated with that site's PBS allocation; its placement and binding must be checked there. No PBS submission or MPI launch of this template occurred locally.</p>
+<pre><code class="language-bash">#!/bin/bash
+#PBS -N heat
+#PBS -l select=2:ncpus=8:mpiprocs=4:ompthreads=2:mem=2gb
+#PBS -l place=scatter
+#PBS -l walltime=00:10:00
+#PBS -j oe
+set -euo pipefail
+ulimit -c 0
+cd "$PBS_O_WORKDIR"
+export OMP_NUM_THREADS=2
+mpiexec -n 8 ./jacobi_mpi_omp --N 1022 --output heat.vtk</code></pre>
+<p>The mapping preserves the intended eight-rank, sixteen-CPU resource model. The explicit <code>place=scatter</code> request asks that the two MPI-bearing chunks use distinct hosts; the site must still support and satisfy that placement. This does not prove identical CPU binding across the two schedulers. The <a href="https://raw.githubusercontent.com/openpbs/openpbs/master/doc/man1/pbs_resources.7B">OpenPBS built-in resources manual</a> defines <code>ncpus</code>, <code>mpiprocs</code> and <code>ompthreads</code>; the qsub manual defines selection and placement. The <a href="https://raw.githubusercontent.com/openpbs/openpbs/master/doc/man1/qstat.1B">OpenPBS qstat manual, description and display formats</a> provides status inspection, while the <a href="https://raw.githubusercontent.com/openpbs/openpbs/master/doc/man1/qdel.1B">qdel manual</a> documents deletion of queued and running jobs. The correct status command is <code>qstat</code>.</p>
+<p>Dependencies, arrays, resource provisioning and GPU requests express useful workload structure, but they remain configuration-dependent. A GPU allocation does not establish that an application uses the GPU correctly. A preempted application without a valid checkpoint can lose its entire partial trajectory. A workflow that accepts a syntactically valid but stale output file can propagate an old result after a failed run. Give each run an identity and require its validation output to match that identity, rather than testing only whether a familiar filename exists.</p>
+<p>A hybrid environment can expose Slurm and PBS to different resource pools or through coordinated middleware. It needs one coherent authority for each actual allocation. If independent managers both believe they own the same exclusive nodes, the sum of their promises can exceed physical capacity. A workflow can translate requests between pools, but that translation must also preserve units, placement and exit semantics. A shared command wrapper alone does not reconcile different fairness rules, accounting systems or available software stacks.</p>
+<div class="table-wrap"><table><caption>Lecture claims and the boundary of the evidence.</caption><thead><tr><th>Claim or illustration</th><th>Status used here</th></tr></thead><tbody>
+<tr><td>Allocation-policy bars show 85%, 90%, 92%, 88% and 80% utilization at W11L5 6:15.</td><td>Illustrative values, not a transferable ranking. No workload trace, denominator or measurement method is supplied; the numerical example in this chapter is independently defined.</td></tr>
+<tr><td>Comparison rings show 85% throughput, 75% latency and 90% utilization efficiency around W11L5 11:15.</td><td>Not enough information for a comparative benchmark. Throughput and latency need units or a defined normalized baseline.</td></tr>
+<tr><td>Case studies quote 30% less computation time, 25% more throughput and 20% better forecasting accuracy.</td><td>The inspected case-study frame identifies no reproducible study or baseline. Retained as unverified illustrations; none enters an estimate or conclusion here.</td></tr>
+<tr><td>Advanced features include checkpointing and dynamic allocation.</td><td>Potential mechanisms, conditional on software and configuration. Application restart, resizing and numerical validation require their own contracts.</td></tr>
+</tbody></table></div>
+<p>Scheduling can shorten the time before a forecast becomes available, but forecast accuracy also depends on model, observations, assimilation and verification metric. An accuracy gain cannot be derived from a queue policy alone. Similarly, total elapsed completion time includes waiting, startup, computation, input/output and postprocessing. Profiling the executable addresses only some of those terms. If waiting dominates a deadline, improving a kernel by ten percent may have little effect; if a memory request prevents placement, accurate resource sizing can matter more.</p>
+<p>The operational lesson from the lecture's final optimization and integration discussion is to measure the complete workflow with defined quantities. Record when a job becomes eligible, when its allocation starts, when validated data become available and when the scientific result reaches its consumer. Containers can help package software dependencies, while file-system and cloud integration affect data access and staging. They do not remove the need to match the site's policies. Logs and explicit failure propagation are what make those boundaries diagnosable.</p>
+<h2 id="visualization">Visualization creates an interpretation, not a new measurement <a class="timestamp" href="https://www.youtube.com/watch?v=VBnF4ZQaQtY&amp;t=6s">W11L6 0:06</a></h2>
+<p>Scientific visualization maps scientific data into visible objects. A scalar field assigns one number to each location, such as temperature. A vector field assigns components with direction, such as velocity. Geometry supplies coordinates; topology specifies which points form neighboring cells. An image has pixels, which are display samples and need not coincide with the computational samples. A viewer who confuses these objects can interpret smooth shading as evidence of additional resolved physical detail.</p>
+<p>The lecture begins with exploration and communication, including medical scans, geospatial fields and engineering simulations. The same dataset can support different questions. An engineer may inspect where a threshold is crossed; a numerical analyst may inspect a residual field; an external reader may need a single explanatory slice. The visualization should be designed around a question and retain the information needed to answer it. Showing every available field at once often conceals both units and the scientific claim.</p>
+<p>Consider a heat field that appears nearly constant after automatic color scaling. Is the physical temperature uniform, is the color interval too wide, or has the file been read as cell data rather than point data? A picture alone cannot distinguish these hypotheses. First inspect dimensions, coordinate bounds, scalar name, scalar range and data association. Then probe known boundaries. This makes visualization an experiment on the data representation: each deliberately chosen check rules out a specific interpretation error.</p>
+<p>Interactive exploration requires acceptable latency, but hardware is only one contributor. Reading a large file, executing a global filter, transferring geometry and rendering pixels have different costs. Caching an unchanged pipeline result can make the next camera motion fast without making the first data transformation cheap. An animation's apparent smoothness depends on displayed frame cadence, not just the simulation's time step. Repeated simulation states or dropped visual frames can create a persuasive motion sequence that misrepresents temporal sampling.</p>
+<p>For a rough storage calculation, let \(K\) be the number of saved states and \(s\) the number of scalar fields per point. Ignoring coordinates, connectivity and metadata, binary payload is \(8Ks(N+2)^2\) bytes for double-precision data. A thousand states of the large one-scalar running case require 8000 MiB, about 7.81 GiB. A movie with 1000 frames and a single saved state repeatedly recolored does not contain that temporal information. Conversely, a file sequence with all states may exceed a workstation's memory even when each individual state fits.</p>
+<p>Component-based software addresses the variety of scientific questions by composing readers, filters and display components. ParaView, VisIt, Mayavi and Avizo are examples named in the lecture. ParaView is built on the Visualization Toolkit (VTK), a software toolkit with a data model and algorithms, as well as associated file formats. Calling VTK only a file standard omits the processing library. The recording's historical screenshots and release dates are context; they are not instructions tied to the current graphical interface.</p>
+<h2 id="pipeline">Separate data processing, mapping and rendering <a class="timestamp" href="https://www.youtube.com/watch?v=VBnF4ZQaQtY&amp;t=531s">W11L6 8:51</a></h2>
+<p>A reader turns serialized bytes into a typed dataset. A filter transforms that dataset, for example by selecting a region, computing a slice or extracting a contour. A mapper converts supported data into a display representation, associating geometry and attributes with graphical properties. A renderer projects and combines those graphical objects into an image. Annotation adds axes, units, legends, text and other context. The <a href="https://docs.paraview.org/en/latest/UsersGuide/filteringData.html">ParaView User's Guide, chapter 6, filtering data</a> formalizes the pipeline as connected modules with inputs and outputs.</p>
+<p>A contour of scalar value \(u_c\) is a locus where an interpolated scalar equals \(u_c\); in three dimensions it generally forms an isosurface. A slice intersects the domain with a geometric surface, often a plane. A threshold retains elements according to an attribute test; its point-versus-cell behavior depends on the filter's definition. A clip removes geometry on one side of a specified surface or criterion. These operations answer distinct questions. A contour does not show the whole field, and an absent contour can mean the chosen value lies outside the range rather than that the domain is empty.</p>
+<p>For a vector field, an arrow glyph displays a direction and a chosen scale at sampled locations. A streamline follows the instantaneous vector field; it need not be the trajectory of a particle in a changing flow. A probe samples a field at a point or along a line, generally requiring interpolation unless it lands exactly on an original sample. The numerical procedure matters: a line profile can look smooth because neighboring samples were interpolated, not because the simulation resolved every visible point independently.</p>
+<p>Filtering can also change the relevant statistic. Suppose one retains only points warmer than 0.5 and computes their mean. That is a conditional mean over the retained samples; it is not the mean temperature of the square. If the samples lie on a nonuniform mesh, their unweighted mean is not generally a spatial average either. Removing the missing or rejected region from view can hide this distinction. State both the selection rule and the averaging measure when visualization feeds a numerical conclusion.</p>
+<p>The lecture's client/server architecture separates a user's interface from processing and possibly rendering. <a href="https://docs.paraview.org/en/latest/ReferenceManual/parallelDataVisualization.html">ParaView Reference Manual, chapter 8, remote and parallel visualization</a> distinguishes remote processing from parallel processing. A remote server may use one rank; a local process can use parallel work. Processing data on a server also does not force rendering there: configurations can send geometry to the client or send rendered images. Which object crosses the network determines the bandwidth and memory costs.</p>
+<p>For an original scale example, one rendered 1920-by-1080 image with four bytes per pixel contains 8,294,400 uncompressed bytes, about 7.91 MiB. At ten images per second that is about 79.1 MiB/s before protocol overhead or compression. A large geometry payload can be much larger, but if the camera moves repeatedly while geometry remains fixed, transferring it once can be attractive. These arithmetic bounds do not predict actual interactive performance: compression, image quality, network latency, depth compositing and server filter cost remain. No remote ParaView session was run for this chapter.</p>
+<p>Parallel data processing introduces a further integrity issue: local filters may need neighboring partitions. A gradient near a partition boundary cannot generally be computed correctly using only a rank's owned values without suitable neighboring or ghost data. A global scalar range requires a collective reduction, not the range on whichever partition happens to be displayed first. A distributed rendering system may composite correct images of incorrect local attributes. Parallelizing a visualization pipeline therefore retains the same decomposition obligations as a parallel solver.</p>
+<h2 id="encoding">Encode geometry, association and ordering explicitly <a class="timestamp" href="https://www.youtube.com/watch?v=VBnF4ZQaQtY&amp;t=1089s">W11L6 18:09</a></h2>
+<p>The lecture closes with classic VTK datasets and alternative scientific formats. Uniform Cartesian samples fit <code>STRUCTURED_POINTS</code>. A rectilinear grid has separate coordinate arrays along its axes, allowing unequal spacing. A structured grid retains regular logical connectivity but provides explicit point coordinates. An unstructured grid stores explicit cells and connectivity, and polygonal data represents combinations such as points, lines and polygons. Choosing the smallest accurate geometric description reduces redundant metadata; choosing an inaccurate one changes the scientific domain.</p>
+<p>The <a href="https://docs.vtk.org/en/latest/vtk_file_formats/vtk_legacy_file_format.html">VTK Simple Legacy Formats documentation, dataset and attribute sections</a> specifies a header, text/binary encoding, dataset geometry and associated attributes. Structured storage runs with x increasing fastest, then y, then z. For a two-dimensional uniform grid set the third dimension to one, rather than zero. Here dimensions are sixteen by sixteen by one, origin is zero, spacing is \((h,h,1)\), and the scalar is associated with 256 points. Spacing in the unused z direction remains positive.</p>
+<p>Let \(j\) index increasing x, \(k\) increasing y and \(\ell\) increasing z. With dimensions \(n_x,n_y,n_z\), zero-based linear point index is
+\[ q=j+n_x(k+n_y\ell),\quad 0\le j\lt n_x,\quad 0\le k\lt n_y,\quad 0\le\ell\lt n_z. \tag{30.3} \]
+This is bijective: remainder modulo \(n_x\) recovers \(j\); dividing the remaining integer by \(n_x\) gives \(k+n_y\ell\); its remainder modulo \(n_y\) recovers \(k\). The final quotient recovers \(\ell\). A file with the right number of values but a different flattening order is structurally plausible and physically wrong.</p>
+<p>Our solver rows increase downward, so exported row \(k\) uses solver row \(n_y-1-k\). Reversing rows makes physical y increase upward. Transposing also preserves scalar count, minimum, maximum and many symmetric patterns. The heat field is horizontally symmetric, so it is a poor sole test of an exporter. The program therefore passes a deliberately asymmetric manufactured marker \(m(x,y)=x+2y\) through the same export mapping and reader. Its known values at unequal x and y detect axis exchange or reversal that a symmetric picture can conceal.</p>
+<p>Point values and cell values are different data associations. A sixteen-by-sixteen point grid spans fifteen-by-fifteen two-dimensional cells. There are 256 point scalars but 225 cell scalars. Relabeling one as the other without resampling changes locations and count. In a finite-volume method a cell scalar may represent an average over an area, not a point sample at its center. Converting it to vertex values is a numerical reconstruction with assumptions; it is not a harmless file-format rename.</p>
+<p>ASCII text is chosen for inspectability. Seventeen significant decimal digits preserve round-trip identity for these finite binary double values when Python writes and rereads them, and the program checks exact equality rather than trusting that expectation. Text storage is not eight bytes per scalar: digit count, signs, exponents and whitespace add overhead. Binary VTK has separate byte-order obligations; this listing makes no claim to implement it. XML-based VTK files add other capabilities, while HDF5 and netCDF support richer scientific datasets. Reader support depends on the exact data model and available software, not just the extension.</p>
+
+<h2 id="checks">Validate the numerical field before choosing its colors</h2>
+<p>The small solver uses Jacobi iteration: each new interior value is the average of its four old nearest neighbors. All updates read the old array; the driver swaps old and new arrays only after a full sweep. Using an already updated neighbor instead would implement another iteration method. Boundary entries remain fixed in both arrays. Let \(u^{(m)}\) denote the grid after sweep \(m\). The stopping variable is the maximum change between consecutive grids, not elapsed time or a visual judgment about smoothness.</p>
+<p>Define the discrete negative Laplacian at an interior point by
+\[ (A_hv)_{ij}=\frac{4v_{ij}-v_{i-1,j}-v_{i+1,j}-v_{i,j-1}-v_{i,j+1}}{h^2}. \tag{30.4} \]
+For a grid field \(v\), the maximum norm \(\|v\|_\infty\) is the largest absolute entry over the specified points. Our residual is \(r=A_hu\) on interior points. It measures failure to solve the discrete equation, in temperature per squared normalized length. The unscaled stencil numerator is \(h^2r\); comparing that numerator across grid resolutions without the factor \(h^{-2}\) changes the meaning of the tolerance.</p>
+<p>Jacobi gives \(u^{(m+1)}-u^{(m)}=-(h^2/4)A_hu^{(m)}\). Thus the change from a sweep corresponds to the residual <em>before</em> that sweep. The listing recomputes the residual of the final exported field directly, which removes an indexing ambiguity. A small change can also reflect slow progress of a poorly converging method. Requiring a residual threshold states what equation the saved field must satisfy, rather than treating cessation of visible change as a numerical guarantee.</p>
+<p>There is a useful independent error estimate for this particular discrete problem. Let \(u_h\) be the exact solution of the discrete equations with the same boundary values, and let \(e=u-u_h\) be the iteration error. Then \(A_he=r\) and \(e=0\) on the boundary. Define a barrier field \(b(x,y)=[x(1-x)+y(1-y)]/4\). Centered second differences differentiate these quadratic terms exactly, so \(A_hb=1\), and \(0\le b\le1/8\) throughout the square.</p>
+<p>The discrete maximum principle states that if \(A_hv\ge0\) in the interior and \(v\ge0\) on the boundary, then \(v\ge0\) everywhere. To see the key step, suppose a negative minimum occurs inside. The four neighbors are no smaller, so \(A_hv\le0\) there. For nonnegative \(A_hv\), equality forces every neighbor to have the same minimum. Repeating this argument along the connected grid reaches a nonnegative boundary and gives a contradiction. This proof depends on the stencil's positive central and negative neighbor coefficients and on connectivity to the prescribed boundary.</p>
+<p>Writing \(R=\|r\|_\infty\), both \(Rb+e\) and \(Rb-e\) have nonnegative discrete negative Laplacian and nonnegative boundary values. Applying the principle twice gives \(-Rb\le e\le Rb\), hence
+\[ \|u-u_h\|_\infty\le\frac18\|A_hu\|_\infty. \tag{30.5} \]
+A final scaled residual below \(10^{-8}\) therefore corresponds to an iteration-error bound below \(1.25\times10^{-9}\) in exact arithmetic. The program evaluates the residual in floating-point arithmetic rather than with interval bounds, so its check is a numerical verification at this scale, not a machine-certified proof of every rounding error.</p>
+<p>This bound does not compare the grid solution with the continuum solution. Discretization error arises from replacing derivatives by differences, and the corner discontinuities prevent a casual smooth-solution argument from settling its global order. Reducing the iteration tolerance cannot remove that error. Export round-trip error, iteration error and discretization error require separate evidence. The same distinction holds in reverse: a coarse-grid image can look smooth after interpolation while the discretization error remains large.</p>
+<p>The complete listing below uses no third-party library. Inputs are the fixed grid, boundaries, maximum of 5000 sweeps and a change tolerance of \(10^{-11}\). It writes one local ASCII file, <code>heat.vtk</code>, rereads it with a deliberately narrow parser and rejects three malformed fixtures. The numerical assertions require convergence, bounded values, horizontal symmetry and the recomputed residual. The data assertions check exact scalar round-trip, known edge values and the asymmetric marker's coordinates. The parser accepts only the header generated here; it is not a general VTK validator or a substitute for testing an actual VTK reader.</p>
+<pre><code class="language-python" data-file="heat_vtk.py" data-run="python3 -B heat_vtk.py" data-check="exact">"""Solve a bounded heat problem, write VTK, read and challenge the data."""
+import math
+from pathlib import Path
+N = 14
+nx = ny = N + 2
+h = 1.0 / (N + 1)
+tol, max_iter = 1e-11, 5000
+u = [[0.0] * nx for _ in range(ny)]
+unew = [[0.0] * nx for _ in range(ny)]
+# i=0 is the top, y=1. Corners stay zero (side boundaries).
+for j in range(1, nx - 1):
+    u[0][j] = unew[0][j] = 1.0
+for iteration in range(1, max_iter + 1):
+    change = 0.0
+    for i in range(1, ny - 1):
+        for j in range(1, nx - 1):
+            value = 0.25 * (u[i-1][j] + u[i+1][j] + u[i][j-1] + u[i][j+1])
+            unew[i][j] = value
+            change = max(change, abs(value-u[i][j]))
+    u, unew = unew, u
+    if change &lt; tol:
+        break
+else:
+    raise RuntimeError("iteration limit reached")
+residual = max(abs(4*u[i][j]-u[i-1][j]-u[i+1][j]-u[i][j-1]-u[i][j+1]) / h**2
+               for i in range(1, ny-1) for j in range(1, nx-1))
+assert residual &lt; 1e-8
+assert all(0 &lt;= v &lt;= 1 for row in u for v in row)
+assert max(abs(u[i][j]-u[i][nx-1-j]) for i in range(ny) for j in range(nx)) &lt; 1e-13
+# VTK x increases fastest; y increases upward, reversing solver rows.
+def export_values(field):
+    return [field[ny-1-k][j] for k in range(ny) for j in range(nx)]
+
+values = export_values(u)
+header = ["# vtk DataFile Version 3.0", "N14 unit-square heat; dimensionless u", "ASCII",
+          "DATASET STRUCTURED_POINTS", f"DIMENSIONS {nx} {ny} 1", "ORIGIN 0 0 0",
+          f"SPACING {h:.17g} {h:.17g} 1", f"POINT_DATA {nx*ny}",
+          "SCALARS temperature double 1", "LOOKUP_TABLE default"]
+text = "\n".join(header + [format(v, ".17g") for v in values]) + "\n"
+Path("heat.vtk").write_text(text, encoding="ascii")
+
+def read_our_vtk(data):
+    lines = data.splitlines()
+    if len(lines) &lt; 10 or lines[:6] != header[:6] or lines[6:10] != header[6:10]:
+        raise ValueError("unexpected header")
+    decoded = [float(v) for line in lines[10:] for v in line.split()]
+    if len(decoded) != nx*ny or not all(math.isfinite(v) for v in decoded):
+        raise ValueError("bad scalar count or nonfinite scalar")
+    return decoded
+
+readback = read_our_vtk(Path("heat.vtk").read_text(encoding="ascii"))
+assert readback == values
+# An asymmetric manufactured marker detects transposition and y reversal.
+marker_field = [[j*h + 2*(1-i*h) for j in range(nx)] for i in range(ny)]
+marker_text = "\n".join(header + [format(v, ".17g") for v in export_values(marker_field)])
+marker = read_our_vtk(marker_text)
+assert abs(marker[2 + nx*3] - (2*h + 2*3*h)) &lt; 1e-14
+assert abs(marker[0]) &lt; 1e-14 and abs(marker[-1]-3) &lt; 1e-14
+assert marker[1] != marker[nx]
+assert readback[0:nx] == [0.0]*nx
+assert readback[-nx+1:-1] == [1.0]*(nx-2)
+rejected = 0
+for bad in ["\n".join(text.splitlines()[:-1]), text.replace("POINT_DATA 256", "POINT_DATA 255"),
+            text.replace("LOOKUP_TABLE default\n0", "LOOKUP_TABLE default\nnan", 1)]:
+    try:
+        read_our_vtk(bad)
+    except ValueError:
+        rejected += 1
+assert rejected == 3
+print("grid=16x16 points=256; converged before 5000 sweeps")
+print("scaled_residual &lt; 1e-8; discrete_error_bound &lt; 1.25e-9")
+print("range, horizontal symmetry, top/bottom orientation: PASS")
+print("ASCII double round-trip: exact; asymmetric marker: PASS")
+print("truncated, wrong-count, nonfinite fixtures rejected=3")
+print("wrote heat.vtk; no VTK/ParaView reader or GUI executed")
+</code></pre>
+<pre><code class="output">grid=16x16 points=256; converged before 5000 sweeps
+scaled_residual &lt; 1e-8; discrete_error_bound &lt; 1.25e-9
+range, horizontal symmetry, top/bottom orientation: PASS
+ASCII double round-trip: exact; asymmetric marker: PASS
+truncated, wrong-count, nonfinite fixtures rejected=3
+wrote heat.vtk; no VTK/ParaView reader or GUI executed
+</code></pre>
+<p>The reported checks passed in WSL Python 3.12.3. None starts Slurm, PBS, ParaView, VisIt or a VTK library. A file can pass these checks while using a feature unsupported by a separate reader; interoperability requires opening it in that actual reader. Conversely, a reader may accept a file whose numeric values are scientifically wrong. Successful parsing and a correctly oriented plot answer different questions from the residual test.</p>
+<h3>Normalization, interpolation and the visible figure</h3>
+<p>A color map associates a normalized scalar with a display color. A normalization first maps physical values into the color map's coordinate interval. For fixed limits \(u_{\min}\) and \(u_{\max}\), linear normalization is \(\eta=(u-u_{\min})/(u_{\max}-u_{\min})\). The <a href="https://matplotlib.org/stable/users/explain/colors/colormapnorms.html">Matplotlib normalization documentation</a> separates these two stages. Our limits are zero and one for every point. Independently rescaling every timestep would make a small remaining temperature contrast fill the entire palette and obscure its physical decay.</p>
+<p>The scalar is sequential: higher temperature means more of the same quantity, rather than a departure on either side of a critical signed zero. The <a href="https://matplotlib.org/stable/users/explain/colors/colormaps.html">Matplotlib color-map guidance</a> motivates a sequential map with orderly lightness; the figure uses <code>cividis</code>. The dark background does not change the data or imply a different normalization. It does affect perceived contrast, which is one reason to retain a labeled scale and numeric probes rather than interpreting color by memory.</p>
+<p>Interpolation is another independent decision. Nearest shading assigns a sample's color to its local display region; bilinear interpolation blends neighboring values. Neither adds new measured or computed degrees of freedom. Furthermore, interpolation and color mapping generally do not commute. If an illustrative nonlinear scalar-to-display function is \(g(u)=\sqrt{u}\), mapping the average of zero and one gives \(\sqrt{1/2}\), about 0.707; averaging their mapped values gives 0.5. A graphics system that interpolates colors can therefore produce a different intermediate appearance from one that interpolates the scientific scalar first.</p>
+<p>The figure below was actually rendered from the listing's validated file using installed Windows Matplotlib 3.9.3, NumPy 2.2.6 and the noninteractive Agg backend. It uses fixed linear normalization on [0,1], cividis and nearest point shading; physical axes are restricted to the unit square. The right-hand line joins the saved samples at \(x=7/15\); the joins do not constitute a finer numerical solution. The graphical export is an inline vector figure. Rendering occurred on this workstation, not through a ParaView or VisIt graphical session.</p>
+<figure><svg role="img" aria-label="Validated heat field with fixed zero-to-one color scale and vertical samples" xmlns:xlink="http://www.w3.org/1999/xlink" width="662.4pt" height="295.2pt" viewBox="0 0 662.4 295.2" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib Agg; chapter30 teaching construction</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 295.2 
+L 662.4 295.2 
+L 662.4 0 
+L 0 0 
+z
+" style="fill: #0c1119"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 58.32997 261.84351 
+L 284.440885 261.84351 
+L 284.440885 35.732595 
+L 58.32997 35.732595 
+z
+" style="fill: #111923"/>
+   </g>
+   <g id="QuadMesh_1">
+    <path d="M 50.792939 269.38054 
+L 65.867 269.38054 
+L 65.867 254.306479 
+L 50.792939 254.306479 
+L 50.792939 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 269.38054 
+L 80.941061 269.38054 
+L 80.941061 254.306479 
+L 65.867 254.306479 
+L 65.867 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 80.941061 269.38054 
+L 96.015122 269.38054 
+L 96.015122 254.306479 
+L 80.941061 254.306479 
+L 80.941061 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 96.015122 269.38054 
+L 111.089183 269.38054 
+L 111.089183 254.306479 
+L 96.015122 254.306479 
+L 96.015122 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 111.089183 269.38054 
+L 126.163244 269.38054 
+L 126.163244 254.306479 
+L 111.089183 254.306479 
+L 111.089183 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 126.163244 269.38054 
+L 141.237305 269.38054 
+L 141.237305 254.306479 
+L 126.163244 254.306479 
+L 126.163244 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 141.237305 269.38054 
+L 156.311366 269.38054 
+L 156.311366 254.306479 
+L 141.237305 254.306479 
+L 141.237305 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 156.311366 269.38054 
+L 171.385427 269.38054 
+L 171.385427 254.306479 
+L 156.311366 254.306479 
+L 156.311366 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 171.385427 269.38054 
+L 186.459488 269.38054 
+L 186.459488 254.306479 
+L 171.385427 254.306479 
+L 171.385427 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 186.459488 269.38054 
+L 201.533549 269.38054 
+L 201.533549 254.306479 
+L 186.459488 254.306479 
+L 186.459488 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 201.533549 269.38054 
+L 216.60761 269.38054 
+L 216.60761 254.306479 
+L 201.533549 254.306479 
+L 201.533549 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 216.60761 269.38054 
+L 231.681671 269.38054 
+L 231.681671 254.306479 
+L 216.60761 254.306479 
+L 216.60761 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 231.681671 269.38054 
+L 246.755732 269.38054 
+L 246.755732 254.306479 
+L 231.681671 254.306479 
+L 231.681671 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 246.755732 269.38054 
+L 261.829793 269.38054 
+L 261.829793 254.306479 
+L 246.755732 254.306479 
+L 246.755732 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 261.829793 269.38054 
+L 276.903854 269.38054 
+L 276.903854 254.306479 
+L 261.829793 254.306479 
+L 261.829793 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 276.903854 269.38054 
+L 291.977915 269.38054 
+L 291.977915 254.306479 
+L 276.903854 254.306479 
+L 276.903854 269.38054 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 254.306479 
+L 65.867 254.306479 
+L 65.867 239.232418 
+L 50.792939 239.232418 
+L 50.792939 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 254.306479 
+L 80.941061 254.306479 
+L 80.941061 239.232418 
+L 65.867 239.232418 
+L 65.867 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #00234f"/>
+    <path d="M 80.941061 254.306479 
+L 96.015122 254.306479 
+L 96.015122 239.232418 
+L 80.941061 239.232418 
+L 80.941061 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #002451"/>
+    <path d="M 96.015122 254.306479 
+L 111.089183 254.306479 
+L 111.089183 239.232418 
+L 96.015122 239.232418 
+L 96.015122 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #002553"/>
+    <path d="M 111.089183 254.306479 
+L 126.163244 254.306479 
+L 126.163244 239.232418 
+L 111.089183 239.232418 
+L 111.089183 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #002554"/>
+    <path d="M 126.163244 254.306479 
+L 141.237305 254.306479 
+L 141.237305 239.232418 
+L 126.163244 239.232418 
+L 126.163244 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #002656"/>
+    <path d="M 141.237305 254.306479 
+L 156.311366 254.306479 
+L 156.311366 239.232418 
+L 141.237305 239.232418 
+L 141.237305 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #002656"/>
+    <path d="M 156.311366 254.306479 
+L 171.385427 254.306479 
+L 171.385427 239.232418 
+L 156.311366 239.232418 
+L 156.311366 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #002656"/>
+    <path d="M 171.385427 254.306479 
+L 186.459488 254.306479 
+L 186.459488 239.232418 
+L 171.385427 239.232418 
+L 171.385427 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #002656"/>
+    <path d="M 186.459488 254.306479 
+L 201.533549 254.306479 
+L 201.533549 239.232418 
+L 186.459488 239.232418 
+L 186.459488 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #002656"/>
+    <path d="M 201.533549 254.306479 
+L 216.60761 254.306479 
+L 216.60761 239.232418 
+L 201.533549 239.232418 
+L 201.533549 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #002656"/>
+    <path d="M 216.60761 254.306479 
+L 231.681671 254.306479 
+L 231.681671 239.232418 
+L 216.60761 239.232418 
+L 216.60761 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #002554"/>
+    <path d="M 231.681671 254.306479 
+L 246.755732 254.306479 
+L 246.755732 239.232418 
+L 231.681671 239.232418 
+L 231.681671 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #002553"/>
+    <path d="M 246.755732 254.306479 
+L 261.829793 254.306479 
+L 261.829793 239.232418 
+L 246.755732 239.232418 
+L 246.755732 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #002451"/>
+    <path d="M 261.829793 254.306479 
+L 276.903854 254.306479 
+L 276.903854 239.232418 
+L 261.829793 239.232418 
+L 261.829793 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #00234f"/>
+    <path d="M 276.903854 254.306479 
+L 291.977915 254.306479 
+L 291.977915 239.232418 
+L 276.903854 239.232418 
+L 276.903854 254.306479 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 239.232418 
+L 65.867 239.232418 
+L 65.867 224.158357 
+L 50.792939 224.158357 
+L 50.792939 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 239.232418 
+L 80.941061 239.232418 
+L 80.941061 224.158357 
+L 65.867 224.158357 
+L 65.867 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #002451"/>
+    <path d="M 80.941061 239.232418 
+L 96.015122 239.232418 
+L 96.015122 224.158357 
+L 80.941061 224.158357 
+L 80.941061 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #002656"/>
+    <path d="M 96.015122 239.232418 
+L 111.089183 239.232418 
+L 111.089183 224.158357 
+L 96.015122 224.158357 
+L 96.015122 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #002859"/>
+    <path d="M 111.089183 239.232418 
+L 126.163244 239.232418 
+L 126.163244 224.158357 
+L 111.089183 224.158357 
+L 111.089183 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #00295d"/>
+    <path d="M 126.163244 239.232418 
+L 141.237305 239.232418 
+L 141.237305 224.158357 
+L 126.163244 224.158357 
+L 126.163244 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #002a5f"/>
+    <path d="M 141.237305 239.232418 
+L 156.311366 239.232418 
+L 156.311366 224.158357 
+L 141.237305 224.158357 
+L 141.237305 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #002a61"/>
+    <path d="M 156.311366 239.232418 
+L 171.385427 239.232418 
+L 171.385427 224.158357 
+L 156.311366 224.158357 
+L 156.311366 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #002b62"/>
+    <path d="M 171.385427 239.232418 
+L 186.459488 239.232418 
+L 186.459488 224.158357 
+L 171.385427 224.158357 
+L 171.385427 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #002b62"/>
+    <path d="M 186.459488 239.232418 
+L 201.533549 239.232418 
+L 201.533549 224.158357 
+L 186.459488 224.158357 
+L 186.459488 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #002a61"/>
+    <path d="M 201.533549 239.232418 
+L 216.60761 239.232418 
+L 216.60761 224.158357 
+L 201.533549 224.158357 
+L 201.533549 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #002a5f"/>
+    <path d="M 216.60761 239.232418 
+L 231.681671 239.232418 
+L 231.681671 224.158357 
+L 216.60761 224.158357 
+L 216.60761 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #00295d"/>
+    <path d="M 231.681671 239.232418 
+L 246.755732 239.232418 
+L 246.755732 224.158357 
+L 231.681671 224.158357 
+L 231.681671 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #002859"/>
+    <path d="M 246.755732 239.232418 
+L 261.829793 239.232418 
+L 261.829793 224.158357 
+L 246.755732 224.158357 
+L 246.755732 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #002656"/>
+    <path d="M 261.829793 239.232418 
+L 276.903854 239.232418 
+L 276.903854 224.158357 
+L 261.829793 224.158357 
+L 261.829793 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #002451"/>
+    <path d="M 276.903854 239.232418 
+L 291.977915 239.232418 
+L 291.977915 224.158357 
+L 276.903854 224.158357 
+L 276.903854 239.232418 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 224.158357 
+L 65.867 224.158357 
+L 65.867 209.084296 
+L 50.792939 209.084296 
+L 50.792939 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 224.158357 
+L 80.941061 224.158357 
+L 80.941061 209.084296 
+L 65.867 209.084296 
+L 65.867 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #002553"/>
+    <path d="M 80.941061 224.158357 
+L 96.015122 224.158357 
+L 96.015122 209.084296 
+L 80.941061 209.084296 
+L 80.941061 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #002859"/>
+    <path d="M 96.015122 224.158357 
+L 111.089183 224.158357 
+L 111.089183 209.084296 
+L 96.015122 209.084296 
+L 96.015122 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #002a61"/>
+    <path d="M 111.089183 224.158357 
+L 126.163244 224.158357 
+L 126.163244 209.084296 
+L 111.089183 209.084296 
+L 111.089183 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #002c66"/>
+    <path d="M 126.163244 224.158357 
+L 141.237305 224.158357 
+L 141.237305 209.084296 
+L 126.163244 209.084296 
+L 126.163244 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #002e6a"/>
+    <path d="M 141.237305 224.158357 
+L 156.311366 224.158357 
+L 156.311366 209.084296 
+L 141.237305 209.084296 
+L 141.237305 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #002f6d"/>
+    <path d="M 156.311366 224.158357 
+L 171.385427 224.158357 
+L 171.385427 209.084296 
+L 156.311366 209.084296 
+L 156.311366 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #002f6d"/>
+    <path d="M 171.385427 224.158357 
+L 186.459488 224.158357 
+L 186.459488 209.084296 
+L 171.385427 209.084296 
+L 171.385427 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #002f6d"/>
+    <path d="M 186.459488 224.158357 
+L 201.533549 224.158357 
+L 201.533549 209.084296 
+L 186.459488 209.084296 
+L 186.459488 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #002f6d"/>
+    <path d="M 201.533549 224.158357 
+L 216.60761 224.158357 
+L 216.60761 209.084296 
+L 201.533549 209.084296 
+L 201.533549 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #002e6a"/>
+    <path d="M 216.60761 224.158357 
+L 231.681671 224.158357 
+L 231.681671 209.084296 
+L 216.60761 209.084296 
+L 216.60761 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #002c66"/>
+    <path d="M 231.681671 224.158357 
+L 246.755732 224.158357 
+L 246.755732 209.084296 
+L 231.681671 209.084296 
+L 231.681671 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #002a61"/>
+    <path d="M 246.755732 224.158357 
+L 261.829793 224.158357 
+L 261.829793 209.084296 
+L 246.755732 209.084296 
+L 246.755732 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #002859"/>
+    <path d="M 261.829793 224.158357 
+L 276.903854 224.158357 
+L 276.903854 209.084296 
+L 261.829793 209.084296 
+L 261.829793 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #002553"/>
+    <path d="M 276.903854 224.158357 
+L 291.977915 224.158357 
+L 291.977915 209.084296 
+L 276.903854 209.084296 
+L 276.903854 224.158357 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 209.084296 
+L 65.867 209.084296 
+L 65.867 194.010235 
+L 50.792939 194.010235 
+L 50.792939 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 209.084296 
+L 80.941061 209.084296 
+L 80.941061 194.010235 
+L 65.867 194.010235 
+L 65.867 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #002656"/>
+    <path d="M 80.941061 209.084296 
+L 96.015122 209.084296 
+L 96.015122 194.010235 
+L 80.941061 194.010235 
+L 80.941061 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #002a5f"/>
+    <path d="M 96.015122 209.084296 
+L 111.089183 209.084296 
+L 111.089183 194.010235 
+L 96.015122 194.010235 
+L 96.015122 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #002d68"/>
+    <path d="M 111.089183 209.084296 
+L 126.163244 209.084296 
+L 126.163244 194.010235 
+L 111.089183 194.010235 
+L 111.089183 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #00306f"/>
+    <path d="M 126.163244 209.084296 
+L 141.237305 209.084296 
+L 141.237305 194.010235 
+L 126.163244 194.010235 
+L 126.163244 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #013271"/>
+    <path d="M 141.237305 209.084296 
+L 156.311366 209.084296 
+L 156.311366 194.010235 
+L 141.237305 194.010235 
+L 141.237305 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #083370"/>
+    <path d="M 156.311366 209.084296 
+L 171.385427 209.084296 
+L 171.385427 194.010235 
+L 156.311366 194.010235 
+L 156.311366 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #0c3470"/>
+    <path d="M 171.385427 209.084296 
+L 186.459488 209.084296 
+L 186.459488 194.010235 
+L 171.385427 194.010235 
+L 171.385427 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #0c3470"/>
+    <path d="M 186.459488 209.084296 
+L 201.533549 209.084296 
+L 201.533549 194.010235 
+L 186.459488 194.010235 
+L 186.459488 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #083370"/>
+    <path d="M 201.533549 209.084296 
+L 216.60761 209.084296 
+L 216.60761 194.010235 
+L 201.533549 194.010235 
+L 201.533549 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #013271"/>
+    <path d="M 216.60761 209.084296 
+L 231.681671 209.084296 
+L 231.681671 194.010235 
+L 216.60761 194.010235 
+L 216.60761 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #00306f"/>
+    <path d="M 231.681671 209.084296 
+L 246.755732 209.084296 
+L 246.755732 194.010235 
+L 231.681671 194.010235 
+L 231.681671 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #002d68"/>
+    <path d="M 246.755732 209.084296 
+L 261.829793 209.084296 
+L 261.829793 194.010235 
+L 246.755732 194.010235 
+L 246.755732 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #002a5f"/>
+    <path d="M 261.829793 209.084296 
+L 276.903854 209.084296 
+L 276.903854 194.010235 
+L 261.829793 194.010235 
+L 261.829793 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #002656"/>
+    <path d="M 276.903854 209.084296 
+L 291.977915 209.084296 
+L 291.977915 194.010235 
+L 276.903854 194.010235 
+L 276.903854 209.084296 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 194.010235 
+L 65.867 194.010235 
+L 65.867 178.936174 
+L 50.792939 178.936174 
+L 50.792939 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 194.010235 
+L 80.941061 194.010235 
+L 80.941061 178.936174 
+L 65.867 178.936174 
+L 65.867 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #002859"/>
+    <path d="M 80.941061 194.010235 
+L 96.015122 194.010235 
+L 96.015122 178.936174 
+L 80.941061 178.936174 
+L 80.941061 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #002c66"/>
+    <path d="M 96.015122 194.010235 
+L 111.089183 194.010235 
+L 111.089183 178.936174 
+L 96.015122 178.936174 
+L 96.015122 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #003170"/>
+    <path d="M 111.089183 194.010235 
+L 126.163244 194.010235 
+L 126.163244 178.936174 
+L 111.089183 178.936174 
+L 111.089183 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #0c3470"/>
+    <path d="M 126.163244 194.010235 
+L 141.237305 194.010235 
+L 141.237305 178.936174 
+L 126.163244 178.936174 
+L 126.163244 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #163770"/>
+    <path d="M 141.237305 194.010235 
+L 156.311366 194.010235 
+L 156.311366 178.936174 
+L 141.237305 178.936174 
+L 141.237305 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #1c396f"/>
+    <path d="M 156.311366 194.010235 
+L 171.385427 194.010235 
+L 171.385427 178.936174 
+L 156.311366 178.936174 
+L 156.311366 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #1e3a6f"/>
+    <path d="M 171.385427 194.010235 
+L 186.459488 194.010235 
+L 186.459488 178.936174 
+L 171.385427 178.936174 
+L 171.385427 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #1e3a6f"/>
+    <path d="M 186.459488 194.010235 
+L 201.533549 194.010235 
+L 201.533549 178.936174 
+L 186.459488 178.936174 
+L 186.459488 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #1c396f"/>
+    <path d="M 201.533549 194.010235 
+L 216.60761 194.010235 
+L 216.60761 178.936174 
+L 201.533549 178.936174 
+L 201.533549 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #163770"/>
+    <path d="M 216.60761 194.010235 
+L 231.681671 194.010235 
+L 231.681671 178.936174 
+L 216.60761 178.936174 
+L 216.60761 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #0c3470"/>
+    <path d="M 231.681671 194.010235 
+L 246.755732 194.010235 
+L 246.755732 178.936174 
+L 231.681671 178.936174 
+L 231.681671 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #003170"/>
+    <path d="M 246.755732 194.010235 
+L 261.829793 194.010235 
+L 261.829793 178.936174 
+L 246.755732 178.936174 
+L 246.755732 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #002c66"/>
+    <path d="M 261.829793 194.010235 
+L 276.903854 194.010235 
+L 276.903854 178.936174 
+L 261.829793 178.936174 
+L 261.829793 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #002859"/>
+    <path d="M 276.903854 194.010235 
+L 291.977915 194.010235 
+L 291.977915 178.936174 
+L 276.903854 178.936174 
+L 276.903854 194.010235 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 178.936174 
+L 65.867 178.936174 
+L 65.867 163.862113 
+L 50.792939 163.862113 
+L 50.792939 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 178.936174 
+L 80.941061 178.936174 
+L 80.941061 163.862113 
+L 65.867 163.862113 
+L 65.867 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #00295d"/>
+    <path d="M 80.941061 178.936174 
+L 96.015122 178.936174 
+L 96.015122 163.862113 
+L 80.941061 163.862113 
+L 80.941061 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #00306f"/>
+    <path d="M 96.015122 178.936174 
+L 111.089183 178.936174 
+L 111.089183 163.862113 
+L 96.015122 163.862113 
+L 96.015122 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #0f3570"/>
+    <path d="M 111.089183 178.936174 
+L 126.163244 178.936174 
+L 126.163244 163.862113 
+L 111.089183 163.862113 
+L 111.089183 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #1e3a6f"/>
+    <path d="M 126.163244 178.936174 
+L 141.237305 178.936174 
+L 141.237305 163.862113 
+L 126.163244 163.862113 
+L 126.163244 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #263d6e"/>
+    <path d="M 141.237305 178.936174 
+L 156.311366 178.936174 
+L 156.311366 163.862113 
+L 141.237305 163.862113 
+L 141.237305 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #2b406d"/>
+    <path d="M 156.311366 178.936174 
+L 171.385427 178.936174 
+L 171.385427 163.862113 
+L 156.311366 163.862113 
+L 156.311366 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #2e416d"/>
+    <path d="M 171.385427 178.936174 
+L 186.459488 178.936174 
+L 186.459488 163.862113 
+L 171.385427 163.862113 
+L 171.385427 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #2e416d"/>
+    <path d="M 186.459488 178.936174 
+L 201.533549 178.936174 
+L 201.533549 163.862113 
+L 186.459488 163.862113 
+L 186.459488 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #2b406d"/>
+    <path d="M 201.533549 178.936174 
+L 216.60761 178.936174 
+L 216.60761 163.862113 
+L 201.533549 163.862113 
+L 201.533549 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #263d6e"/>
+    <path d="M 216.60761 178.936174 
+L 231.681671 178.936174 
+L 231.681671 163.862113 
+L 216.60761 163.862113 
+L 216.60761 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #1e3a6f"/>
+    <path d="M 231.681671 178.936174 
+L 246.755732 178.936174 
+L 246.755732 163.862113 
+L 231.681671 163.862113 
+L 231.681671 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #0f3570"/>
+    <path d="M 246.755732 178.936174 
+L 261.829793 178.936174 
+L 261.829793 163.862113 
+L 246.755732 163.862113 
+L 246.755732 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #00306f"/>
+    <path d="M 261.829793 178.936174 
+L 276.903854 178.936174 
+L 276.903854 163.862113 
+L 261.829793 163.862113 
+L 261.829793 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #00295d"/>
+    <path d="M 276.903854 178.936174 
+L 291.977915 178.936174 
+L 291.977915 163.862113 
+L 276.903854 163.862113 
+L 276.903854 178.936174 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 163.862113 
+L 65.867 163.862113 
+L 65.867 148.788052 
+L 50.792939 148.788052 
+L 50.792939 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 163.862113 
+L 80.941061 163.862113 
+L 80.941061 148.788052 
+L 65.867 148.788052 
+L 65.867 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #002b62"/>
+    <path d="M 80.941061 163.862113 
+L 96.015122 163.862113 
+L 96.015122 148.788052 
+L 80.941061 148.788052 
+L 80.941061 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #053371"/>
+    <path d="M 96.015122 163.862113 
+L 111.089183 163.862113 
+L 111.089183 148.788052 
+L 96.015122 148.788052 
+L 96.015122 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #1e3a6f"/>
+    <path d="M 111.089183 163.862113 
+L 126.163244 163.862113 
+L 126.163244 148.788052 
+L 111.089183 148.788052 
+L 111.089183 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #2b406d"/>
+    <path d="M 126.163244 163.862113 
+L 141.237305 163.862113 
+L 141.237305 148.788052 
+L 126.163244 148.788052 
+L 126.163244 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #34456c"/>
+    <path d="M 141.237305 163.862113 
+L 156.311366 163.862113 
+L 156.311366 148.788052 
+L 141.237305 148.788052 
+L 141.237305 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #39486c"/>
+    <path d="M 156.311366 163.862113 
+L 171.385427 163.862113 
+L 171.385427 148.788052 
+L 156.311366 148.788052 
+L 156.311366 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #3b496c"/>
+    <path d="M 171.385427 163.862113 
+L 186.459488 163.862113 
+L 186.459488 148.788052 
+L 171.385427 148.788052 
+L 171.385427 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #3b496c"/>
+    <path d="M 186.459488 163.862113 
+L 201.533549 163.862113 
+L 201.533549 148.788052 
+L 186.459488 148.788052 
+L 186.459488 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #39486c"/>
+    <path d="M 201.533549 163.862113 
+L 216.60761 163.862113 
+L 216.60761 148.788052 
+L 201.533549 148.788052 
+L 201.533549 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #34456c"/>
+    <path d="M 216.60761 163.862113 
+L 231.681671 163.862113 
+L 231.681671 148.788052 
+L 216.60761 148.788052 
+L 216.60761 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #2b406d"/>
+    <path d="M 231.681671 163.862113 
+L 246.755732 163.862113 
+L 246.755732 148.788052 
+L 231.681671 148.788052 
+L 231.681671 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #1e3a6f"/>
+    <path d="M 246.755732 163.862113 
+L 261.829793 163.862113 
+L 261.829793 148.788052 
+L 246.755732 148.788052 
+L 246.755732 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #053371"/>
+    <path d="M 261.829793 163.862113 
+L 276.903854 163.862113 
+L 276.903854 148.788052 
+L 261.829793 148.788052 
+L 261.829793 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #002b62"/>
+    <path d="M 276.903854 163.862113 
+L 291.977915 163.862113 
+L 291.977915 148.788052 
+L 276.903854 148.788052 
+L 276.903854 163.862113 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 148.788052 
+L 65.867 148.788052 
+L 65.867 133.713991 
+L 50.792939 133.713991 
+L 50.792939 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 148.788052 
+L 80.941061 148.788052 
+L 80.941061 133.713991 
+L 65.867 133.713991 
+L 65.867 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #002e6a"/>
+    <path d="M 80.941061 148.788052 
+L 96.015122 148.788052 
+L 96.015122 133.713991 
+L 80.941061 133.713991 
+L 80.941061 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #18376f"/>
+    <path d="M 96.015122 148.788052 
+L 111.089183 148.788052 
+L 111.089183 133.713991 
+L 96.015122 133.713991 
+L 96.015122 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #2d416d"/>
+    <path d="M 111.089183 148.788052 
+L 126.163244 148.788052 
+L 126.163244 133.713991 
+L 111.089183 133.713991 
+L 111.089183 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #39486c"/>
+    <path d="M 126.163244 148.788052 
+L 141.237305 148.788052 
+L 141.237305 133.713991 
+L 126.163244 133.713991 
+L 126.163244 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #424e6c"/>
+    <path d="M 141.237305 148.788052 
+L 156.311366 148.788052 
+L 156.311366 133.713991 
+L 141.237305 133.713991 
+L 141.237305 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #47516c"/>
+    <path d="M 156.311366 148.788052 
+L 171.385427 148.788052 
+L 171.385427 133.713991 
+L 156.311366 133.713991 
+L 156.311366 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #4a536c"/>
+    <path d="M 171.385427 148.788052 
+L 186.459488 148.788052 
+L 186.459488 133.713991 
+L 171.385427 133.713991 
+L 171.385427 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #4a536c"/>
+    <path d="M 186.459488 148.788052 
+L 201.533549 148.788052 
+L 201.533549 133.713991 
+L 186.459488 133.713991 
+L 186.459488 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #47516c"/>
+    <path d="M 201.533549 148.788052 
+L 216.60761 148.788052 
+L 216.60761 133.713991 
+L 201.533549 133.713991 
+L 201.533549 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #424e6c"/>
+    <path d="M 216.60761 148.788052 
+L 231.681671 148.788052 
+L 231.681671 133.713991 
+L 216.60761 133.713991 
+L 216.60761 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #39486c"/>
+    <path d="M 231.681671 148.788052 
+L 246.755732 148.788052 
+L 246.755732 133.713991 
+L 231.681671 133.713991 
+L 231.681671 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #2d416d"/>
+    <path d="M 246.755732 148.788052 
+L 261.829793 148.788052 
+L 261.829793 133.713991 
+L 246.755732 133.713991 
+L 246.755732 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #18376f"/>
+    <path d="M 261.829793 148.788052 
+L 276.903854 148.788052 
+L 276.903854 133.713991 
+L 261.829793 133.713991 
+L 261.829793 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #002e6a"/>
+    <path d="M 276.903854 148.788052 
+L 291.977915 148.788052 
+L 291.977915 133.713991 
+L 276.903854 133.713991 
+L 276.903854 148.788052 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 133.713991 
+L 65.867 133.713991 
+L 65.867 118.63993 
+L 50.792939 118.63993 
+L 50.792939 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 133.713991 
+L 80.941061 133.713991 
+L 80.941061 118.63993 
+L 65.867 118.63993 
+L 65.867 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #003070"/>
+    <path d="M 80.941061 133.713991 
+L 96.015122 133.713991 
+L 96.015122 118.63993 
+L 80.941061 118.63993 
+L 80.941061 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #263d6e"/>
+    <path d="M 96.015122 133.713991 
+L 111.089183 133.713991 
+L 111.089183 118.63993 
+L 96.015122 118.63993 
+L 96.015122 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #3a486c"/>
+    <path d="M 111.089183 133.713991 
+L 126.163244 133.713991 
+L 126.163244 118.63993 
+L 111.089183 118.63993 
+L 111.089183 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #47516c"/>
+    <path d="M 126.163244 133.713991 
+L 141.237305 133.713991 
+L 141.237305 118.63993 
+L 126.163244 118.63993 
+L 126.163244 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #51586d"/>
+    <path d="M 141.237305 133.713991 
+L 156.311366 133.713991 
+L 156.311366 118.63993 
+L 141.237305 118.63993 
+L 141.237305 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #565c6d"/>
+    <path d="M 156.311366 133.713991 
+L 171.385427 133.713991 
+L 171.385427 118.63993 
+L 156.311366 118.63993 
+L 156.311366 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #595e6e"/>
+    <path d="M 171.385427 133.713991 
+L 186.459488 133.713991 
+L 186.459488 118.63993 
+L 171.385427 118.63993 
+L 171.385427 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #595e6e"/>
+    <path d="M 186.459488 133.713991 
+L 201.533549 133.713991 
+L 201.533549 118.63993 
+L 186.459488 118.63993 
+L 186.459488 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #565c6d"/>
+    <path d="M 201.533549 133.713991 
+L 216.60761 133.713991 
+L 216.60761 118.63993 
+L 201.533549 118.63993 
+L 201.533549 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #51586d"/>
+    <path d="M 216.60761 133.713991 
+L 231.681671 133.713991 
+L 231.681671 118.63993 
+L 216.60761 118.63993 
+L 216.60761 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #47516c"/>
+    <path d="M 231.681671 133.713991 
+L 246.755732 133.713991 
+L 246.755732 118.63993 
+L 231.681671 118.63993 
+L 231.681671 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #3a486c"/>
+    <path d="M 246.755732 133.713991 
+L 261.829793 133.713991 
+L 261.829793 118.63993 
+L 246.755732 118.63993 
+L 246.755732 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #263d6e"/>
+    <path d="M 261.829793 133.713991 
+L 276.903854 133.713991 
+L 276.903854 118.63993 
+L 261.829793 118.63993 
+L 261.829793 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #003070"/>
+    <path d="M 276.903854 133.713991 
+L 291.977915 133.713991 
+L 291.977915 118.63993 
+L 276.903854 118.63993 
+L 276.903854 133.713991 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 118.63993 
+L 65.867 118.63993 
+L 65.867 103.56587 
+L 50.792939 103.56587 
+L 50.792939 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 118.63993 
+L 80.941061 118.63993 
+L 80.941061 103.56587 
+L 65.867 103.56587 
+L 65.867 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #0c3470"/>
+    <path d="M 80.941061 118.63993 
+L 96.015122 118.63993 
+L 96.015122 103.56587 
+L 80.941061 103.56587 
+L 80.941061 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #35456c"/>
+    <path d="M 96.015122 118.63993 
+L 111.089183 118.63993 
+L 111.089183 103.56587 
+L 96.015122 103.56587 
+L 96.015122 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #4a536c"/>
+    <path d="M 111.089183 118.63993 
+L 126.163244 118.63993 
+L 126.163244 103.56587 
+L 111.089183 103.56587 
+L 111.089183 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #585e6d"/>
+    <path d="M 126.163244 118.63993 
+L 141.237305 118.63993 
+L 141.237305 103.56587 
+L 126.163244 103.56587 
+L 126.163244 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #62656f"/>
+    <path d="M 141.237305 118.63993 
+L 156.311366 118.63993 
+L 156.311366 103.56587 
+L 141.237305 103.56587 
+L 141.237305 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #686a71"/>
+    <path d="M 156.311366 118.63993 
+L 171.385427 118.63993 
+L 171.385427 103.56587 
+L 156.311366 103.56587 
+L 156.311366 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #6b6d72"/>
+    <path d="M 171.385427 118.63993 
+L 186.459488 118.63993 
+L 186.459488 103.56587 
+L 171.385427 103.56587 
+L 171.385427 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #6b6d72"/>
+    <path d="M 186.459488 118.63993 
+L 201.533549 118.63993 
+L 201.533549 103.56587 
+L 186.459488 103.56587 
+L 186.459488 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #686a71"/>
+    <path d="M 201.533549 118.63993 
+L 216.60761 118.63993 
+L 216.60761 103.56587 
+L 201.533549 103.56587 
+L 201.533549 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #62656f"/>
+    <path d="M 216.60761 118.63993 
+L 231.681671 118.63993 
+L 231.681671 103.56587 
+L 216.60761 103.56587 
+L 216.60761 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #585e6d"/>
+    <path d="M 231.681671 118.63993 
+L 246.755732 118.63993 
+L 246.755732 103.56587 
+L 231.681671 103.56587 
+L 231.681671 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #4a536c"/>
+    <path d="M 246.755732 118.63993 
+L 261.829793 118.63993 
+L 261.829793 103.56587 
+L 246.755732 103.56587 
+L 246.755732 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #35456c"/>
+    <path d="M 261.829793 118.63993 
+L 276.903854 118.63993 
+L 276.903854 103.56587 
+L 261.829793 103.56587 
+L 261.829793 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #0c3470"/>
+    <path d="M 276.903854 118.63993 
+L 291.977915 118.63993 
+L 291.977915 103.56587 
+L 276.903854 103.56587 
+L 276.903854 118.63993 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 103.56587 
+L 65.867 103.56587 
+L 65.867 88.491809 
+L 50.792939 88.491809 
+L 50.792939 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 103.56587 
+L 80.941061 103.56587 
+L 80.941061 88.491809 
+L 65.867 88.491809 
+L 65.867 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #203a6f"/>
+    <path d="M 80.941061 103.56587 
+L 96.015122 103.56587 
+L 96.015122 88.491809 
+L 80.941061 88.491809 
+L 80.941061 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #45506c"/>
+    <path d="M 96.015122 103.56587 
+L 111.089183 103.56587 
+L 111.089183 88.491809 
+L 96.015122 88.491809 
+L 96.015122 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #5c616e"/>
+    <path d="M 111.089183 103.56587 
+L 126.163244 103.56587 
+L 126.163244 88.491809 
+L 111.089183 88.491809 
+L 111.089183 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #6c6d72"/>
+    <path d="M 126.163244 103.56587 
+L 141.237305 103.56587 
+L 141.237305 88.491809 
+L 126.163244 88.491809 
+L 126.163244 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #767676"/>
+    <path d="M 141.237305 103.56587 
+L 156.311366 103.56587 
+L 156.311366 88.491809 
+L 141.237305 88.491809 
+L 141.237305 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #7c7b78"/>
+    <path d="M 156.311366 103.56587 
+L 171.385427 103.56587 
+L 171.385427 88.491809 
+L 156.311366 88.491809 
+L 156.311366 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #7f7e78"/>
+    <path d="M 171.385427 103.56587 
+L 186.459488 103.56587 
+L 186.459488 88.491809 
+L 171.385427 88.491809 
+L 171.385427 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #7f7e78"/>
+    <path d="M 186.459488 103.56587 
+L 201.533549 103.56587 
+L 201.533549 88.491809 
+L 186.459488 88.491809 
+L 186.459488 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #7c7b78"/>
+    <path d="M 201.533549 103.56587 
+L 216.60761 103.56587 
+L 216.60761 88.491809 
+L 201.533549 88.491809 
+L 201.533549 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #767676"/>
+    <path d="M 216.60761 103.56587 
+L 231.681671 103.56587 
+L 231.681671 88.491809 
+L 216.60761 88.491809 
+L 216.60761 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #6c6d72"/>
+    <path d="M 231.681671 103.56587 
+L 246.755732 103.56587 
+L 246.755732 88.491809 
+L 231.681671 88.491809 
+L 231.681671 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #5c616e"/>
+    <path d="M 246.755732 103.56587 
+L 261.829793 103.56587 
+L 261.829793 88.491809 
+L 246.755732 88.491809 
+L 246.755732 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #45506c"/>
+    <path d="M 261.829793 103.56587 
+L 276.903854 103.56587 
+L 276.903854 88.491809 
+L 261.829793 88.491809 
+L 261.829793 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #203a6f"/>
+    <path d="M 276.903854 103.56587 
+L 291.977915 103.56587 
+L 291.977915 88.491809 
+L 276.903854 88.491809 
+L 276.903854 103.56587 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 88.491809 
+L 65.867 88.491809 
+L 65.867 73.417747 
+L 50.792939 73.417747 
+L 50.792939 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 88.491809 
+L 80.941061 88.491809 
+L 80.941061 73.417747 
+L 65.867 73.417747 
+L 65.867 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #33446d"/>
+    <path d="M 80.941061 88.491809 
+L 96.015122 88.491809 
+L 96.015122 73.417747 
+L 80.941061 73.417747 
+L 80.941061 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #5b606e"/>
+    <path d="M 96.015122 88.491809 
+L 111.089183 88.491809 
+L 111.089183 73.417747 
+L 96.015122 73.417747 
+L 96.015122 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #727374"/>
+    <path d="M 111.089183 88.491809 
+L 126.163244 88.491809 
+L 126.163244 73.417747 
+L 111.089183 73.417747 
+L 111.089183 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #838179"/>
+    <path d="M 126.163244 88.491809 
+L 141.237305 88.491809 
+L 141.237305 73.417747 
+L 126.163244 73.417747 
+L 126.163244 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #8f8a78"/>
+    <path d="M 141.237305 88.491809 
+L 156.311366 88.491809 
+L 156.311366 73.417747 
+L 141.237305 73.417747 
+L 141.237305 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #958f77"/>
+    <path d="M 156.311366 88.491809 
+L 171.385427 88.491809 
+L 171.385427 73.417747 
+L 156.311366 73.417747 
+L 156.311366 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #999277"/>
+    <path d="M 171.385427 88.491809 
+L 186.459488 88.491809 
+L 186.459488 73.417747 
+L 171.385427 73.417747 
+L 171.385427 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #999277"/>
+    <path d="M 186.459488 88.491809 
+L 201.533549 88.491809 
+L 201.533549 73.417747 
+L 186.459488 73.417747 
+L 186.459488 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #958f77"/>
+    <path d="M 201.533549 88.491809 
+L 216.60761 88.491809 
+L 216.60761 73.417747 
+L 201.533549 73.417747 
+L 201.533549 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #8f8a78"/>
+    <path d="M 216.60761 88.491809 
+L 231.681671 88.491809 
+L 231.681671 73.417747 
+L 216.60761 73.417747 
+L 216.60761 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #838179"/>
+    <path d="M 231.681671 88.491809 
+L 246.755732 88.491809 
+L 246.755732 73.417747 
+L 231.681671 73.417747 
+L 231.681671 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #727374"/>
+    <path d="M 246.755732 88.491809 
+L 261.829793 88.491809 
+L 261.829793 73.417747 
+L 246.755732 73.417747 
+L 246.755732 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #5b606e"/>
+    <path d="M 261.829793 88.491809 
+L 276.903854 88.491809 
+L 276.903854 73.417747 
+L 261.829793 73.417747 
+L 261.829793 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #33446d"/>
+    <path d="M 276.903854 88.491809 
+L 291.977915 88.491809 
+L 291.977915 73.417747 
+L 276.903854 73.417747 
+L 276.903854 88.491809 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 73.417747 
+L 65.867 73.417747 
+L 65.867 58.343686 
+L 50.792939 58.343686 
+L 50.792939 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 73.417747 
+L 80.941061 73.417747 
+L 80.941061 58.343686 
+L 65.867 58.343686 
+L 65.867 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #4d556c"/>
+    <path d="M 80.941061 73.417747 
+L 96.015122 73.417747 
+L 96.015122 58.343686 
+L 80.941061 58.343686 
+L 80.941061 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #777777"/>
+    <path d="M 96.015122 73.417747 
+L 111.089183 73.417747 
+L 111.089183 58.343686 
+L 96.015122 58.343686 
+L 96.015122 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #928d78"/>
+    <path d="M 111.089183 73.417747 
+L 126.163244 73.417747 
+L 126.163244 58.343686 
+L 111.089183 58.343686 
+L 111.089183 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #a49b74"/>
+    <path d="M 126.163244 73.417747 
+L 141.237305 73.417747 
+L 141.237305 58.343686 
+L 126.163244 58.343686 
+L 126.163244 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #aea371"/>
+    <path d="M 141.237305 73.417747 
+L 156.311366 73.417747 
+L 156.311366 58.343686 
+L 141.237305 58.343686 
+L 141.237305 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #b5a86f"/>
+    <path d="M 156.311366 73.417747 
+L 171.385427 73.417747 
+L 171.385427 58.343686 
+L 156.311366 58.343686 
+L 156.311366 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #b8aa6e"/>
+    <path d="M 171.385427 73.417747 
+L 186.459488 73.417747 
+L 186.459488 58.343686 
+L 171.385427 58.343686 
+L 171.385427 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #b8aa6e"/>
+    <path d="M 186.459488 73.417747 
+L 201.533549 73.417747 
+L 201.533549 58.343686 
+L 186.459488 58.343686 
+L 186.459488 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #b5a86f"/>
+    <path d="M 201.533549 73.417747 
+L 216.60761 73.417747 
+L 216.60761 58.343686 
+L 201.533549 58.343686 
+L 201.533549 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #aea371"/>
+    <path d="M 216.60761 73.417747 
+L 231.681671 73.417747 
+L 231.681671 58.343686 
+L 216.60761 58.343686 
+L 216.60761 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #a49b74"/>
+    <path d="M 231.681671 73.417747 
+L 246.755732 73.417747 
+L 246.755732 58.343686 
+L 231.681671 58.343686 
+L 231.681671 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #928d78"/>
+    <path d="M 246.755732 73.417747 
+L 261.829793 73.417747 
+L 261.829793 58.343686 
+L 246.755732 58.343686 
+L 246.755732 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #777777"/>
+    <path d="M 261.829793 73.417747 
+L 276.903854 73.417747 
+L 276.903854 58.343686 
+L 261.829793 58.343686 
+L 261.829793 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #4d556c"/>
+    <path d="M 276.903854 73.417747 
+L 291.977915 73.417747 
+L 291.977915 58.343686 
+L 276.903854 58.343686 
+L 276.903854 73.417747 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 58.343686 
+L 65.867 58.343686 
+L 65.867 43.269625 
+L 50.792939 43.269625 
+L 50.792939 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 58.343686 
+L 80.941061 58.343686 
+L 80.941061 43.269625 
+L 65.867 43.269625 
+L 65.867 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #7b7a78"/>
+    <path d="M 80.941061 58.343686 
+L 96.015122 58.343686 
+L 96.015122 43.269625 
+L 80.941061 43.269625 
+L 80.941061 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #aba072"/>
+    <path d="M 96.015122 58.343686 
+L 111.089183 58.343686 
+L 111.089183 43.269625 
+L 96.015122 43.269625 
+L 96.015122 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #c2b369"/>
+    <path d="M 111.089183 58.343686 
+L 126.163244 58.343686 
+L 126.163244 43.269625 
+L 111.089183 43.269625 
+L 111.089183 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #cfbd62"/>
+    <path d="M 126.163244 58.343686 
+L 141.237305 58.343686 
+L 141.237305 43.269625 
+L 126.163244 43.269625 
+L 126.163244 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #d5c25e"/>
+    <path d="M 141.237305 58.343686 
+L 156.311366 58.343686 
+L 156.311366 43.269625 
+L 141.237305 43.269625 
+L 141.237305 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #d9c55c"/>
+    <path d="M 156.311366 58.343686 
+L 171.385427 58.343686 
+L 171.385427 43.269625 
+L 156.311366 43.269625 
+L 156.311366 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #dbc75a"/>
+    <path d="M 171.385427 58.343686 
+L 186.459488 58.343686 
+L 186.459488 43.269625 
+L 171.385427 43.269625 
+L 171.385427 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #dbc75a"/>
+    <path d="M 186.459488 58.343686 
+L 201.533549 58.343686 
+L 201.533549 43.269625 
+L 186.459488 43.269625 
+L 186.459488 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #d9c55c"/>
+    <path d="M 201.533549 58.343686 
+L 216.60761 58.343686 
+L 216.60761 43.269625 
+L 201.533549 43.269625 
+L 201.533549 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #d5c25e"/>
+    <path d="M 216.60761 58.343686 
+L 231.681671 58.343686 
+L 231.681671 43.269625 
+L 216.60761 43.269625 
+L 216.60761 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #cfbd62"/>
+    <path d="M 231.681671 58.343686 
+L 246.755732 58.343686 
+L 246.755732 43.269625 
+L 231.681671 43.269625 
+L 231.681671 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #c2b369"/>
+    <path d="M 246.755732 58.343686 
+L 261.829793 58.343686 
+L 261.829793 43.269625 
+L 246.755732 43.269625 
+L 246.755732 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #aba072"/>
+    <path d="M 261.829793 58.343686 
+L 276.903854 58.343686 
+L 276.903854 43.269625 
+L 261.829793 43.269625 
+L 261.829793 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #7b7a78"/>
+    <path d="M 276.903854 58.343686 
+L 291.977915 58.343686 
+L 291.977915 43.269625 
+L 276.903854 43.269625 
+L 276.903854 58.343686 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 50.792939 43.269625 
+L 65.867 43.269625 
+L 65.867 28.195565 
+L 50.792939 28.195565 
+L 50.792939 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+    <path d="M 65.867 43.269625 
+L 80.941061 43.269625 
+L 80.941061 28.195565 
+L 65.867 28.195565 
+L 65.867 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #fee838"/>
+    <path d="M 80.941061 43.269625 
+L 96.015122 43.269625 
+L 96.015122 28.195565 
+L 80.941061 28.195565 
+L 80.941061 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #fee838"/>
+    <path d="M 96.015122 43.269625 
+L 111.089183 43.269625 
+L 111.089183 28.195565 
+L 96.015122 28.195565 
+L 96.015122 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #fee838"/>
+    <path d="M 111.089183 43.269625 
+L 126.163244 43.269625 
+L 126.163244 28.195565 
+L 111.089183 28.195565 
+L 111.089183 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #fee838"/>
+    <path d="M 126.163244 43.269625 
+L 141.237305 43.269625 
+L 141.237305 28.195565 
+L 126.163244 28.195565 
+L 126.163244 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #fee838"/>
+    <path d="M 141.237305 43.269625 
+L 156.311366 43.269625 
+L 156.311366 28.195565 
+L 141.237305 28.195565 
+L 141.237305 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #fee838"/>
+    <path d="M 156.311366 43.269625 
+L 171.385427 43.269625 
+L 171.385427 28.195565 
+L 156.311366 28.195565 
+L 156.311366 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #fee838"/>
+    <path d="M 171.385427 43.269625 
+L 186.459488 43.269625 
+L 186.459488 28.195565 
+L 171.385427 28.195565 
+L 171.385427 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #fee838"/>
+    <path d="M 186.459488 43.269625 
+L 201.533549 43.269625 
+L 201.533549 28.195565 
+L 186.459488 28.195565 
+L 186.459488 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #fee838"/>
+    <path d="M 201.533549 43.269625 
+L 216.60761 43.269625 
+L 216.60761 28.195565 
+L 201.533549 28.195565 
+L 201.533549 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #fee838"/>
+    <path d="M 216.60761 43.269625 
+L 231.681671 43.269625 
+L 231.681671 28.195565 
+L 216.60761 28.195565 
+L 216.60761 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #fee838"/>
+    <path d="M 231.681671 43.269625 
+L 246.755732 43.269625 
+L 246.755732 28.195565 
+L 231.681671 28.195565 
+L 231.681671 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #fee838"/>
+    <path d="M 246.755732 43.269625 
+L 261.829793 43.269625 
+L 261.829793 28.195565 
+L 246.755732 28.195565 
+L 246.755732 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #fee838"/>
+    <path d="M 261.829793 43.269625 
+L 276.903854 43.269625 
+L 276.903854 28.195565 
+L 261.829793 28.195565 
+L 261.829793 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #fee838"/>
+    <path d="M 276.903854 43.269625 
+L 291.977915 43.269625 
+L 291.977915 28.195565 
+L 276.903854 28.195565 
+L 276.903854 43.269625 
+" clip-path="url(#p47784e6400)" style="fill: #00224e"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <defs>
+       <path id="m37d4347c65" d="M 0 0 
+L 0 3.5 
+" style="stroke: #cbd5e1; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m37d4347c65" x="58.32997" y="261.84351" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_1">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="58.32997" y="276.441947" transform="rotate(-0 58.32997 276.441947)">0.0</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_2">
+      <g>
+       <use xlink:href="#m37d4347c65" x="103.552153" y="261.84351" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_2">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="103.552153" y="276.441947" transform="rotate(-0 103.552153 276.441947)">0.2</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_3">
+      <g>
+       <use xlink:href="#m37d4347c65" x="148.774336" y="261.84351" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_3">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="148.774336" y="276.441947" transform="rotate(-0 148.774336 276.441947)">0.4</text>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_4">
+      <g>
+       <use xlink:href="#m37d4347c65" x="193.996519" y="261.84351" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_4">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="193.996519" y="276.441947" transform="rotate(-0 193.996519 276.441947)">0.6</text>
+     </g>
+    </g>
+    <g id="xtick_5">
+     <g id="line2d_5">
+      <g>
+       <use xlink:href="#m37d4347c65" x="239.218702" y="261.84351" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_5">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="239.218702" y="276.441947" transform="rotate(-0 239.218702 276.441947)">0.8</text>
+     </g>
+    </g>
+    <g id="xtick_6">
+     <g id="line2d_6">
+      <g>
+       <use xlink:href="#m37d4347c65" x="284.440885" y="261.84351" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_6">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="284.440885" y="276.441947" transform="rotate(-0 284.440885 276.441947)">1.0</text>
+     </g>
+    </g>
+    <g id="text_7">
+     <text style="fill: #e6edf3; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="171.385427" y="290.120072" transform="rotate(-0 171.385427 290.120072)">x / side length</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_7">
+      <defs>
+       <path id="m1e7254dd2b" d="M 0 0 
+L -3.5 0 
+" style="stroke: #cbd5e1; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m1e7254dd2b" x="58.32997" y="261.84351" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_8">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end" x="51.32997" y="265.642729" transform="rotate(-0 51.32997 265.642729)">0.0</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_8">
+      <g>
+       <use xlink:href="#m1e7254dd2b" x="58.32997" y="216.621327" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_9">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end" x="51.32997" y="220.420546" transform="rotate(-0 51.32997 220.420546)">0.2</text>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_9">
+      <g>
+       <use xlink:href="#m1e7254dd2b" x="58.32997" y="171.399144" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_10">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end" x="51.32997" y="175.198363" transform="rotate(-0 51.32997 175.198363)">0.4</text>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_10">
+      <g>
+       <use xlink:href="#m1e7254dd2b" x="58.32997" y="126.176961" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_11">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end" x="51.32997" y="129.97618" transform="rotate(-0 51.32997 129.97618)">0.6</text>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_11">
+      <g>
+       <use xlink:href="#m1e7254dd2b" x="58.32997" y="80.954778" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_12">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end" x="51.32997" y="84.753997" transform="rotate(-0 51.32997 84.753997)">0.8</text>
+     </g>
+    </g>
+    <g id="ytick_6">
+     <g id="line2d_12">
+      <g>
+       <use xlink:href="#m1e7254dd2b" x="58.32997" y="35.732595" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_13">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end" x="51.32997" y="39.531814" transform="rotate(-0 51.32997 39.531814)">1.0</text>
+     </g>
+    </g>
+    <g id="text_14">
+     <text style="fill: #e6edf3; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="29.347157" y="148.788052" transform="rotate(-90 29.347157 148.788052)">y / side length</text>
+    </g>
+   </g>
+   <g id="patch_3">
+    <path d="M 58.32997 261.84351 
+L 58.32997 35.732595 
+" style="fill: none; stroke: #ffffff; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 284.440885 261.84351 
+L 284.440885 35.732595 
+" style="fill: none; stroke: #ffffff; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 58.32997 261.84351 
+L 284.440885 261.84351 
+" style="fill: none; stroke: #ffffff; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 58.32997 35.732595 
+L 284.440885 35.732595 
+" style="fill: none; stroke: #ffffff; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_15">
+    <text style="fill: #e6edf3; font: 12px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="171.385427" y="29.732595" transform="rotate(-0 171.385427 29.732595)">Point samples: nearest shading</text>
+   </g>
+  </g>
+  <g id="axes_2">
+   <g id="patch_7">
+    <path d="M 395.593066 261.84351 
+L 651.448198 261.84351 
+L 651.448198 35.732595 
+L 395.593066 35.732595 
+z
+" style="fill: #111923"/>
+   </g>
+   <g id="matplotlib.axis_3">
+    <g id="xtick_7">
+     <g id="line2d_13">
+      <path d="M 395.593066 261.84351 
+L 395.593066 35.732595 
+" clip-path="url(#pa768a43c8a)" style="fill: none; stroke: #334155; stroke-opacity: 0.6; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_14">
+      <g>
+       <use xlink:href="#m37d4347c65" x="395.593066" y="261.84351" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_16">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="395.593066" y="276.441947" transform="rotate(-0 395.593066 276.441947)">0.0</text>
+     </g>
+    </g>
+    <g id="xtick_8">
+     <g id="line2d_15">
+      <path d="M 446.764092 261.84351 
+L 446.764092 35.732595 
+" clip-path="url(#pa768a43c8a)" style="fill: none; stroke: #334155; stroke-opacity: 0.6; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_16">
+      <g>
+       <use xlink:href="#m37d4347c65" x="446.764092" y="261.84351" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_17">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="446.764092" y="276.441947" transform="rotate(-0 446.764092 276.441947)">0.2</text>
+     </g>
+    </g>
+    <g id="xtick_9">
+     <g id="line2d_17">
+      <path d="M 497.935118 261.84351 
+L 497.935118 35.732595 
+" clip-path="url(#pa768a43c8a)" style="fill: none; stroke: #334155; stroke-opacity: 0.6; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_18">
+      <g>
+       <use xlink:href="#m37d4347c65" x="497.935118" y="261.84351" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_18">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="497.935118" y="276.441947" transform="rotate(-0 497.935118 276.441947)">0.4</text>
+     </g>
+    </g>
+    <g id="xtick_10">
+     <g id="line2d_19">
+      <path d="M 549.106145 261.84351 
+L 549.106145 35.732595 
+" clip-path="url(#pa768a43c8a)" style="fill: none; stroke: #334155; stroke-opacity: 0.6; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_20">
+      <g>
+       <use xlink:href="#m37d4347c65" x="549.106145" y="261.84351" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_19">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="549.106145" y="276.441947" transform="rotate(-0 549.106145 276.441947)">0.6</text>
+     </g>
+    </g>
+    <g id="xtick_11">
+     <g id="line2d_21">
+      <path d="M 600.277171 261.84351 
+L 600.277171 35.732595 
+" clip-path="url(#pa768a43c8a)" style="fill: none; stroke: #334155; stroke-opacity: 0.6; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_22">
+      <g>
+       <use xlink:href="#m37d4347c65" x="600.277171" y="261.84351" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_20">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="600.277171" y="276.441947" transform="rotate(-0 600.277171 276.441947)">0.8</text>
+     </g>
+    </g>
+    <g id="xtick_12">
+     <g id="line2d_23">
+      <path d="M 651.448198 261.84351 
+L 651.448198 35.732595 
+" clip-path="url(#pa768a43c8a)" style="fill: none; stroke: #334155; stroke-opacity: 0.6; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_24">
+      <g>
+       <use xlink:href="#m37d4347c65" x="651.448198" y="261.84351" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_21">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="651.448198" y="276.441947" transform="rotate(-0 651.448198 276.441947)">1.0</text>
+     </g>
+    </g>
+    <g id="text_22">
+     <text style="fill: #e6edf3; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="523.520632" y="290.120072" transform="rotate(-0 523.520632 290.120072)">Dimensionless temperature u</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_4">
+    <g id="ytick_7">
+     <g id="line2d_25">
+      <path d="M 395.593066 261.84351 
+L 651.448198 261.84351 
+" clip-path="url(#pa768a43c8a)" style="fill: none; stroke: #334155; stroke-opacity: 0.6; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_26">
+      <g>
+       <use xlink:href="#m1e7254dd2b" x="395.593066" y="261.84351" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_23">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end" x="388.593066" y="265.642729" transform="rotate(-0 388.593066 265.642729)">0.0</text>
+     </g>
+    </g>
+    <g id="ytick_8">
+     <g id="line2d_27">
+      <path d="M 395.593066 216.621327 
+L 651.448198 216.621327 
+" clip-path="url(#pa768a43c8a)" style="fill: none; stroke: #334155; stroke-opacity: 0.6; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_28">
+      <g>
+       <use xlink:href="#m1e7254dd2b" x="395.593066" y="216.621327" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_24">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end" x="388.593066" y="220.420546" transform="rotate(-0 388.593066 220.420546)">0.2</text>
+     </g>
+    </g>
+    <g id="ytick_9">
+     <g id="line2d_29">
+      <path d="M 395.593066 171.399144 
+L 651.448198 171.399144 
+" clip-path="url(#pa768a43c8a)" style="fill: none; stroke: #334155; stroke-opacity: 0.6; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_30">
+      <g>
+       <use xlink:href="#m1e7254dd2b" x="395.593066" y="171.399144" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_25">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end" x="388.593066" y="175.198363" transform="rotate(-0 388.593066 175.198363)">0.4</text>
+     </g>
+    </g>
+    <g id="ytick_10">
+     <g id="line2d_31">
+      <path d="M 395.593066 126.176961 
+L 651.448198 126.176961 
+" clip-path="url(#pa768a43c8a)" style="fill: none; stroke: #334155; stroke-opacity: 0.6; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_32">
+      <g>
+       <use xlink:href="#m1e7254dd2b" x="395.593066" y="126.176961" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_26">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end" x="388.593066" y="129.97618" transform="rotate(-0 388.593066 129.97618)">0.6</text>
+     </g>
+    </g>
+    <g id="ytick_11">
+     <g id="line2d_33">
+      <path d="M 395.593066 80.954778 
+L 651.448198 80.954778 
+" clip-path="url(#pa768a43c8a)" style="fill: none; stroke: #334155; stroke-opacity: 0.6; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_34">
+      <g>
+       <use xlink:href="#m1e7254dd2b" x="395.593066" y="80.954778" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_27">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end" x="388.593066" y="84.753997" transform="rotate(-0 388.593066 84.753997)">0.8</text>
+     </g>
+    </g>
+    <g id="ytick_12">
+     <g id="line2d_35">
+      <path d="M 395.593066 35.732595 
+L 651.448198 35.732595 
+" clip-path="url(#pa768a43c8a)" style="fill: none; stroke: #334155; stroke-opacity: 0.6; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_36">
+      <g>
+       <use xlink:href="#m1e7254dd2b" x="395.593066" y="35.732595" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_28">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end" x="388.593066" y="39.531814" transform="rotate(-0 388.593066 39.531814)">1.0</text>
+     </g>
+    </g>
+    <g id="text_29">
+     <text style="fill: #e6edf3; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="366.610253" y="148.788052" transform="rotate(-90 366.610253 148.788052)">y / side length</text>
+    </g>
+   </g>
+   <g id="line2d_37">
+    <path d="M 395.593066 261.84351 
+L 401.521976 246.769449 
+L 407.705326 231.695388 
+L 414.40692 216.621327 
+L 421.909073 201.547266 
+L 430.521069 186.473205 
+L 440.586006 171.399144 
+L 452.484161 156.325083 
+L 466.629537 141.251022 
+L 483.45416 126.176961 
+L 503.372037 111.1029 
+L 526.7128 96.028839 
+L 553.616984 80.954778 
+L 583.897014 65.880717 
+L 616.898795 50.806656 
+L 651.448198 35.732595 
+" clip-path="url(#pa768a43c8a)" style="fill: none; stroke: #58d4c5; stroke-width: 1.5; stroke-linecap: square"/>
+    <defs>
+     <path id="m7598168f1e" d="M 0 1.5 
+C 0.397805 1.5 0.77937 1.341951 1.06066 1.06066 
+C 1.341951 0.77937 1.5 0.397805 1.5 0 
+C 1.5 -0.397805 1.341951 -0.77937 1.06066 -1.06066 
+C 0.77937 -1.341951 0.397805 -1.5 0 -1.5 
+C -0.397805 -1.5 -0.77937 -1.341951 -1.06066 -1.06066 
+C -1.341951 -0.77937 -1.5 -0.397805 -1.5 0 
+C -1.5 0.397805 -1.341951 0.77937 -1.06066 1.06066 
+C -0.77937 1.341951 -0.397805 1.5 0 1.5 
+z
+" style="stroke: #58d4c5"/>
+    </defs>
+    <g clip-path="url(#pa768a43c8a)">
+     <use xlink:href="#m7598168f1e" x="395.593066" y="261.84351" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="401.521976" y="246.769449" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="407.705326" y="231.695388" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="414.40692" y="216.621327" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="421.909073" y="201.547266" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="430.521069" y="186.473205" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="440.586006" y="171.399144" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="452.484161" y="156.325083" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="466.629537" y="141.251022" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="483.45416" y="126.176961" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="503.372037" y="111.1029" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="526.7128" y="96.028839" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="553.616984" y="80.954778" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="583.897014" y="65.880717" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="616.898795" y="50.806656" style="fill: #58d4c5; stroke: #58d4c5"/>
+     <use xlink:href="#m7598168f1e" x="651.448198" y="35.732595" style="fill: #58d4c5; stroke: #58d4c5"/>
+    </g>
+   </g>
+   <g id="patch_8">
+    <path d="M 395.593066 261.84351 
+L 395.593066 35.732595 
+" style="fill: none; stroke: #ffffff; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 651.448198 261.84351 
+L 651.448198 35.732595 
+" style="fill: none; stroke: #ffffff; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 395.593066 261.84351 
+L 651.448198 261.84351 
+" style="fill: none; stroke: #ffffff; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 395.593066 35.732595 
+L 651.448198 35.732595 
+" style="fill: none; stroke: #ffffff; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_30">
+    <text style="fill: #e6edf3; font: 12px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="523.520632" y="29.732595" transform="rotate(-0 523.520632 29.732595)">Vertical samples at x = 7/15</text>
+   </g>
+  </g>
+  <g id="axes_3">
+   <g id="patch_12">
+    <path d="M 306.46448 248.276855 
+L 316.41336 248.276855 
+L 316.41336 49.29925 
+L 306.46448 49.29925 
+z
+" style="fill: #111923"/>
+   </g>
+   <image xlink:href="data:image/png;base64,
+iVBORw0KGgoAAAANSUhEUgAAAA0AAAEVCAYAAAA7GW8+AAABZklEQVR4nO2bSQ4CIBAEB+QlPsj/v0a9uJynTCotwXulZ5oGAXHU9fao5mfVGF2mVo1pQdUvry9Tbk/IctCWOk6aEWJ5EgQDm245UmozUAn4UGsR6FLtVZkqsfIANIESSzlRWpNYzpQ8qM/UGsMyAjBUybKcBXaQ7Gk9sXHasTw0NdLdE1NOIG26n/J+gvqMWt5J+QvqM6e8L9Rnag1yfhIDmz1O6HgXHyPr9Bk/NfoQvaojlhOleMuTs2cuYVYi1J4QZE0NtpZvucKGW279gmKusFYivLvl8OxlfxPSfQSAso0I3xLE3+9F9xS/+egz5yj0gcwNlTY1TsrfSsmW77ksZ28+NjQivqf9FkvPcvVCWnu1EB5YMXvZRoDy1EuMHcfJex+R3ZOoZKXce0wWb7mnhObTdj2Ju2VzS3AS8Q/Q3DDl6VDdJSVtcClkGaGVR5/0h7uHlAA0NSUItRn8ByMCTemfVk9ddUhDv2VGNgAAAABJRU5ErkJggg==" id="image4a30dc0ef2" transform="scale(1 -1) translate(0 -199.44)" x="306.72" y="-48.24" width="9.36" height="199.44"/>
+   <g id="matplotlib.axis_5"/>
+   <g id="matplotlib.axis_6">
+    <g id="ytick_13">
+     <g id="line2d_38">
+      <defs>
+       <path id="m7c67b26e59" d="M 0 0 
+L 3.5 0 
+" style="stroke: #cbd5e1; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m7c67b26e59" x="316.41336" y="248.276855" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_31">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start" x="323.41336" y="252.076074" transform="rotate(-0 323.41336 252.076074)">0.0</text>
+     </g>
+    </g>
+    <g id="ytick_14">
+     <g id="line2d_39">
+      <g>
+       <use xlink:href="#m7c67b26e59" x="316.41336" y="208.481334" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_32">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start" x="323.41336" y="212.280553" transform="rotate(-0 323.41336 212.280553)">0.2</text>
+     </g>
+    </g>
+    <g id="ytick_15">
+     <g id="line2d_40">
+      <g>
+       <use xlink:href="#m7c67b26e59" x="316.41336" y="168.685813" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_33">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start" x="323.41336" y="172.485032" transform="rotate(-0 323.41336 172.485032)">0.4</text>
+     </g>
+    </g>
+    <g id="ytick_16">
+     <g id="line2d_41">
+      <g>
+       <use xlink:href="#m7c67b26e59" x="316.41336" y="128.890292" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_34">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start" x="323.41336" y="132.689511" transform="rotate(-0 323.41336 132.689511)">0.6</text>
+     </g>
+    </g>
+    <g id="ytick_17">
+     <g id="line2d_42">
+      <g>
+       <use xlink:href="#m7c67b26e59" x="316.41336" y="89.094771" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_35">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start" x="323.41336" y="92.89399" transform="rotate(-0 323.41336 92.89399)">0.8</text>
+     </g>
+    </g>
+    <g id="ytick_18">
+     <g id="line2d_43">
+      <g>
+       <use xlink:href="#m7c67b26e59" x="316.41336" y="49.29925" style="fill: #cbd5e1; stroke: #cbd5e1; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_36">
+      <text style="fill: #cbd5e1; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start" x="323.41336" y="53.098469" transform="rotate(-0 323.41336 53.098469)">1.0</text>
+     </g>
+    </g>
+    <g id="text_37">
+     <text style="fill: #e6edf3; font: 10px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="350.914922" y="148.788052" transform="rotate(-90 350.914922 148.788052)">Dimensionless temperature u</text>
+    </g>
+   </g>
+   <g id="LineCollection_1"/>
+   <g id="patch_13">
+    <path d="M 306.46448 248.276855 
+L 311.43892 248.276855 
+L 316.41336 248.276855 
+L 316.41336 49.29925 
+L 311.43892 49.29925 
+L 306.46448 49.29925 
+L 306.46448 248.276855 
+z
+" style="fill: none; stroke: #ffffff; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+  </g>
+  <g id="text_38">
+   <text style="fill: #e6edf3; font: 12px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="331.2" y="12.118365" transform="rotate(-0 331.2 12.118365)">N = 14 interior points; physical top at y = 1</text>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p47784e6400">
+   <rect x="58.32997" y="35.732595" width="226.110915" height="226.110915"/>
+  </clipPath>
+  <clipPath id="pa768a43c8a">
+   <rect x="395.593066" y="35.732595" width="255.855132" height="226.110915"/>
+  </clipPath>
+ </defs>
+</svg>
+<figcaption>Figure 30.1. Validated 16-by-16 point field. Left: nearest-shaded values with fixed cividis scale. Right: saved vertical samples at x = 7/15. The top boundary is at y = 1; lines join samples without adding resolution.</figcaption></figure>
+<p>A reader can check three independent features against the specification: the top boundary is hot, the bottom is cold, and the interior increases toward the top along the displayed near-center column. The side-boundary corners remain cold. These checks are useful but incomplete: a horizontally mirrored field would look identical here, which is why the asymmetric marker test belongs in the program. A figure's plausibility should trigger numerical questions rather than terminate them.</p>
+<h2 id="limits">Limits of the workflow</h2>
+<p>The scheduling programs establish arithmetic and the consequences of a stated toy policy. They establish no real queue waiting time, cluster utilization, fair-share behavior, multi-node placement or submitted-job success. Both scheduler templates require a configured site and a real compatible executable. Their resource counts can be audited without presenting unperformed cluster execution. No comparison of Slurm and PBS performance follows from this local work.</p>
+<p>The numerical program establishes a finite discrete solve and a narrow data contract. It does not establish continuum accuracy near discontinuous corners, large-grid performance, parallel output correctness or general VTK reader compliance. The stored ASCII values preserve this run's double values under rereading; that property does not prove their physical interpretation. The rendered figure establishes that this installed plotting stack produced a visible artifact from that data under declared settings. It does not establish interactive, remote or GPU rendering capability.</p>
+<p>For a real production extension, make the workflow graph carry evidence as well as files: each stage should consume a named input and emit parameters, status and a content identity. Make validation fail before visualization if the solver exceeded its iteration limit or exported an inconsistent point count. Then preserve visualization settings alongside the image. This converts an attractive picture into a reproducible claim about a particular computed dataset, with each remaining uncertainty attached to the stage that owns it.</p>
+<h2 id="exercises">Six worked exercises</h2>
+<h3>1. Derive a resource request and its memory subtotal</h3>
+<p>A job requests three nodes, six MPI tasks per node and four CPUs per task. Each process mistakenly replicates two full 2048-by-2048 double arrays. Derive rank count, total CPU request, array storage per rank and buffer storage per node. Does a two-GiB node limit prove the job will fit?</p>
+<details><summary>Solution</summary><p>The rank count is \(3\times6=18\). CPU allocations total \(18\times4=72\); that is a resource request, while using all 72 requires an appropriately threaded executable. One array occupies \(8\times2048^2=33{,}554{,}432\) bytes, or 32 MiB. Two arrays occupy 64 MiB per rank. Six ranks therefore place 384 MiB of those buffers on each node, and all eighteen collectively hold 1152 MiB. The two-GiB limit is 2048 MiB per node, so the buffers alone are below it by 1664 MiB per node. This is a necessary subtotal comparison, not a sufficient fit test: rank-private runtime memory, stacks, temporary arrays, communication and output staging remain. The aggregate 1152-MiB figure cannot be compared with one node's 2048-MiB limit as if all storage lived there. Conversely, a sufficient cluster-wide sum would not help a single node that exceeds its own limit. Measure peak memory with the actual decomposition and libraries before choosing a margin.</p></details>
+<h3>2. Compute a backfill window and a utilization denominator</h3>
+<p>Use the four-node reservation example, but give the short job duration nine minutes. Compute occupied node-minutes in [0,20) for strict priority and for the non-delaying backfill plan. What happens if the candidate requests eleven minutes? Explain why utilization alone cannot establish fairness.</p>
+<details><summary>Solution</summary><p>The original running work occupies two nodes for ten minutes, contributing twenty node-minutes. The protected job occupies four nodes for ten minutes, contributing forty. Strict priority leaves the other two nodes idle until minute ten and delays the candidate until minute twenty, so the numerator is sixty. A nine-minute candidate occupies two nodes during [0,9), contributing eighteen without crossing the minute-ten reservation. Backfill therefore gives 78 node-minutes. The common denominator is \(4\times20=80\), yielding 0.75 and 0.975. An eleven-minute candidate extends past the reservation, so the simple non-delay test rejects it. Starting it anyway would delay the protected job or require interruption, changing the policy. These numbers count allocated node-time over a specified window; they do not record which projects received service or whether a repeatedly postponed large job eventually runs. A policy that fills every gap with the same favored user's short jobs can have high utilization and poor fairness.</p></details>
+<h3>3. Construct a data-ordering counterexample</h3>
+<p>A developer writes a square field in transposed order. Scalar count, minimum, maximum and a smooth-looking picture all pass. Give a field that makes transposition invisible, then construct a stronger test using the marker in this chapter. Include a coordinate whose expected value changes.</p>
+<details><summary>Solution</summary><p>Any field symmetric under exchanging coordinates, such as \(v(x,y)=x^2+y^2\) on equal axes, satisfies \(v(x,y)=v(y,x)\). Its transposed serialization cannot be distinguished by comparing scalar values at swapped positions, and extrema are unchanged even for nonsymmetric fields. Instead export \(m(x,y)=x+2y\). At \((x,y)=(2/15,3/15)\), the correct value is \(8/15\); transposition gives \(7/15\). A vertical reversal gives \(2/15+2(12/15)=26/15\), also different. In x-fastest storage this target has index \(2+16\times3=50\). Check that decoded index fifty agrees with the independently specified physical coordinate, and also test known corners and counts. The test must exercise the actual production export mapping, as the listing does, rather than test a second implementation that bypasses it. A field with a unique linear marker detects these simple permutations; it is not a proof against every arbitrary permutation or unit error.</p></details>
+<h3>4. Diagnose a successful job with an incorrect image</h3>
+<p>The batch script returns zero, a file has 256 finite numbers between zero and one, and a plotting program creates an image. The solver actually stopped at its iteration limit and the file is yesterday's output. Identify the failed assumptions and design a minimum acceptance gate.</p>
+<details><summary>Solution</summary><p>A zero script status certifies only the script's observed exit path. It fails to establish convergence if the program treats exhaustion as success or if the shell masks failure. File existence and plausible ranges do not establish that this run wrote it. Rendering establishes only that the plotting stage accepted some data. The gate should require the solver to return nonzero on iteration-limit exhaustion; preserve and propagate that exit; require a final scaled residual satisfying the declared criterion; and bind the exported file to the run's grid, input identity and parameters. Write to a run-specific output location and validate the newly produced file rather than reusing an old basename blindly. Check dimensions, count, association, finite values and known boundaries before rendering. A content hash identifies the bytes that were validated but does not itself prove the bytes came from a converged solve. Finally, make the rendering stage consume exactly that validated identity and retain its normalization and coordinate settings. The workflow then tests both freshness and scientific acceptance.</p></details>
+<h3>5. Choose where rendering should occur</h3>
+<p>A server holds a 40-GiB dataset. A client has only 8 GiB available. A rendered image is 1920 by 1080 pixels with four bytes per pixel. Compare transferring the complete dataset with receiving ten uncompressed images per second. Can these figures alone determine the best architecture?</p>
+<details><summary>Solution</summary><p>The full dataset exceeds the client's available memory by a factor of five before processing overhead, so a naive full local copy and load is infeasible. One image contains \(1920\times1080\times4=8{,}294{,}400\) bytes, about 7.91 MiB; ten per second require about 79.1 MiB/s of uncompressed payload. This makes server-side data processing with remote image delivery a plausible design, while leaving server memory and filter costs to be checked. It does not prove smooth interaction: network latency, bandwidth, compression, image composition and server rendering capacity matter. A small extracted geometry or reduced dataset might fit the client and be reusable over many camera movements. Transferring it once can outperform repeated images even though transferring the whole forty-GiB source cannot. Remote processing and remote rendering are separate choices. Benchmark the representative interaction, including first filter execution and subsequent camera changes, with declared image quality and network conditions.</p></details>
+<h3>6. Extend the implementation with a numerical and file failure test</h3>
+<p>Modify the heat writer to verify the barrier identity on its grid and to reject a file with 255 scalars but an unchanged 256-point declaration. State the expected outcome and explain why both checks together still do not prove continuum accuracy.</p>
+<details><summary>Solution</summary><p>Build \(b_{ij}=[x_j(1-x_j)+y_i(1-y_i)]/4\) using the same physical coordinates, then apply equation (30.4) at each interior node. Require the maximum difference from one to be below a small floating-point allowance, for example \(10^{-12}\) on this small grid. Centered second differences of a quadratic are exact in real arithmetic, so a larger discrepancy signals coordinate, sign or scaling trouble rather than an unknown truncation constant. For the file test remove the last scalar line while retaining the header. The reader must raise <code>ValueError</code> because the decoded count is 255, and the harness should count that expected rejection rather than treat the exception as an unexplained crash; the listing already includes this fixture. Check both error detection and the valid file's unchanged acceptance. The barrier check supports an iteration-error estimate relative to the discrete boundary-value problem. The count check supports serialization integrity. Neither compares the grid solution against the continuum solution or controls corner regularity. A separate mesh-refinement or analytic-reference study is needed for that question.</p></details>
+<h2 id="primary-sources">Recordings and primary sources</h2>
+<ol>
+<li><a href="https://www.youtube.com/watch?v=TwuO7a5KvS8">NPTEL W11L5, introduction to HPC schedulers using Slurm and PBS</a>, 16:24. Resource allocation, commands, policies, workflow features and illustrative comparisons.</li>
+<li><a href="https://www.youtube.com/watch?v=VBnF4ZQaQtY">NPTEL W11L6, scientific visualization</a>, 20:43. Purposes, modular pipelines, ParaView architecture, filters, annotation and formats.</li>
+<li><a href="https://slurm.schedmd.com/quickstart.html">SchedMD, Quick Start User Guide</a>, overview and commands. Roles of submission, launching, status, cancellation and partition inspection.</li>
+<li><a href="https://slurm.schedmd.com/sbatch.html">SchedMD, sbatch</a>, description, resource and dependency options. Directive parsing, tasks, CPUs per task, memory, time and afterok semantics.</li>
+<li><a href="https://slurm.schedmd.com/priority_multifactor.html">SchedMD, Multifactor Priority Plugin</a>, factors/configuration. Priority depends on configured policy factors.</li>
+<li><a href="https://slurm.schedmd.com/sched_config.html">SchedMD, Scheduling Configuration Guide</a>, Backfill Scheduling. Non-delay criterion and declared time limits.</li>
+<li><a href="https://slurm.schedmd.com/job_exit_code.html">SchedMD, Job Exit Codes</a>. Script and step status versus application correctness.</li>
+<li><a href="https://slurm.schedmd.com/faq.html">SchedMD, FAQ</a>, killed jobs and job management. Requeue/failure distinctions and operational limits.</li>
+<li><a href="https://raw.githubusercontent.com/openpbs/openpbs/master/doc/man1/qsub.1B">OpenPBS, qsub manual</a>, resource lists, chunks and placement; <a href="https://raw.githubusercontent.com/openpbs/openpbs/master/doc/man1/pbs_resources.7B">built-in resources manual</a>, ncpus, mpiprocs and ompthreads. PBS template vocabulary.</li>
+<li><a href="https://raw.githubusercontent.com/openpbs/openpbs/master/doc/man1/qstat.1B">OpenPBS, qstat manual</a>, description/display formats; <a href="https://raw.githubusercontent.com/openpbs/openpbs/master/doc/man1/qdel.1B">qdel manual</a>, description. Status and cancellation.</li>
+<li><a href="https://docs.paraview.org/en/latest/UsersGuide/filteringData.html">ParaView User's Guide, chapter 6</a>. Typed filter inputs and outputs in a pipeline.</li>
+<li><a href="https://docs.paraview.org/en/latest/ReferenceManual/parallelDataVisualization.html">ParaView Reference Manual, chapter 8</a>. Remote/parallel processing and rendering placement.</li>
+<li><a href="https://docs.vtk.org/en/latest/vtk_file_formats/vtk_legacy_file_format.html">VTK, Simple Legacy Formats</a>, dataset and data-attribute sections. Structured-point geometry, x-fastest ordering and scalar association.</li>
+<li><a href="https://matplotlib.org/stable/users/explain/colors/colormapnorms.html">Matplotlib, Colormap normalization</a>; <a href="https://matplotlib.org/stable/users/explain/colors/colormaps.html">Choosing Colormaps</a>; <a href="https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.pcolormesh.html">pcolormesh API</a>, shading. Declared scalar-to-color mapping and sample display. Online manuals checked 28 October 2026; the actual local renderer used Matplotlib 3.9.3.</li>
+<li><a href="https://docs.oracle.com/cd/E19957-01/806-3568/ncg_math.html">Oracle, Numerical Computation Guide, chapter 2, Double Format</a>. Double storage fields, eight-byte size and 53-bit normal significand precision.</li>
+</ol>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-29-numerical-methods-scientific-libraries.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-31-heterogeneous-computing-processor-trends.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

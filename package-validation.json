@@ -1,18 +1,11 @@
 {
-  "checked_at_utc": "2026-10-28T12:33:37.800037+00:00",
+  "checked_at_utc": "2026-10-28T14:13:54.240937+00:00",
   "status": "passed",
   "scope": "Public package inventory and exact chapter-body preservation, not scientific acceptance",
-  "chapter_count": 25,
-  "runnable_listings": 221,
-  "worked_solution_disclosures": 150,
+  "chapter_count": 31,
+  "runnable_listings": 246,
+  "worked_solution_disclosures": 186,
   "failures": [],
   "final_independent_signoff_pending_chapters": [],
-  "unwritten_chapters": [
-    26,
-    27,
-    28,
-    29,
-    30,
-    31
-  ]
+  "unwritten_chapters": []
 }

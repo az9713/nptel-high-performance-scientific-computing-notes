@@ -1,16 +1,9 @@
 {
-  "checked_at_utc": "2026-10-28T12:32:30.177926+00:00",
-  "status": "partial edition: chapters 1-25 written; chapters 26-31 not written; 56 recordings assigned to written chapters; every written chapter has an independent zero-blocking verdict",
+  "checked_at_utc": "2026-10-28T14:12:20.678451+00:00",
+  "status": "complete edition: all 31 chapters written; 75 source recordings covered; every written chapter has an independent zero-blocking verdict",
   "chapter_count": 31,
-  "written_chapters": 25,
-  "unwritten_chapters": [
-    26,
-    27,
-    28,
-    29,
-    30,
-    31
-  ],
+  "written_chapters": 31,
+  "unwritten_chapters": [],
   "final_independent_signoff_pending_chapters": [],
   "chapter_body_sha256": {
     "chapter-01-what-hpsc-is-for.html": "20fed3dd02c0eeda5d6b6f0e701dea5f35e694395df359864c0bcdf4ded80223",
@@ -37,7 +30,13 @@
     "chapter-22-thread-divergence-and-memory-layouts.html": "72e91651d394640fb033d6ef4fec65c44ced7332297a1c2f486f4c366a65982b",
     "chapter-23-cuda-compilation-and-execution.html": "1fbfa166e896639c753a1842d0f63e423979de8b319004df394f54c3b576f499",
     "chapter-24-openacc-directives-loops-data-management.html": "5c1c29d9fbf4dd9f4322b6e2f8eca438ca286e73a0f585e295d0dfce2c749a9e",
-    "chapter-25-openacc-loop-optimization-asynchrony-multiple-devices.html": "879565e5c294c8cfde9769255ed90a7a33d05b0832d45813fa1e18d517a72f49"
+    "chapter-25-openacc-loop-optimization-asynchrony-multiple-devices.html": "879565e5c294c8cfde9769255ed90a7a33d05b0832d45813fa1e18d517a72f49",
+    "chapter-26-multi-device-profiling-mpi-cuda-openacc.html": "26f081501cd3cb05a2eda68ff40784141ce9b95d66e47952ecaf145e138da195",
+    "chapter-27-serial-profiling-debugging-gprof-valgrind-gdb.html": "93e75cfc759ed0ae09f5527321e59834918a4a0ad0d71ac2e25022f29f6482e2",
+    "chapter-28-mpi-performance-analysis-and-debugging.html": "335dcb37d2c9a84a03d9fa428137eb5bb984b345838843b7321d5b5a2f245490",
+    "chapter-29-numerical-methods-scientific-libraries.html": "c0b48527150ec020d38fe2fc4cb13df1628470e051ebcfacc17785c62f95a037",
+    "chapter-30-batch-schedulers-scientific-visualization.html": "ba701db7e816d2395aaa66da1bc9946f53d3cb7fda1eacdf2efdc1e171124e2d",
+    "chapter-31-heterogeneous-computing-processor-trends.html": "df77bfa8a482d7b96e84b34500073f5820259c86b078e5bc2b5f588a1d87a46a"
   },
   "scope": "Content inventory and exact body preservation; does not certify full scientific acceptance"
 }

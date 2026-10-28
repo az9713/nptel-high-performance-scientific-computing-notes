@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="335dcb37d2c9a84a03d9fa428137eb5bb984b345838843b7321d5b5a2f245490"><title>Performance analysis and debugging of MPI programs · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>Performance analysis and debugging of MPI programs</h1>
+<p class="lead">Four ranks finish one solver phase after 1, 1, 1, and 3 milliseconds of useful work. Their profiler reports substantial time inside communication. Replacing the network cannot remove the missing two milliseconds on three ranks: those ranks reached the exchange early. The first decision is whether to move data faster, redistribute work, or repair a protocol that can never finish. A percentage headed “MPI time” cannot make that decision alone.</p>
+<p class="source-note">Grounded in <a href="https://www.youtube.com/watch?v=-C-S0rAA_OI">W11L1: performance analysis of MPI codes</a> and <a href="https://www.youtube.com/watch?v=5ghvxhl9yF0">W11L2: parallel debugging of MPI programs</a>. <strong>Lecture material:</strong> communication and synchronization costs, strong and weak scaling, mpiP aggregation and call sites, profiling scope, per-process debugging, memory diagnostics, correctness checking, parallel input/output, hybrid programs, clusters, and automated testing. <strong>Research extensions:</strong> the MPI 4.1 standard supplies completion, matching, ordering, timers, profiling, and file-consistency contracts; the mpiP guide supplies report semantics; the GDB and Valgrind manuals delimit debugger and memory-checking scope; official Scalasca, TAU, and MUST material distinguishes complementary tools. <strong>Original teaching constructions:</strong> the four-rank model, report arithmetic checks, a minimal profiling wrapper, finite protocol and debugger experiments, and all six solved exercises.</p>
+
+<h2 id="model">Model a rank, a phase, and the dependency that delays it <a class="timestamp" href="https://www.youtube.com/watch?v=-C-S0rAA_OI&amp;t=39s">W11L1 0:39</a></h2>
+<p>The Message Passing Interface, MPI, specifies operations through which separate processes exchange data. A communicator identifies a participating group and a communication context; a rank is a process's integer index within that communicator. The same process can have different ranks in different communicators. We use \(p\) for the number of ranks and \(r\in\{0,\ldots,p-1\}\) for one rank. A process has its own address space. Its local array is not a shared variable that another rank can inspect merely by using the same array name.</p>
+<p>The running application is a distributed Jacobi solver for the steady heat equation. It divides an \(N\times N\) interior grid into pieces, exchanges boundary values called halos, updates the interior values from their four neighbors, and computes a global maximum change to decide when to stop. Here \(N\) is the number of interior grid points per direction. A halo contains copies of adjacent ranks' values, rather than new physical unknowns. The numerical method is familiar; our new object is the sequence of dependent events that implements one iteration.</p>
+<p>A phase is a deliberately chosen interval with stated entry and exit conditions, such as one halo exchange and the update that depends on it. Let \(c_r\) be useful computation time on rank \(r\) during an idealized phase, in seconds. Let \(w_r\) be waiting time caused by unfinished prerequisites, and let \(v_r\) be local communication-related service time. A local elapsed duration \(t_r\) can include all three. “Service” here includes software processing and transfers needed by that rank; it is a modeling category, not something an ordinary wrapper can isolate automatically.</p>
+<p>Assume initially that all ranks start together, compute without overlap, then enter an exchange that requires every rank's contribution and takes a common additional duration \(g\). The phase completes after \(\max_r c_r+g\). Under the stronger idealization that the exchange itself adds no arrival imbalance, rank \(r\) waits approximately \(\max_s c_s-c_r\). The symbol \(s\) is another rank index. These assumptions make the arithmetic transparent. A real halo exchange has a graph of neighbor dependencies, so the latest rank can delay some neighbors before its delay propagates farther.</p>
+<p>For the opening construction, \((c_0,c_1,c_2,c_3)=(1,1,1,3)\) milliseconds. The sum is 6 rank-milliseconds: six milliseconds of computation accumulated across processes. The makespan, the elapsed time until the whole compute phase finishes, is 3 milliseconds. Adding those numbers would count concurrent work as sequential work. With zero exchange cost, ranks 0–2 each wait 2 milliseconds; total waiting is another 6 rank-milliseconds. Resource accounting and user-visible elapsed time therefore answer different questions.</p>
+<p>An event graph formalizes that difference. A vertex represents a completed computation or communication event; a directed edge means the destination cannot complete before the source. Local program order supplies edges within a rank, and message or collective dependencies supply edges across ranks. The critical path is a longest chain of dependent event durations. Reducing a duration outside every critical path may reduce resource use without changing the final completion time. Finding a large aggregate count is useful, but identifying its causal position is the step that turns observation into a performance decision.</p>
+<p>This model also separates an expensive legal run from a hang. A slow edge eventually completes. A protocol error may leave an event with no possible producer, or form a cycle in which every participant waits for another. A debugger reports where processes are stopped; the graph explains why that location can persist. Profiling and debugging meet at this dependency model, even though one measures a successful execution and the other often investigates an execution that cannot complete.</p>
+
+<h2 id="costs">Separate transfer cost, imbalance, and lost scalability <a class="timestamp" href="https://www.youtube.com/watch?v=-C-S0rAA_OI&amp;t=203s">W11L1 3:23</a></h2>
+<p>A message containing \(m\) payload bytes is often approximated by \(T_{\mathrm{msg}}(m)=\alpha+\beta m\). The startup latency \(\alpha\) has units seconds; inverse bandwidth \(\beta\) has units seconds per byte. This approximation describes a chosen protocol and size range. It does not include arbitrary waiting for a sender that has not produced the message. Sending one thousand tiny messages instead of one aggregated message can multiply startup work even when the payload sum stays fixed.</p>
+<p>The model immediately suggests a diagnostic distinction. A large call count with small messages suggests examining aggregation and unnecessary synchronization. A small call count with large payloads suggests examining data volume, network contention, memory copies, and decomposition. A large receive duration with an unchanged message size suggests checking arrival times before blaming bandwidth. These are competing explanations to test, not universal diagnoses. An MPI implementation can also switch protocols as message size changes, invalidating a single fitted straight line.</p>
+<p>Define mean compute time \(\bar c=p^{-1}\sum_r c_r\), maximum compute time \(c_{\max}=\max_r c_r\), and compute-balance efficiency \(\eta_{\mathrm{bal}}=\bar c/c_{\max}\). This dimensionless ratio lies in \((0,1]\) when some computation occurs. It equals one when every rank has the same compute time. With identical processors, divisible work, simultaneous starts, and no communication, it is the parallel efficiency of that phase. Without those assumptions it remains a descriptive ratio, rather than a proof that repartitioning can realize the implied improvement.</p>
+\[
+\sum_r w_r=\sum_r(c_{\max}-c_r)
+=p c_{\max}-\sum_r c_r,
+\qquad
+\eta_{\mathrm{bal}}=\frac{\sum_r c_r}{p c_{\max}}. \tag{28.1}
+\]
+<p>Equation (28.1) follows by summing one waiting interval per rank. For the running construction it gives \(\eta_{\mathrm{bal}}=6/(4\cdot3)=0.5\). Perfect redistribution preserves six units of total computation and assigns 1.5 to each rank, halving compute makespan from 3 to 1.5. If the exchange costs another millisecond in either partition, total time changes from 4 to 2.5 milliseconds: the whole-phase improvement is 1.6, rather than two. Moving work can also increase halo size, so even that improvement is conditional.</p>
+<p>For an entire fixed-size application, \(T_1\) and \(T_p\) denote elapsed time on one and \(p\) processing elements. Speedup is \(S_p=T_1/T_p\); efficiency is \(E_p=S_p/p\). These definitions require matching numerical work, convergence tolerance, timing boundaries, and an identified one-process reference. Calling a four-process run twice as fast as another four-process run does not measure \(S_4\). If both perform different amounts of useful work, even an ordinary runtime ratio may be scientifically misleading.</p>
+<p>Strong scaling fixes global problem size while increasing \(p\). Weak scaling increases global work to keep nominal work per rank fixed. For a one-million-unknown strong-scaling example, ten ranks own roughly 100,000 unknowns each, and one hundred own 10,000 each. For a weak-scaling example with one million unknowns per rank, total unknowns are one million at one rank and four million at four ranks. Iterative solvers add a complication: a larger global grid can require more iterations, so constant per-iteration time does not establish constant time to solution.</p>
+<p>A square two-dimensional decomposition makes a scalability limit concrete. Each rank owns about \(N^2/p\) points and exchanges about four edges of length \(N/\sqrt p\). Let \(\gamma\) be compute seconds per point, and let \(b\) be bytes per halo value. An idealized serialized per-iteration model is \(T_p\approx\gamma N^2/p+4\alpha+4\beta bN/\sqrt p+g_{\mathrm{red}}(p)\), where \(g_{\mathrm{red}}\) is the global-reduction cost in seconds. The count four ignores physical boundaries and assumes one exchange per face. The formula excludes overlap, congestion, imbalance, and mapping effects.</p>
+<p>Under strong scaling the compute term falls as \(p^{-1}\), while the face payload term falls only as \(p^{-1/2}\), and latency remains. Under weak scaling with \(N/\sqrt p\) fixed, those local terms stay approximately constant, but the reduction and machine-wide contention can grow. Repartitioning cannot eliminate the need for neighboring values or a global stopping decision. Algorithm changes, such as reducing convergence-check frequency when mathematically justified, can matter more than changing the communication library. Local loopback measurements cannot determine any inter-node constants in this model.</p>
+
+
+<h2 id="metrics">Choose clock and aggregation scopes before comparing numbers <a class="timestamp" href="https://www.youtube.com/watch?v=-C-S0rAA_OI&amp;t=537s">W11L1 8:57</a></h2>
+<p>A wall clock measures elapsed time, including descheduling and blocking; a central processing unit (CPU) time counter measures processor time charged to a process or thread. They differ sharply when a rank sleeps, waits for data, or spins in a progress loop. A rank can consume CPU while making no application progress. Consequently, neither high CPU utilization nor a large duration inside MPI establishes efficient numerical work. The unit and measurement boundary must accompany every duration.</p>
+<p><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node262.htm">MPI 4.1 §10.6, Timers and Synchronization</a>, defines <code>MPI_Wtime</code> in seconds relative to an arbitrary origin. Compute a duration by subtracting two readings on the same rank. The standard does not require different ranks' clocks to agree; <code>MPI_WTIME_IS_GLOBAL</code> describes a relevant communicator attribute when supported. Subtracting rank 0's start from rank 1's finish without a clock relationship can produce a meaningless cross-rank duration, including a negative one.</p>
+<p>Let \(a_r\) and \(z_r\) be a rank's local start and finish timestamps. Its duration \(d_r=z_r-a_r\) is meaningful without globally synchronized clocks. Reducing \(\max_r d_r\) gives the largest local duration. It does not exactly reconstruct the global interval from earliest actual start to latest finish if the ranks entered the phase at different real times. An entry barrier narrows that ambiguity but does not make all returns occur simultaneously. State that synchronization was inserted, because it also changes the application being measured.</p>
+<p>For solver timing, warm up the execution path, place any deliberate entry synchronization outside the reported interval, measure the intended iterations, and aggregate after the interval. Include the natural reductions and halo exchanges whose cost the application actually pays. Keep setup, allocation, first-touch faults, process launch, and report generation separately visible. End-to-end application time may legitimately include them; a steady-state kernel comparison usually answers a different question. There is no single correct scope independent of the decision being made.</p>
+<p>Inclusive timing charges a routine for its own work plus its callees. Exclusive or local timing removes selected nested work according to the profiler's definitions. If a solver routine includes halo exchange, adding its inclusive time to the inclusive halo time counts the same interval twice. Conversely, the wall time of <code>MPI_Waitall</code> after nonblocking initiation measures residual delay until completion, rather than all transfer work performed since initiation. A short wait can result from overlap; a long wait can reflect late production, insufficient progress, or transport cost.</p>
+<p>Suppose a transfer would take 4 milliseconds when ready, and independent computation takes 6 milliseconds. Perfect overlap gives 6 milliseconds from joint start to completion, while serialization gives 10. Timing only initiation can be near zero in either case. Timing the subsequent wait can be near zero in the overlapped run, but that does not mean the transfer cost vanished. A correct comparison times the enclosing dependency interval and verifies the same output. No asynchronous API name guarantees that the implementation actually overlaps the operations.</p>
+<p>A statistical profile discards much of the execution order and retains counters, durations, and possibly distributions grouped by rank and call site. An event trace retains an ordered record of selected events. The profile answers where time accumulated; a trace can show which arrival preceded which wait. Greater temporal detail consumes storage and can perturb behavior. If \(p\) ranks each record \(k\) events of \(b_e\) bytes, raw trace storage is \(p k b_e\), before indexes or compression. With 10,000 ranks, one million events per rank, and 32 bytes per event, that is 320 billion bytes, about 320 decimal gigabytes.</p>
+<p>Repeated measurements should preserve distributions rather than a favored minimum alone. Record input, rank placement, affinity policy, compiler options, MPI version, transport, timer scope, and any instrumentation. Compare instrumented and uninstrumented elapsed time to estimate perturbation, while retaining correctness checks in both. For short phases, timer overhead and operating-system scheduling can dominate; enlarge the measured repetition count without silently changing the algorithm. The local examples below establish their own bounded behavior, not the scaling curve of a multi-node installation.</p>
+
+<h2 id="profiling">Intercept a call without confusing observation with explanation <a class="timestamp" href="https://www.youtube.com/watch?v=-C-S0rAA_OI&amp;t=770s">W11L1 12:50</a></h2>
+<p>The MPI profiling interface gives most MPI routines a corresponding name prefixed with <code>PMPI_</code>. A tool can define an <code>MPI_Sendrecv</code> wrapper, record information, and invoke <code>PMPI_Sendrecv</code> to reach the underlying implementation without recursively calling itself. <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node403.htm">MPI 4.1 §16.2.1</a> specifies the interface requirements. This mechanism is interception, not a change to the mathematical message contract.</p>
+<p><a href="https://software.llnl.gov/mpiP/">The mpiP user guide, “Using mpiP” and “mpiP Output”</a>, describes a lightweight statistical profiler with task-local collection and merging during report generation. Linking the profiling library or using a supported preload mechanism enables interception. Source debugging information, requested with a compiler option such as <code>-g</code>, helps map program addresses to filenames and lines. It can coexist with optimization, although optimized code can make source attribution less direct. A launcher word inserted before an executable is not a universal installation-independent mpiP interface.</p>
+<p>The lecture's tool landscape includes mpiP, Scalasca, TAU, Vampir, and Intel Trace Analyzer and Collector. <a href="https://www.scalasca.org/">Scalasca's official description</a> emphasizes communication and synchronization bottlenecks and their causes. <a href="https://www.cs.uoregon.edu/research/tau/home.php">TAU's official description</a> covers instrumentation, sampling, profiles, and traces, including export to visualization tools. Those capabilities are complementary. A statistical MPI-call profile alone is not a CPU microarchitecture profile, a complete memory-usage report, or an execution timeline. The listed graphical tools were not run for the local checks.</p>
+<p>Our minimal wrapper counts calls and requested outgoing payload bytes, and accumulates elapsed time inside one routine. If a call sends one C <code>double</code>, it counts <code>MPI_Type_size(MPI_DOUBLE)</code> bytes. C <code>double</code> is the implementation's double-precision floating-point type; on the verification system it occupies eight bytes. The counter is neither wire traffic nor protocol overhead. It excludes acknowledgments, packet headers, receives, retransmission, and any internal messages used by MPI. The distinction prevents a payload counter from masquerading as an interconnect bandwidth measurement.</p>
+<p>The next listing accepts no user input and requires four ranks. Each rank delays for 40 milliseconds, except rank 3, which delays for 120; it then exchanges one value around a ring. The second phase assigns 60 milliseconds to every rank, preserving 240 milliseconds of requested delay in total. Sleeping emulates arrival imbalance without consuming corresponding CPU computation. The program checks the received value, wrapper call count, and payload count. It gathers timing rows only after each measured interval and prints from rank 0, making rank order readable.</p>
+<pre><code class="language-c" data-file="mpi_profile.c" data-build="mpicc -std=c11 -O2 -g -Wall -Wextra mpi_profile.c -o mpi_profile" data-run="timeout 15s mpirun -np 4 ./mpi_profile" data-check="returncode" data-needs="mpi">#define _POSIX_C_SOURCE 200809L
+#include &lt;mpi.h&gt;
+#include &lt;assert.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;time.h&gt;
+#include &lt;errno.h&gt;
+static int calls;
+static long long payload;
+static double mpi_seconds;
+int MPI_Sendrecv(const void *sb, int sc, MPI_Datatype st, int dest, int stag,
+                 void *rb, int rc, MPI_Datatype rt, int src, int rtag,
+                 MPI_Comm comm, MPI_Status *status) {
+    int bytes;
+    PMPI_Type_size(st, &amp;bytes);
+    double t = PMPI_Wtime();
+    int err = PMPI_Sendrecv(sb, sc, st, dest, stag, rb, rc, rt,
+                           src, rtag, comm, status);
+    mpi_seconds += PMPI_Wtime()-t;
+    ++calls;
+    payload += (long long)sc*bytes;
+    return err;
+}
+static void delay_ms(long ms) {
+    struct timespec request = {ms/1000, (ms%1000)*1000000L};
+    while (nanosleep(&amp;request, &amp;request) &amp;&amp; errno == EINTR) {}
+}
+int main(int argc, char **argv) {
+    int rank, p;
+    MPI_Init(&amp;argc, &amp;argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &amp;rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &amp;p);
+    if (p != 4) MPI_Abort(MPI_COMM_WORLD, 2);
+    for (int phase=0; phase&lt;2; ++phase) {
+        calls=0; payload=0; mpi_seconds=0;
+        MPI_Barrier(MPI_COMM_WORLD);
+        double begin=MPI_Wtime();
+        delay_ms(phase ? 60 : (rank==3 ? 120 : 40));
+        double compute=MPI_Wtime()-begin;
+        double sent=rank+1.0, received=-1.0;
+        MPI_Status status;
+        int previous=(rank+p-1)%p, next=(rank+1)%p;
+        int err=MPI_Sendrecv(&amp;sent,1,MPI_DOUBLE,next,17,
+                            &amp;received,1,MPI_DOUBLE,previous,17,
+                            MPI_COMM_WORLD,&amp;status);
+        assert(err==MPI_SUCCESS &amp;&amp; received==previous+1.0);
+        assert(calls==1 &amp;&amp; payload==(long long)sizeof(double));
+        double elapsed=MPI_Wtime()-begin;
+        double row[3]={compute,mpi_seconds,elapsed}, rows[12];
+        MPI_Gather(row,3,MPI_DOUBLE,rows,3,MPI_DOUBLE,0,MPI_COMM_WORLD);
+        if (rank==0) {
+            double sum=0, peak=0;
+            printf(&quot;%s phase: rank compute_s sendrecv_s local_s\n&quot;,
+                   phase ? &quot;balanced&quot; : &quot;imbalanced&quot;);
+            for (int r=0;r&lt;p;++r) {
+                printf(&quot;%d %.6f %.6f %.6f\n&quot;,r,rows[3*r],rows[3*r+1],rows[3*r+2]);
+                sum+=rows[3*r];
+                if(rows[3*r]&gt;peak) peak=rows[3*r];
+            }
+            printf(&quot;compute_balance=%.3f calls_per_rank=1 payload_bytes=%zu\n&quot;,
+                   sum/(p*peak),sizeof(double));
+        }
+    }
+    MPI_Finalize();
+    return 0;
+}
+</code></pre>
+<pre><code class="output">imbalanced phase: rank compute_s sendrecv_s local_s
+0 0.040258 0.079995 0.120266
+1 0.040141 0.000176 0.040340
+2 0.040140 0.080227 0.120386
+3 0.120165 0.000205 0.120381
+compute_balance=0.501 calls_per_rank=1 payload_bytes=8
+balanced phase: rank compute_s sendrecv_s local_s
+0 0.060151 0.000088 0.060241
+1 0.060149 0.000088 0.060239
+2 0.060155 0.000089 0.060246
+3 0.060175 0.000063 0.060239
+compute_balance=1.000 calls_per_rank=1 payload_bytes=8
+</code></pre>
+<p>The shown output is one sample run; the formal checker accepts a successful exit, while the program's assertions check the deterministic communication facts. <code>compute_s</code> includes requested sleep and scheduling delay. <code>sendrecv_s</code> is inclusive wall time inside the wrapper's underlying call, including waiting for a neighbor. <code>local_s</code> includes delay, call, and small surrounding checks but excludes the gather and report. <code>compute_balance</code> is calculated from observed delay intervals. It need not equal the ideal 0.5 or 1 exactly.</p>
+<p>In the displayed sample, rank 1 finishes its imbalanced local interval after about 0.040 seconds, while the slowest local interval is about 0.120 seconds. Its neighboring operations can complete before rank 3 finishes the delayed work. The ring exchange is not an all-rank barrier. Ranks 0 and 2 instead accumulate about 0.080 seconds inside their calls. The balanced phase has a largest local interval near 0.060 seconds. This supports the constructed arrival-imbalance explanation on this run; it is not a measurement of a faster communication fabric.</p>
+<p>The wrapper deliberately covers only <code>MPI_Sendrecv</code>. It is single-threaded, uses fixed-size counters, and does not intercept initialization, gathers, barriers, reductions, or finalization. It cannot reproduce mpiP's call-stack analysis. Its value is that every counter has a visible definition. In particular, adding the four <code>sendrecv_s</code> values produces rank-seconds, not the exchange's elapsed makespan. An early rank can report more MPI time precisely because it finished its useful work earlier.</p>
+<p>The verification configuration uses Open MPI 4.1.6 with self and TCP transports and Process Management Interface for Exascale (PMIx) hash storage. TCP means Transmission Control Protocol; these ranks communicate through the local host rather than a measured inter-node fabric. The temporary files, homes, and caches are workspace-contained. The location on the Windows NT File System (NTFS) emits a <code>debugger_attach_fifo</code> warning on this setup; successful communication does not demonstrate external debugger attachment. No profile here establishes shared-memory-transport performance, InfiniBand performance, or a multi-node scaling limit.</p>
+
+<h2 id="reports">Read the mpiP report with its units and denominators intact <a class="timestamp" href="https://www.youtube.com/watch?v=-C-S0rAA_OI&amp;t=1060s">W11L1 17:40</a></h2>
+<p>The historical report displayed in W11L1 identifies mpiP 3.1.2, a 2008 build, and a 2009 execution. Four tasks were mapped across two named nodes. Those dates and placements describe the source example, rather than the local laptop. The report's application times are approximately 9.78, 9.80, 9.80, and 9.77 seconds. Its MPI times are 1.97, 1.95, 1.87, and 2.15 seconds. The summary row shows 39.1 application rank-seconds and 7.94 MPI rank-seconds.</p>
+<p>The summary application number is a sum across ranks; it is about four times the elapsed runtime. The report displays an MPI fraction of 20.29 percent. Dividing its rounded totals gives \(100(7.94/39.1)\approx20.31\) percent; the small difference is consistent with rounding. These are accumulated application rank-times, not a serial fraction in Amdahl's law. MPI calls on different ranks can overlap, useful work can be imbalanced, and MPI's own work can be parallel. Treating the fraction as intrinsically serial would assert a speedup ceiling without identifying a serial dependency.</p>
+<p>A call site identifies a particular invocation location, potentially including part of its calling stack. The source report lists 23 sites. Site 10 is a <code>Waitall</code> in <code>communication.c</code>, line 667, under <code>hypre_FinalizeCommunication</code>. A site identifier is meaningful only within its matching report. It is not a stable identifier to compare blindly across recompilations, source edits, or different stack-depth settings. Keep the report, executable identity, debugging information, and source revision together.</p>
+<p>The per-function timing table labels its durations milliseconds. Site 10's <code>Waitall</code> has <code>4.4e+03</code> milliseconds, or approximately 4.4 accumulated rank-seconds. Its <code>App%</code> is 11.24 and its <code>MPI%</code> is 55.40. Those columns use different denominators: total application rank-time and total MPI rank-time. The number 55.40 is a percentage, not 55.40 seconds. The displayed totals are rounded, so recomputation need not reproduce every final digit.</p>
+<p>The per-site table adds rank, count, maximum, mean, and minimum. At the illustrated <code>Allgather</code> site 16, each rank calls once; the four durations are about 0.034, 0.049, 2.92, and 3 milliseconds. The combined row therefore has four calls and a mean near 1.5 milliseconds. This establishes asymmetry in observed call residence time. It does not identify whether the cause was arrival skew, rank placement, competing traffic, or the collective algorithm. With only one call per rank, the per-rank mean and maximum are necessarily the same.</p>
+<p>The following original arithmetic check takes fixed constructed compute times and the rounded historical values above. It performs no MPI launch and writes no files. It checks the waiting identity, balance ratio, and unit conversion before printing the derived quantities. These values are calculations from a model and source report, not fresh performance measurements.</p>
+<pre><code class="language-python" data-file="mpi_metrics.py" data-run="python3 -B mpi_metrics.py" data-check="exact">from math import isclose
+compute = [1.0, 1.0, 1.0, 3.0]  # constructed milliseconds
+p, total, peak = len(compute), sum(compute), max(compute)
+efficiency = total/(p*peak)
+wait = [peak-c for c in compute]
+assert isclose(efficiency, 0.5)
+assert isclose(sum(wait), p*peak-total)
+# Rounded values read from the historical mpiP slides, not local timing.
+app = [9.78, 9.80, 9.80, 9.77]
+mpi = [1.97, 1.95, 1.87, 2.15]
+waitall = 4.4e3/1000.0
+assert abs(sum(app)-39.1) &lt; 0.1
+assert abs(100*sum(mpi)/sum(app)-20.29) &lt; 0.02
+assert abs(100*waitall/sum(mpi)-55.40) &lt; 0.02
+print(f'constructed efficiency={efficiency:.3f}, waiting={sum(wait):.1f} rank-ms')
+print(f'historical MPI fraction={100*sum(mpi)/sum(app):.2f}%')
+print(f'historical Waitall={waitall:.1f} rank-s, MPI share={100*waitall/sum(mpi):.2f}%')
+</code></pre>
+<pre><code class="output">constructed efficiency=0.500, waiting=6.0 rank-ms
+historical MPI fraction=20.28%
+historical Waitall=4.4 rank-s, MPI share=55.42%
+</code></pre>
+<p>The matching arithmetic catches a particularly damaging category error: multiplying or dividing rank-time by process count does not automatically reconstruct a critical path. A useful next experiment at site 10 would compare the producer phase across ranks and inspect request completion dependencies. Optimizing <code>Waitall</code> itself may be irrelevant if it is merely where a late halo becomes visible.</p>
+<p>Profiling scope also affects the denominator. <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node406.htm">MPI 4.1 §16.2.4</a> makes <code>MPI_Pcontrol</code> available but leaves profiling behavior tool-dependent. The lecture's reset, enable, disable, and report example must therefore be interpreted through the profiler's own contract. The mpiP guide documents <code>MPIP</code> flags for output directory, stack depth, concise reports, and initial disabling. Check the installed version's guide before adopting historical control numbers or option spelling.</p>
+<p>Restricting collection to a representative steady-state window can remove irrelevant initialization noise, but every rank must measure the intended logical iterations. A short stack depth can merge library callers that should be distinguished; a long depth can increase overhead and produce too many sites. Start with a concise profile, ask a specific causal question, and collect finer evidence for the implicated phase. Reduced detail is a measurement design choice, not permission to claim the omitted behavior never happened.</p>
+
+
+<h2 id="debugging">Inspect each process without mistaking threads for ranks <a class="timestamp" href="https://www.youtube.com/watch?v=5ghvxhl9yF0&amp;t=6s">W11L2 0:06</a></h2>
+<p>Parallel debugging adds state, timing, and visibility problems. A failing rank may corrupt its own memory, send the wrong data, skip a collective, or exit while peers await it. The surviving ranks' stacks can then point to communication routines even though the first defect occurred elsewhere. Start with the smallest process count that preserves the failure and with a deterministic input. Preserve both the first error and the later symptoms; the final stack frame is not necessarily the cause.</p>
+<p>Write a reproduction record before adding instrumentation. Include the input seed, decomposition, rank count, communicator structure, numerical stopping rule, executable hash, and tool commands. Record each selected event with communicator role, rank, local sequence number, iteration, peer, tag, and count. A process identifier identifies an operating-system process on one host; it is neither a rank nor globally unique across hosts. A filename containing only the process identifier can collide when records from different machines are collected together.</p>
+<p>Logging itself changes scheduling and can expose or hide timing-sensitive behavior. A flushed message before a send shows that the process reached that logging point; it does not prove the send completed. A line after a receive shows local completion but says nothing about unrelated ranks. Prefer bounded records at phase boundaries over printing every grid value. Keep per-rank logs and combine them by logical identifiers; terminal output order is affected by buffering and launcher forwarding, so it is not a reliable global event order.</p>
+<p>The GNU Debugger, GDB, controls an inferior, its representation of a program execution. <a href="https://sourceware.org/gdb/current/onlinedocs/gdb.html/Inferiors-Connections-and-Programs.html">GDB manual §4.9</a> distinguishes inferiors from process identifiers. <a href="https://sourceware.org/gdb/current/onlinedocs/gdb.html/Threads.html">Section 4.10</a> defines <code>info threads</code>, thread selection, and <code>thread apply</code>. These commands inspect threads in the inferiors already under that debugger's control. They do not discover every MPI rank automatically. A backtrace shows the selected thread's stack, not a distributed causal backtrace.</p>
+<p>A process can contain MPI progress threads, application threads, or both. Seeing three threads in rank 0 therefore does not establish that three MPI ranks are controlled. To inspect a particular rank, associate its communicator rank with its host and process, then launch it under a debugger or use an authorized, supported attach mechanism. Coordinating many such inspections is additional functionality. The <a href="https://www.open-mpi.org/faq/?category=debugging">Open MPI v4 debugging FAQ, question 6</a>, describes separate serial debuggers and attachment as distinct approaches; their availability depends on the environment.</p>
+<p>Here the experiment launches two separate batch GDB instances through <code>mpirun</code>, each of which starts one MPI program. This uses child-process debugging rather than attaching to an already-running job. The Python driver writes a complete C source, compiles with symbols and optimization disabled, sets a breakpoint in <code>inspect_rank</code>, prints its arguments, obtains a backtrace, and continues to normal termination. It saves raw debugger output in rank-specific files and checks that both ranks reported the intended values. It does not require a graphical terminal.</p>
+<p>The driver takes no input. Its effects are C source, executable, and text logs in the current execution directory. Core dumps are disabled. <code>-nx</code> disables initialization files, while explicit commands disable automatic scripts, debugger history saving, and debuginfod downloads; the latter service otherwise can fetch debugging information. <code>set disable-randomization off</code> leaves the target's normal address randomization policy in effect. These are per-run debugger choices, not changes to operating-system security configuration. Batch-mode behavior is documented in <a href="https://sourceware.org/gdb/current/onlinedocs/gdb.html/Mode-Options.html">GDB manual §2.1.2</a>.</p>
+<pre><code class="language-python" data-file="mpi_gdb.py" data-run="python3 -B mpi_gdb.py" data-check="exact" data-needs="mpi">from pathlib import Path
+import os, re, resource, subprocess, sys
+resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+if '--rank' in sys.argv:
+    rank = int(os.environ['OMPI_COMM_WORLD_RANK'])
+    commands = ['set pagination off', 'set confirm off',
+                'set auto-load off', 'set debuginfod enabled off',
+                'set history save off', 'set disable-randomization off',
+                'break inspect_rank', 'run',
+                'printf &quot;DEBUG rank=%d owned=%d\\n&quot;, rank, owned',
+                'backtrace', 'continue']
+    cmd = ['gdb', '-nx', '-nh', '-q', '-batch']
+    for command in commands:
+        cmd += ['-ex', command]
+    cmd += ['--args', './debug_rank']
+    run = subprocess.run(cmd, capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, timeout=15)
+    Path(f'gdb-rank{rank}.stdout.txt').write_text(run.stdout, encoding='utf-8')
+    Path(f'gdb-rank{rank}.stderr.txt').write_text(run.stderr, encoding='utf-8')
+    assert run.returncode == 0, (rank, run.returncode, run.stderr)
+    assert f'DEBUG rank={rank} owned={rank+1}' in run.stdout, run.stdout
+    assert 'inspect_rank' in run.stdout and 'exited normally' in run.stdout
+    print(f'rank {rank}: breakpoint, arguments, backtrace, normal exit checked')
+else:
+    source = r'''#include &lt;mpi.h&gt;
+__attribute__((noinline)) void inspect_rank(int rank, int owned) {
+    volatile int witness=rank+owned;
+    (void)witness;
+}
+int main(int argc,char **argv) {
+    int rank,p;
+    MPI_Init(&amp;argc,&amp;argv);
+    MPI_Comm_rank(MPI_COMM_WORLD,&amp;rank);
+    MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    if(p!=2) MPI_Abort(MPI_COMM_WORLD,2);
+    inspect_rank(rank,rank+1);
+    MPI_Finalize();
+    return 0;
+}
+'''
+    Path('debug_rank.c').write_text(source, encoding='utf-8')
+    subprocess.run(['mpicc','-g','-O0','-fno-omit-frame-pointer',
+                    'debug_rank.c','-o','debug_rank'], check=True, timeout=10)
+    run = subprocess.run(['mpirun','-np','2','python3','-B',__file__,'--rank'],
+                         capture_output=True, text=True, timeout=18)
+    Path('gdb-launch.stdout.txt').write_text(run.stdout, encoding='utf-8')
+    Path('gdb-launch.stderr.txt').write_text(run.stderr, encoding='utf-8')
+    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
+    lines=sorted(line for line in run.stdout.splitlines() if line.startswith('rank '))
+    assert len(lines)==2, run.stdout
+    print('\n'.join(lines))
+</code></pre>
+<pre><code class="output">rank 0: breakpoint, arguments, backtrace, normal exit checked
+rank 1: breakpoint, arguments, backtrace, normal exit checked
+</code></pre>
+<p>The stable output summarizes assertions on the actual saved debugger text. It is not a fabricated GDB transcript. The check requires the breakpoint arguments, a stack naming <code>inspect_rank</code>, and normal termination for each inferior. The command log remains the evidence for details that vary, such as addresses and thread identifiers. Neither this test nor successful MPI startup establishes external attachment support on the mounted filesystem. The known FIFO warning is retained in raw launcher stderr.</p>
+<p>Pausing one rank can force peers into waits and can change collective arrival patterns. That is expected debugger perturbation. A run under GDB is a correctness investigation, not an uninstrumented performance sample. For an optimized production failure, repeat with the production build after localization: <code>-O0</code> improves visibility but can change timing, layout, and instruction behavior. A defect disappearing in a debug build is evidence about sensitivity, not evidence that the production program was correct.</p>
+
+<h2 id="correctness">Reconstruct the communication contract before interpreting a hang <a class="timestamp" href="https://www.youtube.com/watch?v=5ghvxhl9yF0&amp;t=424s">W11L2 7:04</a></h2>
+<p>For a point-to-point exchange, the <em>message envelope</em> comprises source, destination, tag, and communicator context. The tag is an integer application label; the communicator context prevents messages from unrelated communication spaces from matching. A receive additionally declares a buffer, count, and datatype. <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node58.htm">MPI 4.1 §4.2.3, Message Envelope</a>, separates envelope selection from the data being carried. Check both. Correct payload arithmetic cannot repair a receive that listens to the wrong context.</p>
+<p>For each outstanding receive, ask which send can satisfy it. Compare source selection, destination, context, tag, count capacity, and type signature, the ordered sequence of basic data types represented by the datatype. A receive buffer can be larger than the incoming point-to-point message, but it must have sufficient capacity. Use the returned status and <code>MPI_Get_count</code> when the received count matters. Inspect the MPI function's return value for success; a generic assumption that every status field carries a meaningful error code is unsafe.</p>
+<p>Consider two ranks that each call synchronous send to the other before posting a receive. Synchronous send completion requires a matching receive to have started, so both sends can wait forever. With ordinary standard-mode sends, small messages may appear to work because an implementation buffers them, while larger messages expose the circular dependence. Replacing a timeout with a longer timeout cannot repair that cycle. A timeout detects lack of completion under a bound; proving a deadlock requires reconstructing the impossible dependencies.</p>
+<p>A portable repair is a combined send-receive operation, or correctly posted nonblocking receives and sends followed by completion. The send and receive buffers must respect the routine's rules; ordinary <code>MPI_Sendrecv</code> uses disjoint buffers here. <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node62.htm">MPI 4.1 §4.2.7</a> specifically provides send-receive for exchanges that otherwise require careful ordering. Nonblocking calls are another representation of dependencies, not a license to reuse buffers while requests remain active.</p>
+<p>The next listing uses two ranks and no external files. Each sends the integer <code>100+rank</code> with tag 71 and receives explicitly from its peer. It checks the function return, status source, status tag, actual count, and received value. A global minimum of the Boolean checks verifies agreement before rank 0 prints. The ten-second external bound catches an unexpected failure to finish; no intentional deadlocking program is launched. This checks one concrete protocol, not every future edit or message size.</p>
+<pre><code class="language-c" data-file="mpi_envelope.c" data-build="mpicc -std=c11 -O2 -Wall -Wextra mpi_envelope.c -o mpi_envelope" data-run="timeout 10s mpirun -np 2 ./mpi_envelope" data-check="exact" data-needs="mpi">#include &lt;mpi.h&gt;
+#include &lt;assert.h&gt;
+#include &lt;stdio.h&gt;
+int main(int argc, char **argv) {
+    int rank,p;
+    MPI_Init(&amp;argc,&amp;argv);
+    MPI_Comm_rank(MPI_COMM_WORLD,&amp;rank);
+    MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    if(p!=2) MPI_Abort(MPI_COMM_WORLD,2);
+    int peer=1-rank, sent=100+rank, received=-1, count=-1;
+    MPI_Status status;
+    int err=MPI_Sendrecv(&amp;sent,1,MPI_INT,peer,71,
+                        &amp;received,1,MPI_INT,peer,71,
+                        MPI_COMM_WORLD,&amp;status);
+    MPI_Get_count(&amp;status,MPI_INT,&amp;count);
+    int ok=err==MPI_SUCCESS &amp;&amp; status.MPI_SOURCE==peer &amp;&amp;
+           status.MPI_TAG==71 &amp;&amp; count==1 &amp;&amp; received==100+peer;
+    int all_ok=0;
+    MPI_Allreduce(&amp;ok,&amp;all_ok,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD);
+    assert(all_ok);
+    if(rank==0) puts(&quot;2 ranks: source, tag, count, payload checked&quot;);
+    MPI_Finalize();
+    return 0;
+}
+</code></pre>
+<pre><code class="output">2 ranks: source, tag, count, payload checked
+</code></pre>
+<p>Message ordering has a narrower scope than “MPI messages arrive in order.” <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node68.htm">MPI 4.1 §4.5</a> specifies nonovertaking when successive messages or receives can match the same counterpart under the stated conditions. Different senders, wildcard receives, and logically concurrent thread operations can admit different matchings. For example, rank 0 receiving from <code>MPI_ANY_SOURCE</code> can accept rank 1 or rank 2 first. The final numerical result must be independent of that choice, or the protocol must constrain the choice.</p>
+<p>Collectives add a second ordering contract. Ranks in a communicator must initiate matching collective operations in compatible order. Rank 0 calling broadcast then reduction while rank 1 calls reduction then broadcast is an erroneous program; neither buffer correctness nor faster hardware fixes the mismatch. <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node172.htm">MPI 4.1 §7.14</a> also warns about cycles involving overlapping communicators and mixtures of collectives and point-to-point communication. Diagnose the combined order rather than treating each call in isolation.</p>
+<p>A blocking collective's local completion generally establishes local buffer safety, not that every participant has returned or even entered, except where the operation's contract implies otherwise. <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node114.htm">MPI 4.1 §7.1</a> explicitly rejects reliance on incidental collective synchronization. <code>MPI_Barrier</code> is the explicit barrier operation. Even a barrier does not force ranks to return at one instant. Replacing every collective with an assumed barrier invents dependencies and can make both debugging and timing arguments wrong.</p>
+<p>The source slides use broad language about collective synchronization and thread switching across processes. The precise contracts above are the verified distinctions needed for portable code. Another source-slide label expands MUST as “MPI Unit Test”; the tool's own name is Marmot Umpire Scalable Tool. These are corrections to displayed terminology or semantics, not allegations about unverified audio. They matter operationally: a rank-local debugger, a memory checker, and an MPI protocol checker answer different questions.</p>
+
+
+<div class="table-wrap"><table><caption>Checkable source statements and their precise interpretation</caption><thead><tr><th>Source material</th><th>Verified interpretation</th></tr></thead><tbody><tr><td>Collective synchronization language</td><td>Ordinary collectives have local completion semantics; only the specified operation contract supplies additional synchronization.</td></tr><tr><td>mpiP Waitall row</td><td>4.4e+03 milliseconds is about 4.4 rank-seconds; 55.40 is the MPI-time percentage.</td></tr><tr><td>GDB thread-switching slide</td><td>Thread commands inspect controlled inferiors; a rank requires its own process association.</td></tr><tr><td>MUST name on slide</td><td>The project expands MUST as Marmot Umpire Scalable Tool.</td></tr></tbody></table></div>
+<h2 id="memory">Check memory safety and MPI correctness with different oracles <a class="timestamp" href="https://www.youtube.com/watch?v=5ghvxhl9yF0&amp;t=691s">W11L2 11:31</a></h2>
+<p>A local memory error can become a distributed failure. An off-by-one halo write may damage a request object; an uninitialized value may produce an invalid destination; a freed send buffer may change before the transfer completes. The visible symptom can be a peer waiting forever or a later reduction producing a wrong residual. Check local memory safety before attributing every anomalous MPI stack to the transport. Conversely, a program can use only valid memory and still execute a completely invalid communication protocol.</p>
+<p>Memcheck, a Valgrind tool, tracks whether memory locations are addressable and whether values are defined. The <a href="https://valgrind.org/docs/manual/mc-manual.html">Valgrind Memcheck manual §§4.2 and 4.5</a> explains invalid accesses, uninitialized-value use, and shadow-state checking. It observes the executed path. An absence of reports does not prove that unexecuted paths are safe, and it does not establish correct MPI matching or collective order. Its execution overhead also changes timing, so the instrumented runtime is not a production performance sample.</p>
+<p>The next self-contained Python driver writes and compiles an intentionally faulty MPI program. Each rank allocates two C integers. Only rank 1 calls <code>fault</code> with index 2, which writes immediately after the allocation; valid indices are 0 and 1. A second run repairs that index to 1. The driver starts Memcheck on each rank, requests rank-specific XML reports, and checks for an <code>InvalidWrite</code> stack containing the application function <code>fault</code>. XML means Extensible Markup Language, a structured text representation that can be parsed without depending on changing human-readable addresses.</p>
+<p>The checks intentionally restrict error reporting around MPI initialization and finalization to focus on this application defect; they do not certify the MPI implementation. The program uses Valgrind client requests supplied by its installed header to enable reporting for allocation, access, and free. XML output enables full leak searching in Memcheck. The option <code>--errors-for-leak-kinds=none</code> excludes leak records from the error exit status because this example concerns a write beyond an allocation; the XML records are retained. Its result must not be summarized as a leak-free application or a clean unrestricted Memcheck run. All reports, generated sources, and executables stay in the current run directory.</p>
+<p>The <a href="https://valgrind.org/docs/manual/manual-core.html">Valgrind core manual §2.7</a> documents the <code>--error-exitcode</code>, XML filename, and debugger-bridge options. We request error exit 86 and verify that the launcher propagates it for the faulty run; the repaired run must exit zero. <code>--vgdb=no</code> disables the bridge to GDB, whose FIFO creation is unsupported on this mounted filesystem. This ordinary Memcheck execution is separate from the earlier direct batch GDB experiment. No bridge or external attach success is inferred.</p>
+<pre><code class="language-python" data-file="mpi_memcheck.py" data-run="python3 -B mpi_memcheck.py" data-check="exact" data-needs="mpi">from pathlib import Path
+import resource, subprocess, xml.etree.ElementTree as ET
+resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+source = r'''#include &lt;mpi.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;valgrind/valgrind.h&gt;
+__attribute__((noinline)) void fault(volatile int *a,int index) {
+    a[index]=99;
+}
+int main(int argc,char **argv) {
+    int rank,p;
+    VALGRIND_DISABLE_ERROR_REPORTING;
+    MPI_Init(&amp;argc,&amp;argv);
+    MPI_Comm_rank(MPI_COMM_WORLD,&amp;rank);
+    MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    if(p!=2) MPI_Abort(MPI_COMM_WORLD,2);
+    VALGRIND_ENABLE_ERROR_REPORTING;
+    volatile int *a=malloc(2*sizeof(int));
+    if(!a) return 3;
+    a[0]=0; a[1]=0;
+    if(rank==1) fault(a,atoi(argv[1]) ? 2 : 1);
+    free((void *)a);
+    VALGRIND_DISABLE_ERROR_REPORTING;
+    MPI_Finalize();
+    VALGRIND_ENABLE_ERROR_REPORTING;
+    return 0;
+}
+'''
+Path('memory_rank.c').write_text(source, encoding='utf-8')
+subprocess.run(['mpicc','-g','-O0','memory_rank.c','-o','memory_rank'],
+               check=True, timeout=10)
+for bad in (1,0):
+    cmd=['mpirun','-np','2','valgrind','--tool=memcheck','--vgdb=no','--xml=yes',
+         f'--xml-file=memory-{bad}-%q{{OMPI_COMM_WORLD_RANK}}.xml',
+         '--errors-for-leak-kinds=none','--error-exitcode=86','./memory_rank',str(bad)]
+    run=subprocess.run(cmd,capture_output=True,text=True,timeout=18)
+    Path(f'memcheck-{bad}.stdout.txt').write_text(run.stdout,encoding='utf-8')
+    Path(f'memcheck-{bad}.stderr.txt').write_text(run.stderr,encoding='utf-8')
+    matched=[]
+    for rank in (0,1):
+        xml=ET.parse(f'memory-{bad}-{rank}.xml').getroot()
+        errors=[e for e in xml.findall('error')
+                if any(f.findtext('fn')=='fault' for f in e.findall('.//frame'))]
+        assert len(errors)==(1 if bad and rank==1 else 0)
+        if errors:
+            assert errors[0].findtext('kind')=='InvalidWrite'
+            matched.append(rank)
+    if bad:
+        assert run.returncode==86, (run.returncode, run.stderr)
+        assert matched==[1]
+        print('faulty: rank 1 InvalidWrite at fault; launcher exit 86 checked')
+    else:
+        assert run.returncode==0, (run.returncode, run.stderr)
+        print('repaired: no fault-frame error; launcher exit 0 checked')
+</code></pre>
+<pre><code class="output">faulty: rank 1 InvalidWrite at fault; launcher exit 86 checked
+repaired: no fault-frame error; launcher exit 0 checked
+</code></pre>
+<p>The first successful test harness run therefore contains an intentionally unsuccessful instrumented application run. The distinction is essential for automated testing: merely accepting any nonzero status could pass when the compiler was missing, MPI failed to start, or Valgrind never reached the application. The oracle requires the expected exit code, both rank reports, the error kind, and the application's stack frame. The repaired run checks the same path with a valid index and a successful launcher exit. Raw reports preserve any diagnostics outside this narrow application-frame assertion.</p>
+<p>Valgrind also has an MPI-wrapper facility, described in Memcheck §4.9, but its coverage and integration are separate capabilities. Likewise, the Open MPI Memchecker component requires appropriate build support. Neither is established merely because <code>valgrind mpirun</code> starts. The placement used here is conceptually <code>mpirun ... valgrind ... application</code>, so each rank is instrumented. Instrumenting only the launcher would examine a different process. The source of each diagnostic must be identified before drawing an application conclusion.</p>
+<p><a href="https://blog.rwth-aachen.de/itc/en/2022/09/05/must/">RWTH's MUST description</a> identifies it as a runtime MPI correctness checker that intercepts MPI calls, with checks including deadlocks, argument and resource errors, datatype mismatches, buffer overlaps, and MPI-related races. This addresses semantics that a local heap-access checker cannot infer. MUST was not executed in the local verification. A cited tool capability supplies a reason to use it on an appropriate installation, rather than evidence that this particular application has passed it.</p>
+<p>Callgrind and Cachegrind, also mentioned in the source's Valgrind discussion, answer still other questions: executed call structure and modeled instruction or cache behavior. An instruction-count reduction can explain an algorithmic change but cannot by itself predict communication waits or real network throughput. Choose the oracle by failure class. For a wrong residual, compare a transparent numerical reference; for a hang, reconstruct envelope and ordering dependencies; for a local invalid write, inspect memory diagnostics. Agreement between independent oracles is stronger than repetition of one narrow check.</p>
+
+<h2 id="systems">Extend the evidence across files, threads, devices, and clusters <a class="timestamp" href="https://www.youtube.com/watch?v=5ghvxhl9yF0&amp;t=796s">W11L2 13:16</a></h2>
+<p>Parallel input/output adds ownership in a second address space: the file. Assign each global output element an owner and a file region before choosing an I/O routine. A disjoint partition can avoid write-write conflicts, whereas every rank opening the same filename and writing from offset zero destroys that ownership rule. A barrier after the writes cannot restore bytes already overwritten. Check the mapping independently from the API that implements it.</p>
+<p>For a concrete original design, flatten a global array of \(M\) elements in row-major order, meaning consecutive columns occupy consecutive positions within each row. Rank \(r\) owns \(n_r\) consecutive elements. Its first global index is \(q_r=\sum_{s\lt r}n_s\); its region is the half-open interval \([q_r,q_r+n_r)\). These intervals are disjoint and cover the array if the counts sum to \(M\). With a byte-oriented file view and \(b\) bytes per element, the corresponding byte start is \(bq_r\). The file-view assumption matters: MPI explicit offsets are otherwise measured in the view's elementary datatype units.</p>
+<p>Use a checkable record format and verify file size, element ownership, ordering, and contents after writing. Disjoint byte regions simplify the proof but do not by themselves establish durable storage, portable binary representation, or visibility to a separate process at an arbitrary instant. <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node383.htm">MPI 4.1 §15.6.1, File Consistency</a>, distinguishes consistency rules and synchronization requirements. Collective I/O also has participation and ordering obligations; a rank with zero payload may still need to call the collective routine.</p>
+<p>To diagnose I/O performance, separate data preparation, MPI file calls, synchronization, and storage completion requirements. A slow collective write may reflect an imbalanced producer or aggregation strategy rather than the device's transfer rate. One local filesystem run cannot reproduce a parallel filesystem's metadata contention, striping, client caching, or network behavior. The source names I/O tracing and graphical analysis tools as possible aids; none was used to establish a local parallel-filesystem result here.</p>
+<p>Hybrid programs combine MPI with another parallel model, such as OpenMP threads or CUDA device kernels. Their event graph must include dependencies from every runtime. Before a host-staged halo is sent, the device computation producing it and the device-to-host copy must complete. After reception, the host-to-device copy must complete before the consuming kernel. CUDA is NVIDIA's device programming platform; a kernel is a function executed by device threads. An MPI barrier alone cannot complete arbitrary device work that its contract does not cover.</p>
+<p>The installed Open MPI 4.1.6 build lacks CUDA-aware support, so these notes do not send device pointers directly to MPI. The earlier multi-device chapter verifies explicit host staging on the one available physical GPU. Multiple ranks sharing that GPU are distinct MPI processes, not multiple GPUs. Debugging their mapping requires recording rank, selected device, buffer location, copy completion, and kernel completion. A host stack waiting in MPI cannot reveal unfinished device execution without corresponding device evidence.</p>
+<p>For threaded MPI programs, request an appropriate thread-support level and inspect the provided level. “Multiple threads exist” is different from “multiple threads can concurrently enter MPI.” A program written for a funneled model, where the main thread performs MPI calls, cannot safely be generalized by letting arbitrary workers make those calls. The global event graph must also respect OpenMP barriers, tasks, and buffer ownership. More runtime layers create more possible schedules; that does not establish a universal exponential complexity law in rank count.</p>
+<p>On a cluster, debugging must occur within the actual resource allocation and launcher environment. Preserve the node mapping and module or library identity. A debugger on a login node does not automatically control a rank on a compute node, and a local two-rank command does not validate scheduler integration. Scale the reproduction gradually: one process for local memory behavior, two for a peer protocol, then the smallest topology that preserves the defect. A failure requiring three ranks or an uneven decomposition can be missed by a two-rank test.</p>
+<p>Continuous integration means running repeatable build and test checks as changes are made. A useful MPI suite includes multiple rank counts, uneven partitions, empty local pieces when supported, deterministic seeds, expected payload checks, and bounded completion. Keep performance thresholds separate from semantic pass conditions unless the measurement environment is controlled. Preserve the first failed run rather than silently retrying until scheduling noise produces a pass. The diagnostic harness above demonstrates how to demand an expected failure's specific evidence.</p>
+<p>The source closes with cloud debugging, machine-learning assistance, visualization, and portability. These are directions for organizing evidence, not replacements for it. A container can stabilize software dependencies while the host scheduler, network, device driver, or rank placement still changes. A model-generated explanation should identify the exact logs and contracts supporting its hypothesis. The decisive feedback loop is a bounded reproduction, a causal prediction, a targeted change, and a fresh check that both the failure disappears and the numerical result remains valid.</p>
+
+
+<h2 id="limits">What these measurements and checks establish</h2>
+<p>The numerical timing model establishes conditional relationships between imbalance, waiting, and phase completion. The historical mpiP reconstruction establishes the units and denominators of one displayed report. The finite local runs establish payload correctness, wrapper counters, rank-local debugger observations, and a targeted invalid write followed by a repaired access. These are separate evidence classes. None substitutes for a production solver's convergence check, a global correctness proof, or a multi-node performance campaign.</p>
+<p>The largest unresolved performance boundary is the actual deployment environment. Hardware mapping, network topology, MPI progress, resource contention, device synchronization, and filesystem behavior can change the critical path. A communication percentage cannot identify the responsible mechanism by itself. Preserve the enclosing timing scope, distinguish rank-time from elapsed time, and pair an optimization with a causal prediction. Then rerun the numerical oracle as well as the performance measurement: a faster wrong answer is a failed scientific computation.</p>
+
+<h2 id="exercises">Exercises with worked solutions</h2>
+<h3>1. Derive the benefit of balancing a phase</h3>
+<p>Six simultaneous ranks compute for 2, 2, 2, 2, 2, and 8 milliseconds, then perform a common 2-millisecond exchange. Derive total waiting, compute-balance efficiency, and the maximum whole-phase improvement from perfectly redistributing the same work. State the assumptions needed.</p>
+<details><summary>Solution</summary>
+<p>Total computation is 18 rank-milliseconds and maximum compute time is 8 milliseconds. Five early ranks each wait 6, so total waiting is 30 rank-milliseconds. Equation (28.1) independently gives \(6\cdot8-18=30\). Compute-balance efficiency is \(18/(6\cdot8)=0.375\). Perfect redistribution assigns 3 milliseconds per rank, reducing the phase from \(8+2=10\) to \(3+2=5\) milliseconds, an improvement factor of two. The compute phase alone improves by \(8/3\), which must not be reported as the whole-phase result. We assumed divisible work, identical processing rates, no redistribution cost, unchanged exchange cost, simultaneous starts, and no overlap. If the heavier rank owns an indivisible task or balancing enlarges its halo, the attainable improvement is smaller.</p>
+</details>
+<h3>2. Reconstruct two profiler percentages</h3>
+<p>A report sums to 80 application rank-seconds and 20 MPI rank-seconds. One call site contributes 5 MPI rank-seconds. Compute its application and MPI percentages. Can the report alone establish an Amdahl speedup ceiling of four?</p>
+<details><summary>Solution</summary>
+<p>The call site's application share is \(100\cdot5/80=6.25\) percent; its MPI share is \(100\cdot5/20=25\) percent. The total MPI fraction is also 25 percent, but the equality with this site's MPI share is accidental: the denominators differ. Amdahl's serial fraction concerns a sequential dependency in a matching one-process reference. MPI rank-time can overlap across processes and include waiting caused by imbalanced computation. Therefore substituting 0.25 as the serial fraction and claiming a ceiling of four is unsupported. We need a causal decomposition and a measured or justified reference scope.</p>
+</details>
+<h3>3. Give a counterexample to a global clock subtraction</h3>
+<p>Rank 0's clock reads real time plus 100 seconds; rank 1's reads real time plus 20 seconds. Rank 0 starts at real time 3 and rank 1 finishes at real time 8. Compute the naive cross-rank difference and repair the measurement design.</p>
+<details><summary>Solution</summary>
+<p>The timestamps are 103 and 28, so the naive difference is \(-75\) seconds, although the physical interval is 5 seconds. Subtract two timestamps on the same rank to measure local elapsed duration, then reduce those durations according to the desired metric. If the question requires a global earliest-start to latest-finish interval, establish and quantify clock offsets or use a suitable synchronized tracing system. An entry barrier can define a useful phase boundary but does not equate clock origins or guarantee simultaneous returns. Reducing the maximum local duration remains a different quantity when starts differ.</p>
+</details>
+<h3>4. Diagnose a collective-order failure</h3>
+<p>On one communicator, rank 0 calls <code>MPI_Bcast</code> and then <code>MPI_Reduce</code>; rank 1 calls <code>MPI_Reduce</code> and then <code>MPI_Bcast</code>. Someone proposes a barrier after both calls. Explain the defect and a portable repair.</p>
+<details><summary>Solution</summary>
+<p>The first collective initiated at each rank is different, so the calls do not match in communicator order. The program violates the collective contract before reaching the proposed barrier. A barrier later cannot repair that mismatch and may never be reached. Put matching collectives in the same order on all participating ranks, with compatible root, datatype, operation, and buffer arguments. Distinct communicators can separate independent logical streams, but constructing them does not automatically eliminate dependency cycles across streams. The repair must cover the whole event graph, including any point-to-point calls between collectives.</p>
+</details>
+<h3>5. Choose a diagnostic without overstating its verdict</h3>
+<p>A two-rank run passes the payload checks and Memcheck's targeted heap test, but a three-rank uneven partition hangs. Choose the next evidence to collect. Would an <code>info threads</code> command on rank 0 or a clean two-rank run settle the issue?</p>
+<details><summary>Solution</summary>
+<p>Preserve the three-rank input and partition and record the last logical communication event on each rank: iteration, communicator role, peer, tag, count, and collective sequence. Inspect each rank's stack using supported per-process debugging, then reconstruct which send or collective participation could satisfy each wait. Check the zero or uneven local-size paths and whether a rank skipped a required call. <code>info threads</code> on rank 0 inspects controlled threads, not all MPI ranks. The two-rank result tests a different topology and cannot establish the three-rank protocol. An available MPI correctness checker such as MUST supplies additional runtime semantics, but its result must still identify which execution and features were analyzed.</p>
+</details>
+<h3>6. Design an automated expected-error measurement</h3>
+<p>Extend the Memcheck harness conceptually to a faulty halo writer and its repair. Specify evidence required for a pass, including tool startup failure and instrumentation effects. Explain why an arbitrary nonzero exit must not count as success.</p>
+<details><summary>Solution</summary>
+<p>Compile both versions with source locations, use a finite input and timeout, launch the checker on each MPI rank, and save commands, hashes, raw output, rank reports, return codes, and timing endpoints. Require the faulty run's intended error kind at the halo-writing application frame on the expected rank, plus the configured error-exit status. Require all expected rank reports so that a missing process cannot silently pass. Run the repair through the same oracle and require absence of that application error and successful normal completion. State any excluded leak classes or reporting-disabled regions. A missing executable, unsupported FIFO, startup abort, or timeout can also return nonzero; none demonstrates that the intended defect was detected. Finally rerun a numerical reference check outside the fault injection. Instrumented timings characterize the diagnostic run only, because memory instrumentation and altered scheduling can substantially perturb performance.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources</h2>
+<ul>
+<li><a href="https://www.youtube.com/watch?v=-C-S0rAA_OI">W11L1: Performance Analysis of MPI Codes</a>: Performance factors, metrics, mpiP mechanism, historical output and profiling controls. Recording duration: 1740 seconds.</li>
+<li><a href="https://www.youtube.com/watch?v=5ghvxhl9yF0">W11L2: Parallel Debugging of MPI Programs</a>: Debugging workflow, GDB, Valgrind, MUST, I/O, collectives, hybrid and cluster concerns. Recording duration: 1325 seconds.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node58.htm">MPI 4.1, §4.2.3 Message Envelope</a>: Source, destination, tag, and communicator context define message selection. §4.2.3.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node62.htm">MPI 4.1, §4.2.7 Blocking Send-Receive</a>: Combined exchange avoids cyclic send-first dependencies; buffer disjointness. §4.2.7.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node68.htm">MPI 4.1, §4.5 Point-to-Point Semantics</a>: Qualified nonovertaking and nondeterministic matching boundaries. §4.5.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node114.htm">MPI 4.1, §7.1 Collective Overview</a>: Local collective completion does not generally imply barrier synchronization. §7.1 completion and advice to users.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node172.htm">MPI 4.1, §7.14 Correctness</a>: Collective ordering, overlap cycles, mixing point-to-point and collective operations. §7.14 examples.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node262.htm">MPI 4.1, §10.6 Timers and Synchronization</a>: Wall-time seconds, fixed local origin, no required global clock agreement. §10.6.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node403.htm">MPI 4.1, §16.2.1 Profiling Requirements</a>: PMPI alternate entry points and wrapper interception. §16.2.1.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node406.htm">MPI 4.1, §16.2.4 Control of Profiling</a>: MPI_Pcontrol semantics are profiler-dependent; requested level conventions. §16.2.4.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node383.htm">MPI 4.1, §15.6.1 File Consistency</a>: Conflicting accesses and synchronization/visibility boundaries. §15.6.1.</li>
+<li><a href="https://software.llnl.gov/mpiP/">mpiP User Guide</a>: Task-local statistical collection, linking/preloading, call-site attribution, units and report controls. Using mpiP; mpiP Output; runtime flags; accessed 2026-10-28.</li>
+<li><a href="https://sourceware.org/gdb/current/onlinedocs/gdb.html/Inferiors-Connections-and-Programs.html">GDB: Multiple Inferiors</a>: An inferior represents program execution and is distinct from an OS PID. §4.9.</li>
+<li><a href="https://sourceware.org/gdb/current/onlinedocs/gdb.html/Threads.html">GDB: Multiple Threads</a>: Thread selection applies to controlled inferiors rather than automatic rank discovery. §4.10.</li>
+<li><a href="https://sourceware.org/gdb/current/onlinedocs/gdb.html/Mode-Options.html">GDB: Choosing Modes</a>: Initialization suppression and batch operation. §2.1.2.</li>
+<li><a href="https://valgrind.org/docs/manual/mc-manual.html">Valgrind: Memcheck</a>: Address/definedness checking, client requests, MPI-wrapper limits, XML-forced leak search and leak error classification. §§4.2,4.3,4.5,4.7,4.9; XML/leak option interaction verified.</li>
+<li><a href="https://valgrind.org/docs/manual/manual-core.html">Valgrind: Core Services</a>: Per-rank XML log naming, error exit codes, --vgdb=no and instrumentation effects. §§2.1,2.7; accessed 2026-10-28.</li>
+<li><a href="https://www.open-mpi.org/faq/?category=debugging">Open MPI v4 Parallel Debugging FAQ</a>: Separate debugger launch versus attach; optional build-dependent Memchecker support. Questions 6,8–13; applies to v4.x and earlier.</li>
+<li><a href="https://blog.rwth-aachen.de/itc/en/2022/09/05/must/">RWTH: MUST MPI Runtime Correctness Analysis</a>: Marmot Umpire Scalable Tool name, runtime interception and error classes. Application of MUST and Further Use Cases; 2022 official description.</li>
+<li><a href="https://www.scalasca.org/">Scalasca Official Description</a>: Parallel communication and synchronization performance analysis. Homepage project description, accessed 2026-10-28.</li>
+<li><a href="https://www.cs.uoregon.edu/research/tau/home.php">TAU Official Description</a>: Instrumentation, sampling, profiling, tracing and visualization exports. Homepage toolkit description, accessed 2026-10-28.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-27-serial-profiling-debugging-gprof-valgrind-gdb.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-29-numerical-methods-scientific-libraries.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

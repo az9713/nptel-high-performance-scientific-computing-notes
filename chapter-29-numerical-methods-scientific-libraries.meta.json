@@ -1,0 +1,518 @@
+{
+  "chapter": 29,
+  "title": "Numerical methods and scientific libraries",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local faster-whisper small.en machine transcription; not publisher captions or verified audio.",
+  "recordings": [
+    {
+      "video_id": "3CwrG8SVgLE",
+      "label": "W11L3",
+      "playlist_index": 66,
+      "duration_seconds": 1754
+    },
+    {
+      "video_id": "bwQu-uSKGGw",
+      "label": "W11L4",
+      "playlist_index": 67,
+      "duration_seconds": 1868
+    }
+  ],
+  "frames_viewed": {
+    "3CwrG8SVgLE": [
+      "f0012",
+      "f0021",
+      "f0031",
+      "f0037",
+      "f0040",
+      "f0043",
+      "f0049",
+      "f0055"
+    ],
+    "bwQu-uSKGGw": [
+      "f0006",
+      "f0015",
+      "f0023",
+      "f0028",
+      "f0033",
+      "f0042",
+      "f0045",
+      "f0046",
+      "f0047",
+      "f0053",
+      "f0056",
+      "f0059",
+      "f0061"
+    ]
+  },
+  "source_uncertainties": [
+    "Historical OpenFOAM and GPU/Xeon Phi plots were inspected as lecture evidence, not reproduced or normalized into a matched-error comparison.",
+    "The NUMA primary paper was opened; its reported 32,768-core DG result is tied to its experiments.",
+    "No audio verification was performed; garbled transcript words and numbers are not attributed as spoken errors.",
+    "PETSc, SciPy, pyFFTW and CuPy Python bindings were unavailable; no such execution is claimed. NumPy FFT is explicitly distinct from FFTW.",
+    "System BLAS configuration is recorded; no optimized BLAS vendor or observed thread count is inferred solely from environment variables.",
+    "Initial manual Thrust attempt failed because nvcc was outside launcher PATH; a second hit the 25-second compile timeout. Retained successful third attempt used a 60-second compile budget and a 20-second runtime bound; compilation took about 25 seconds.",
+    "No native cuBLAS or cuFFT routine was executed; shared-library availability is inventory evidence only.",
+    "NUMA PDF abstract was opened successfully and supports the cited scaling statement; later attempts to reopen full sections timed out, so no additional detailed claim relies on those sections."
+  ],
+  "sections": [
+    {
+      "section": "The mathematical problem, its discrete representation, and the answer we can check",
+      "id": "model",
+      "video_id": null,
+      "start": 0,
+      "end": 262,
+      "lecture_material": "Algorithmic efficiency and local formal objects.",
+      "research_extension": "Independent Poisson error budget and exact/rounded data boundaries.",
+      "teaching_construction": "Running Poisson case and error bookkeeping.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Consistency, stability, and finite precision answer different questions W11L3 4:22",
+      "id": "requirements",
+      "video_id": "3CwrG8SVgLE",
+      "start": 262,
+      "end": 556,
+      "lecture_material": "Consistency, stability, accuracy, computational efficiency, geometry.",
+      "research_extension": "Linear theorem scope, steady inverse argument, binary rounding test.",
+      "teaching_construction": "Derivations, explicit assumptions, limits and bounded examples where present.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Finite volumes make conservation local; reconstruction can widen communication W11L3 9:16",
+      "id": "volume",
+      "video_id": "3CwrG8SVgLE",
+      "start": 556,
+      "end": 909,
+      "lecture_material": "Finite-volume conservation, stencil widening, OpenFOAM scaling and cache interpretation.",
+      "research_extension": "Explicit halo/work/latency model and matched-error comparison.",
+      "teaching_construction": "Derivations, explicit assumptions, limits and bounded examples where present.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Element polynomials reorganize work into local algebra and interface fluxes W11L3 15:09",
+      "id": "galerkin",
+      "video_id": "3CwrG8SVgLE",
+      "start": 909,
+      "end": 1408,
+      "lecture_material": "Element bases, weak residual, shallow-water matrices, NUMA and accelerator plots.",
+      "research_extension": "Scalar DG derivation; degree/count distinctions; published NUMA context.",
+      "teaching_construction": "Derivations, explicit assumptions, limits and bounded examples where present.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "A faster numerical kernel changes the feasible ensemble, not the certainty of the inputs W11L3 23:28",
+      "id": "hazards",
+      "video_id": "3CwrG8SVgLE",
+      "start": 1408,
+      "end": 1754,
+      "lecture_material": "Tsunami curves, storm surge, uncertain inputs, scenario ensembles, inundation resolutions.",
+      "research_extension": "Work budget and evidence separation; no hazard reproduction.",
+      "teaching_construction": "Derivations, explicit assumptions, limits and bounded examples where present.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Use an algorithmic abstraction while retaining a checkable data contract W11L4 1:20",
+      "id": "thrust",
+      "video_id": "bwQu-uSKGGw",
+      "start": 80,
+      "end": 573,
+      "lecture_material": "Containers, algorithms, backends, interoperability and profile-specialize workflow.",
+      "research_extension": "Full sort payload test; installed CCCL and real native GPU target.",
+      "teaching_construction": "Derivations, explicit assumptions, limits and bounded examples where present.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "BLAS levels organize the amount of reuse available to an implementation W11L4 9:33",
+      "id": "blas",
+      "video_id": "bwQu-uSKGGw",
+      "start": 573,
+      "end": 1095,
+      "lecture_material": "Netlib, BLAS levels/naming, rank-one versus matrix update.",
+      "research_extension": "Traffic/reuse derivations; full-data interpreted/NumPy comparison.",
+      "teaching_construction": "Derivations, explicit assumptions, limits and bounded examples where present.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Factorization turns elimination into reusable matrix operations W11L4 18:15",
+      "id": "factorization",
+      "video_id": "bwQu-uSKGGw",
+      "start": 1095,
+      "end": 1423,
+      "lecture_material": "Elimination, stored multipliers, blocking, LU and Cholesky; QR/LQ, least squares and minimum norm, eigenpairs/SVD, generalized contracts, and driver/computational/auxiliary roles.",
+      "research_extension": "Pivoting assumptions; residual, conditioning, backward-error model; full solver test. Netlib problem contracts and hand-derived rectangular examples; no additional library execution.",
+      "teaching_construction": "Derivations, explicit assumptions, limits and bounded examples where present.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Choose a library layer that preserves the mathematical structure W11L4 23:43",
+      "id": "solver-stack",
+      "video_id": "bwQu-uSKGGw",
+      "start": 1423,
+      "end": 1868,
+      "lecture_material": "Vendor CPU/GPU library survey; PETSc objects and solver hierarchy.",
+      "research_extension": "Current verified contracts and absent-binding boundary; preconditioner assumptions.",
+      "teaching_construction": "Derivations, explicit assumptions, limits and bounded examples where present.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Transform libraries add another convention boundary",
+      "id": "transforms",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Research extension to library survey.",
+      "research_extension": "DFT convention derivation and full NumPy/reference check; FFTW not executed.",
+      "teaching_construction": "Derivations, explicit assumptions, limits and bounded examples where present.",
+      "evidence_class": "derivation"
+    }
+  ],
+  "references": [
+    {
+      "title": "Trefethen, Finite Difference and Spectral Methods",
+      "url": "https://www.math.hmc.edu/~dyong/math165/trefethenbook.pdf",
+      "supports": "Scope of the Lax equivalence theorem for consistent approximations of a well-posed linear initial-value problem.",
+      "page_checked": "\u00a74.2, Theorem 4.1, printed p. 157",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "Kelly and Giraldo (2012), scalable atmospheric Galerkin methods",
+      "url": "https://faculty.nps.edu/fxgirald/projects/NUMA/Publications_files/Kelly_Giraldo_JCP_2012_published.pdf",
+      "supports": "Published NUMA context and near-ideal DG scaling to 32,768 cores, not a universal method comparison.",
+      "page_checked": "abstract; later section-specific reopening timed out",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "NVIDIA, Floating Point and IEEE 754",
+      "url": "https://docs.nvidia.com/cuda/floating-point/index.html",
+      "supports": "Binary formats, rounding-order dependence and fused multiply-add semantics.",
+      "page_checked": "\u00a7\u00a72.1\u20132.3; opened 2026-10-28; current page identifies 13.4",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "Netlib, BLAS overview",
+      "url": "https://netlib.org/blas/",
+      "supports": "BLAS expansion and three operation levels; interface versus implementation.",
+      "page_checked": "Presentation and optimized-BLAS description",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "LAPACK Users Guide, Linear Equations",
+      "url": "https://www.netlib.org/lapack/lug/node38.html",
+      "supports": "Factorizations and separate factor, solve, condition-estimation and refinement routines.",
+      "page_checked": "\u00a72 computational routines, Linear Equations",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "NVIDIA, CUDA Core Compute Libraries",
+      "url": "https://github.com/NVIDIA/cccl",
+      "supports": "Thrust within CCCL, header-based toolkit use and include configuration.",
+      "page_checked": "Getting Started, Users, CUDA Toolkit",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "NVIDIA, Thrust systems",
+      "url": "https://nvidia.github.io/cccl/unstable/thrust/developer/systems.html",
+      "supports": "Host/device systems and explicit execution-policy dispatch.",
+      "page_checked": "Parallel and sequential policy; Host and device system policy",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "NumPy 1.26, matmul",
+      "url": "https://numpy.org/doc/1.26/reference/generated/numpy.matmul.html",
+      "supports": "Matrix-product shape and optimized BLAS use when possible.",
+      "page_checked": "Notes",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "NumPy 1.26, linalg.solve",
+      "url": "https://numpy.org/doc/1.26/reference/generated/numpy.linalg.solve.html",
+      "supports": "Full-rank square linear solve uses LAPACK _gesv.",
+      "page_checked": "Notes",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "NVIDIA, cuBLAS reference",
+      "url": "https://docs.nvidia.com/cuda/cublas/index.html",
+      "supports": "cuBLAS is a GPU BLAS interface; finding a shared library is not execution evidence.",
+      "page_checked": "Introduction; no library execution inferred",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "PETSc, KSP Linear System Solvers",
+      "url": "https://petsc.org/release/manual/ksp/",
+      "supports": "Common linear-solver interface and method selection.",
+      "page_checked": "KSP introduction and solver setup",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "PETSc, KSPCG",
+      "url": "https://petsc.org/release/manualpages/KSP/KSPCG/",
+      "supports": "Conjugate-gradient matrix/preconditioner restrictions and preconditioned interpretations.",
+      "page_checked": "Notes",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "PETSc, KSPSetTolerances",
+      "url": "https://petsc.org/release/manualpages/KSP/KSPSetTolerances/",
+      "supports": "Stopping tolerances refer to possibly preconditioned residual norms, not solution error.",
+      "page_checked": "Input Parameters and Notes",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "FFTW, Complex One-Dimensional DFTs",
+      "url": "https://www.fftw.org/fftw3_doc/Complex-One_002dDimensional-DFTs.html",
+      "supports": "Plan/execution distinction and unnormalized forward/backward composition.",
+      "page_checked": "\u00a72.1",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "NumPy 1.26, Discrete Fourier Transform",
+      "url": "https://numpy.org/doc/1.26/reference/routines.fft.html",
+      "supports": "Forward exponent sign and default inverse normalization.",
+      "page_checked": "Implementation details and Normalization",
+      "opened_at_utc": "2026-10-28"
+    },
+    {
+      "title": "LAPACK Users Guide, Levels of Routines",
+      "url": "https://netlib.org/lapack/lug/node22.html",
+      "supports": "Driver, computational and auxiliary routine roles.",
+      "page_checked": "Levels of Routines, complete page",
+      "opened_at_utc": "2026-10-28T13:34:32.550Z"
+    },
+    {
+      "title": "LAPACK Users Guide, Driver Routines",
+      "url": "https://www.netlib.org/lapack/lug/node25.html",
+      "supports": "Driver problem families include linear equations, least squares, eigenproblems and SVD.",
+      "page_checked": "Driver Routines, complete overview",
+      "opened_at_utc": "2026-10-28T13:34:32.552Z"
+    },
+    {
+      "title": "LAPACK Users Guide, Linear Least Squares Problems",
+      "url": "https://www.netlib.org/lapack/lug/node27.html",
+      "supports": "Rectangular least squares, minimum-norm selection, full-rank QR/LQ and rank-deficient problem distinctions.",
+      "page_checked": "Linear Least Squares Problems, paragraphs 1\u20134",
+      "opened_at_utc": "2026-10-28T13:34:32.552Z"
+    },
+    {
+      "title": "LAPACK Users Guide, QR Factorization",
+      "url": "https://www.netlib.org/lapack/lug/node40.html",
+      "supports": "Tall QR shapes, orthogonal factors, triangular solve and orthogonal residual in least squares.",
+      "page_checked": "QR Factorization, complete page",
+      "opened_at_utc": "2026-10-28T13:34:32.552Z"
+    },
+    {
+      "title": "LAPACK Users Guide, LQ Factorization",
+      "url": "https://www.netlib.org/lapack/lug/node41.html",
+      "supports": "Wide LQ shapes and minimum-norm solution for a full-row-rank matrix.",
+      "page_checked": "LQ Factorization, complete page",
+      "opened_at_utc": "2026-10-28T13:34:32.552Z"
+    },
+    {
+      "title": "LAPACK Users Guide, Nonsymmetric Eigenproblems",
+      "url": "https://www.netlib.org/lapack/lug/node31.html",
+      "supports": "Eigenpair equation and possibility of complex eigenpairs for real nonsymmetric matrices.",
+      "page_checked": "Nonsymmetric Eigenproblems, opening definition",
+      "opened_at_utc": "2026-10-28T13:34:32.552Z"
+    },
+    {
+      "title": "LAPACK Users Guide, Singular Value Decomposition",
+      "url": "https://www.netlib.org/lapack/lug/node32.html",
+      "supports": "Full SVD shapes, nonnegative ordered singular values and singular vectors.",
+      "page_checked": "Singular Value Decomposition, opening definition",
+      "opened_at_utc": "2026-10-28T13:34:32.552Z"
+    },
+    {
+      "title": "LAPACK Users Guide, Generalized Linear Least Squares",
+      "url": "https://netlib.org/lapack/lug/node28.html",
+      "supports": "Equality-constrained least-squares and generalized linear-model problem contracts.",
+      "page_checked": "Generalized Linear Least Squares, two problem definitions",
+      "opened_at_utc": "2026-10-28T13:34:32.552Z"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "u",
+      "first_section": "model",
+      "definition": "continuous steady temperature"
+    },
+    {
+      "symbol": "s",
+      "first_section": "model",
+      "definition": "source in -Laplacian u=s"
+    },
+    {
+      "symbol": "N",
+      "first_section": "model",
+      "definition": "interior grid points per direction"
+    },
+    {
+      "symbol": "h",
+      "first_section": "model",
+      "definition": "mesh spacing 1/(N+1)"
+    },
+    {
+      "symbol": "n",
+      "first_section": "model",
+      "definition": "total algebraic unknowns N squared, or separately declared transform length"
+    },
+    {
+      "symbol": "A_h,b_h,x_h",
+      "first_section": "model",
+      "definition": "dimensionless discrete operator, right-hand side, exact discrete solution"
+    },
+    {
+      "symbol": "u_h",
+      "first_section": "model",
+      "definition": "sampled continuous solution"
+    },
+    {
+      "symbol": "xhat",
+      "first_section": "model",
+      "definition": "finite-precision numerical answer"
+    },
+    {
+      "symbol": "epsilon_r",
+      "first_section": "requirements",
+      "definition": "unit roundoff"
+    },
+    {
+      "symbol": "p",
+      "first_section": "volume",
+      "definition": "processing-element count"
+    },
+    {
+      "symbol": "alpha,beta",
+      "first_section": "volume",
+      "definition": "latency and inverse bandwidth"
+    },
+    {
+      "symbol": "p_e",
+      "first_section": "galerkin",
+      "definition": "local polynomial degree"
+    },
+    {
+      "symbol": "M",
+      "first_section": "galerkin",
+      "definition": "element mass matrix; separately cache capacity in BLAS paragraph"
+    },
+    {
+      "symbol": "F,Q,I",
+      "first_section": "blas",
+      "definition": "flops, bytes moved and arithmetic intensity"
+    },
+    {
+      "symbol": "kappa",
+      "first_section": "factorization",
+      "definition": "subordinate-norm matrix condition number"
+    },
+    {
+      "symbol": "r",
+      "first_section": "factorization",
+      "definition": "original-equation residual b-A*xhat"
+    },
+    {
+      "symbol": "eta",
+      "first_section": "factorization",
+      "definition": "normalized infinity-norm residual indicator"
+    },
+    {
+      "symbol": "mathcal F(q)",
+      "first_section": "volume",
+      "definition": "conserved-quantity flux; distinct from F, the floating-point-operation count"
+    },
+    {
+      "symbol": "Id_d; Id_n",
+      "first_section": "factorization",
+      "definition": "d-by-d identity matrix for positive integer d; Id_n is n-by-n and is used again in solver-stack"
+    },
+    {
+      "symbol": "mathsf Q_1, mathsf Q, mathsf R, mathsf L",
+      "first_section": "factorization",
+      "definition": "orthonormal factors and upper/lower triangular factors in QR/LQ; distinct from Q, byte traffic"
+    },
+    {
+      "symbol": "m,n",
+      "first_section": "factorization",
+      "definition": "rows and columns of a rectangular matrix, locally declared in the LAPACK-contract subsection"
+    },
+    {
+      "symbol": "star",
+      "first_section": "factorization",
+      "definition": "conjugate transpose, ordinary transpose for real matrices"
+    },
+    {
+      "symbol": "lambda,v",
+      "first_section": "factorization",
+      "definition": "eigenvalue and nonzero eigenvector of a square matrix"
+    },
+    {
+      "symbol": "mathsf U,Sigma,mathsf V,sigma_j",
+      "first_section": "factorization",
+      "definition": "full singular-vector factors, rectangular diagonal singular-value matrix, and nonnegative singular values"
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B tools/check_chapter_code.py --file <private chapter> --report <private code-validation.json>",
+    "listings": 5,
+    "all_passed": true,
+    "fingerprint_sha256": "974059b7c2219eb82bb113558b6a510a0c77220060e0db2e21ba42ab984b5c84",
+    "checked_at_utc": "2026-10-28T13:08:44.151952+00:00",
+    "report": "code-validation.json",
+    "retained_after_prose_math_repair": true,
+    "reexecuted_for_repair": false,
+    "retention_basis": "All five complete contracts, including expected outputs and run/build/check metadata, preserve fingerprint 974059b7c2219eb82bb113558b6a510a0c77220060e0db2e21ba42ab984b5c84."
+  },
+  "execution_scope": "Manual and formal evidence separate; workspace-contained temp/home/cache, core dumps disabled, runtime 20 seconds per listing; separately bounded Thrust compilation 60 seconds. CPU thread controls requested at one; full data checked; no installs.",
+  "lecture_claims_and_status": [
+    {
+      "claim": "Consistent and stable implies convergent",
+      "status": "Qualified to appropriate well-posed linear theorem; separate explicit steady inverse argument."
+    },
+    {
+      "claim": "High-order DG scaling versus finite-volume plot",
+      "status": "Historical experiments identified; no universal cross-method ranking."
+    },
+    {
+      "claim": "Higher BLAS level always performs better",
+      "status": "Qualified by dimensions, overhead, data movement and specialized alternatives."
+    },
+    {
+      "claim": "Mass matrix dimension for third-order 3D element",
+      "status": "Explicit basis counts supplied; no unverified speech or frame-error attribution."
+    }
+  ],
+  "review_history": [
+    {
+      "round": 1,
+      "verdict": "REVISE",
+      "blocking": 2,
+      "major": 1,
+      "minor": 2,
+      "report": "../reviews/ch29-r1.md",
+      "before_snapshot": "r1-before-repair",
+      "repairs": "r1-repair-receipt.json",
+      "status": "author repairs complete; independent R2 pending"
+    }
+  ],
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "REVISE",
+      "blocking": 2,
+      "major": 1,
+      "minor": 2,
+      "report": "ch29-r1.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch29-r2.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    }
+  ]
+}

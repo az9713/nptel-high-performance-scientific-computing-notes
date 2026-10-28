@@ -1,0 +1,372 @@
+{
+  "chapter": 28,
+  "title": "Performance analysis and debugging of MPI programs",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "-C-S0rAA_OI",
+      "label": "W11L1",
+      "playlist_index": 64,
+      "duration_seconds": 1740
+    },
+    {
+      "video_id": "5ghvxhl9yF0",
+      "label": "W11L2",
+      "playlist_index": 65,
+      "duration_seconds": 1325
+    }
+  ],
+  "frames_viewed": {
+    "-C-S0rAA_OI": [
+      "f0011",
+      "f0023",
+      "f0028",
+      "f0031",
+      "f0036",
+      "f0040",
+      "f0042",
+      "f0043",
+      "f0045",
+      "f0046",
+      "f0047",
+      "f0048",
+      "f0050",
+      "f0052",
+      "f0054",
+      "f0056"
+    ],
+    "5ghvxhl9yF0": [
+      "f0007",
+      "f0010",
+      "f0013",
+      "f0016",
+      "f0020",
+      "f0025",
+      "f0028",
+      "f0031",
+      "f0034",
+      "f0038",
+      "f0042"
+    ]
+  },
+  "source_uncertainties": [
+    "No independent audio verification; source reconciliations are grounded in original slide frames and primary technical contracts.",
+    "Historical mpiP 3.1.2 run was interpreted from displayed source frames; it was not reproduced locally. Rounded sums differ from exact underlying values.",
+    "MUST homepage requests timed out; the official RWTH 2022 project article was opened and used for the name and runtime scope. MUST was not run.",
+    "Vampir and BSC tool pages were inaccessible; these names are retained only as source-lecture mentions, with no independently asserted product capability or executed GUI.",
+    "No mpiP, Scalasca, TAU, MUST, Intel trace analyzer or graphical trace viewer execution is claimed. The minimal PMPI wrapper is an original construction.",
+    "No inter-node, InfiniBand, shared-memory-transport, actual scheduler or parallel-filesystem experiment was performed.",
+    "NTFS debugger_attach_fifo warning persists. Separate child-process batch GDB succeeded; external attachment and Valgrind vgdb bridge are not established.",
+    "Memcheck application access oracle disables reporting around MPI runtime calls and excludes leak classes from exit status; XML leak records retained. No leak-free or unrestricted clean Memcheck claim."
+  ],
+  "lecture_corrections": [
+    {
+      "source": "W11L1 synchronization discussion and W11L2 collective slide",
+      "correction": "Blocking collectives are not generic barriers; MPI4.1 \u00a77.1 defines local completion."
+    },
+    {
+      "source": "W11L2 f0013 and f0031",
+      "correction": "GDB thread selection applies to controlled inferiors; it does not automatically traverse all MPI ranks."
+    },
+    {
+      "source": "W11L2 f0025",
+      "correction": "MUST is Marmot Umpire Scalable Tool in the official project description, not MPI Unit Test."
+    },
+    {
+      "source": "W11L1 f0045/f0046",
+      "correction": "4.4e3 milliseconds is 4.4 accumulated rank-seconds; MPI%=55.40 is a percentage, not seconds. Public text attributes values to the slide and does not allege an audio error."
+    }
+  ],
+  "sections": [
+    {
+      "section": "model",
+      "video_id": "-C-S0rAA_OI",
+      "start": 6,
+      "end": 203,
+      "lecture_material": "Distributed performance motivation and resource efficiency.",
+      "research_extension": "MPI process and communicator concepts.",
+      "teaching_construction": "Jacobi event graph, c_r, waiting and critical path.",
+      "evidence_class": "model"
+    },
+    {
+      "section": "costs",
+      "video_id": "-C-S0rAA_OI",
+      "start": 203,
+      "end": 537,
+      "lecture_material": "Communication overhead, imbalance, synchronization, I/O, topology and algorithm.",
+      "research_extension": "Point-to-point communication completion boundaries.",
+      "teaching_construction": "Balance identity and decomposition scaling model.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "metrics",
+      "video_id": "-C-S0rAA_OI",
+      "start": 537,
+      "end": 770,
+      "lecture_material": "Speedup, efficiency, strong/weak scaling and time per iteration.",
+      "research_extension": "MPI 4.1 local timers.",
+      "teaching_construction": "Clock-offset example, overlap and trace-storage budget.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "profiling",
+      "video_id": "-C-S0rAA_OI",
+      "start": 770,
+      "end": 1060,
+      "lecture_material": "Tool landscape, statistical wrappers, linking/preloading.",
+      "research_extension": "PMPI interface, mpiP guide, Scalasca and TAU descriptions.",
+      "teaching_construction": "Single-call wrapper with finite synthetic imbalance and payload checks.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "reports",
+      "video_id": "-C-S0rAA_OI",
+      "start": 1060,
+      "end": 1740,
+      "lecture_material": "Historical mpiP header, overview, sites, timings, stack depth and profiling controls.",
+      "research_extension": "mpiP report semantics and MPI_Pcontrol scope.",
+      "teaching_construction": "Historical rounded arithmetic checked independently; no local reproduction of historical hardware.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "debugging",
+      "video_id": "5ghvxhl9yF0",
+      "start": 6,
+      "end": 424,
+      "lecture_material": "Parallel debugging challenges, GDB launch/attach, variable and stack inspection.",
+      "research_extension": "GDB inferiors/threads/modes; Open MPI v4 FAQ.",
+      "teaching_construction": "Finite two-rank separate batch GDB drivers.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "correctness",
+      "video_id": "5ghvxhl9yF0",
+      "start": 424,
+      "end": 691,
+      "lecture_material": "Logging, tracing, conditional inspection and common debugging scenarios.",
+      "research_extension": "MPI matching, ordering, Sendrecv and collective semantics.",
+      "teaching_construction": "Envelope oracle and deadlock dependency analysis; corrected slide terms.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "memory",
+      "video_id": "5ghvxhl9yF0",
+      "start": 691,
+      "end": 796,
+      "lecture_material": "Valgrind and MUST discussion.",
+      "research_extension": "Valgrind memory, XML/leak-exit options; official MUST description.",
+      "teaching_construction": "Targeted rank1 invalid write and repair with explicit excluded scopes.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "systems",
+      "video_id": "5ghvxhl9yF0",
+      "start": 796,
+      "end": 1325,
+      "lecture_material": "Parallel I/O, collectives, hybrid programming, clusters, automation and emerging directions.",
+      "research_extension": "MPI file consistency.",
+      "teaching_construction": "File ownership proof, runtime dependency graph and CI evidence design.",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "W11L1: Performance Analysis of MPI Codes",
+      "url": "https://www.youtube.com/watch?v=-C-S0rAA_OI",
+      "supports": "Performance factors, metrics, mpiP mechanism, historical output and profiling controls.",
+      "page_checked": "Complete local recording transcript and listed original frames; duration 1740 seconds."
+    },
+    {
+      "title": "W11L2: Parallel Debugging of MPI Programs",
+      "url": "https://www.youtube.com/watch?v=5ghvxhl9yF0",
+      "supports": "Debugging workflow, GDB, Valgrind, MUST, I/O, collectives, hybrid and cluster concerns.",
+      "page_checked": "Complete local recording transcript and listed original frames; duration 1325 seconds."
+    },
+    {
+      "title": "MPI 4.1, \u00a74.2.3 Message Envelope",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node58.htm",
+      "supports": "Source, destination, tag, and communicator context define message selection.",
+      "page_checked": "\u00a74.2.3"
+    },
+    {
+      "title": "MPI 4.1, \u00a74.2.7 Blocking Send-Receive",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node62.htm",
+      "supports": "Combined exchange avoids cyclic send-first dependencies; buffer disjointness.",
+      "page_checked": "\u00a74.2.7"
+    },
+    {
+      "title": "MPI 4.1, \u00a74.5 Point-to-Point Semantics",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node68.htm",
+      "supports": "Qualified nonovertaking and nondeterministic matching boundaries.",
+      "page_checked": "\u00a74.5"
+    },
+    {
+      "title": "MPI 4.1, \u00a77.1 Collective Overview",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node114.htm",
+      "supports": "Local collective completion does not generally imply barrier synchronization.",
+      "page_checked": "\u00a77.1 completion and advice to users"
+    },
+    {
+      "title": "MPI 4.1, \u00a77.14 Correctness",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node172.htm",
+      "supports": "Collective ordering, overlap cycles, mixing point-to-point and collective operations.",
+      "page_checked": "\u00a77.14 examples"
+    },
+    {
+      "title": "MPI 4.1, \u00a710.6 Timers and Synchronization",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node262.htm",
+      "supports": "Wall-time seconds, fixed local origin, no required global clock agreement.",
+      "page_checked": "\u00a710.6"
+    },
+    {
+      "title": "MPI 4.1, \u00a716.2.1 Profiling Requirements",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node403.htm",
+      "supports": "PMPI alternate entry points and wrapper interception.",
+      "page_checked": "\u00a716.2.1"
+    },
+    {
+      "title": "MPI 4.1, \u00a716.2.4 Control of Profiling",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node406.htm",
+      "supports": "MPI_Pcontrol semantics are profiler-dependent; requested level conventions.",
+      "page_checked": "\u00a716.2.4"
+    },
+    {
+      "title": "MPI 4.1, \u00a715.6.1 File Consistency",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node383.htm",
+      "supports": "Conflicting accesses and synchronization/visibility boundaries.",
+      "page_checked": "\u00a715.6.1"
+    },
+    {
+      "title": "mpiP User Guide",
+      "url": "https://software.llnl.gov/mpiP/",
+      "supports": "Task-local statistical collection, linking/preloading, call-site attribution, units and report controls.",
+      "page_checked": "Using mpiP; mpiP Output; runtime flags; accessed 2026-10-28"
+    },
+    {
+      "title": "GDB: Multiple Inferiors",
+      "url": "https://sourceware.org/gdb/current/onlinedocs/gdb.html/Inferiors-Connections-and-Programs.html",
+      "supports": "An inferior represents program execution and is distinct from an OS PID.",
+      "page_checked": "\u00a74.9"
+    },
+    {
+      "title": "GDB: Multiple Threads",
+      "url": "https://sourceware.org/gdb/current/onlinedocs/gdb.html/Threads.html",
+      "supports": "Thread selection applies to controlled inferiors rather than automatic rank discovery.",
+      "page_checked": "\u00a74.10"
+    },
+    {
+      "title": "GDB: Choosing Modes",
+      "url": "https://sourceware.org/gdb/current/onlinedocs/gdb.html/Mode-Options.html",
+      "supports": "Initialization suppression and batch operation.",
+      "page_checked": "\u00a72.1.2"
+    },
+    {
+      "title": "Valgrind: Memcheck",
+      "url": "https://valgrind.org/docs/manual/mc-manual.html",
+      "supports": "Address/definedness checking, client requests, MPI-wrapper limits, XML-forced leak search and leak error classification.",
+      "page_checked": "\u00a7\u00a74.2,4.3,4.5,4.7,4.9; XML/leak option interaction verified"
+    },
+    {
+      "title": "Valgrind: Core Services",
+      "url": "https://valgrind.org/docs/manual/manual-core.html",
+      "supports": "Per-rank XML log naming, error exit codes, --vgdb=no and instrumentation effects.",
+      "page_checked": "\u00a7\u00a72.1,2.7; accessed 2026-10-28"
+    },
+    {
+      "title": "Open MPI v4 Parallel Debugging FAQ",
+      "url": "https://www.open-mpi.org/faq/?category=debugging",
+      "supports": "Separate debugger launch versus attach; optional build-dependent Memchecker support.",
+      "page_checked": "Questions 6,8\u201313; applies to v4.x and earlier"
+    },
+    {
+      "title": "RWTH: MUST MPI Runtime Correctness Analysis",
+      "url": "https://blog.rwth-aachen.de/itc/en/2022/09/05/must/",
+      "supports": "Marmot Umpire Scalable Tool name, runtime interception and error classes.",
+      "page_checked": "Application of MUST and Further Use Cases; 2022 official description"
+    },
+    {
+      "title": "Scalasca Official Description",
+      "url": "https://www.scalasca.org/",
+      "supports": "Parallel communication and synchronization performance analysis.",
+      "page_checked": "Homepage project description, accessed 2026-10-28"
+    },
+    {
+      "title": "TAU Official Description",
+      "url": "https://www.cs.uoregon.edu/research/tau/home.php",
+      "supports": "Instrumentation, sampling, profiling, tracing and visualization exports.",
+      "page_checked": "Homepage toolkit description, accessed 2026-10-28"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "p,r,s,N,c_r,w_r,v_r,t_r,g",
+      "first_section": "model",
+      "definition": "Rank count, rank indices, interior grid points per direction, useful compute time, dependency waiting, local communication service, local elapsed time, common additional exchange duration."
+    },
+    {
+      "symbol": "m,alpha,beta,cbar,cmax,eta_bal,T1,Tp,Sp,Ep,gamma,b,g_red",
+      "first_section": "costs",
+      "definition": "Message payload bytes, startup seconds, inverse bandwidth, mean/max compute, compute balance, one/p-rank elapsed time, speedup, efficiency, seconds per grid point, halo bytes/value, reduction seconds."
+    },
+    {
+      "symbol": "a_r,z_r,d_r,k,b_e",
+      "first_section": "metrics",
+      "definition": "Local start/end clocks, local duration, events per rank, bytes per event."
+    },
+    {
+      "symbol": "M,n_r,q_r",
+      "first_section": "systems",
+      "definition": "Global element count, owned count, first owned global index."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B tools/check_chapter_code.py --file <private chapter HTML> --report <private code-validation.json>",
+    "listings": 5,
+    "all_passed": true,
+    "manual_all_passed": true,
+    "report": "code-validation.json",
+    "checked_at_utc": "2026-10-28T12:54:53.560689+00:00",
+    "evidence_reuse": "Prose-only R1 repairs; five complete listing contracts and output blocks verified identical to formal evidence. No code, MPI, profiler, debugger, or Memcheck rerun."
+  },
+  "verification_environment": {
+    "os": "WSL Ubuntu24.04 on Windows",
+    "gcc": "13.3.0",
+    "mpi": "OpenMPI4.1.6",
+    "gdb": "15.1",
+    "valgrind": "3.22.0",
+    "mpi_transports": "self,tcp",
+    "pmix_gds": "hash",
+    "cuda_aware_mpi": false,
+    "core_dumps": false,
+    "external_attach_verified": false,
+    "vgdb_enabled": false,
+    "date": "2026-10-28"
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "REVISE",
+      "blocking": 2,
+      "major": 0,
+      "minor": 0,
+      "report": "work/reviews/ch28-r1.md",
+      "repairs": [
+        "B1: exact review replacement distinguishes slide percentage from division of rounded totals; printed rank-sum arithmetic remains unchanged.",
+        "B2: two public recording-reference workflow sentences replaced with actual recording durations."
+      ],
+      "resolution": "author repairs applied; independent round 2 pending"
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch28-r2.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    }
+  ],
+  "pending_review_round": 2
+}

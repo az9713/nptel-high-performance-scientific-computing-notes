@@ -1,0 +1,478 @@
+{
+  "chapter": 27,
+  "title": "Profiling and debugging serial codes: gprof, Valgrind and GDB",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "U3HNXAuVyQo",
+      "label": "W10L4",
+      "playlist_index": 61,
+      "duration_seconds": 1615
+    },
+    {
+      "video_id": "EFT7lXzkRHo",
+      "label": "W10L5",
+      "playlist_index": 62,
+      "duration_seconds": 1637
+    },
+    {
+      "video_id": "dICh15lNwPw",
+      "label": "W10L6",
+      "playlist_index": 63,
+      "duration_seconds": 886
+    }
+  ],
+  "frames_viewed": {
+    "U3HNXAuVyQo": [
+      "f0002",
+      "f0011",
+      "f0013",
+      "f0028",
+      "f0031",
+      "f0038",
+      "f0040",
+      "f0044",
+      "f0049"
+    ],
+    "EFT7lXzkRHo": [
+      "f0007",
+      "f0014",
+      "f0017",
+      "f0033",
+      "f0037",
+      "f0042",
+      "f0044",
+      "f0048",
+      "f0052"
+    ],
+    "dICh15lNwPw": [
+      "f0007",
+      "f0012",
+      "f0015",
+      "f0016",
+      "f0020",
+      "f0023",
+      "f0026",
+      "f0028"
+    ]
+  },
+  "source_uncertainties": [
+    "All three complete assigned machine transcripts were read; relevant original frames were viewed. Audio was not independently replayed, so no spoken-error allegations are made.",
+    "Section anchors derive from transcript segment times; frame samples represent15+30*(index-1) seconds.",
+    "W10L4 f0011 explicitly defines f as sequential; conflicting transcript wording is not attributed to speech or slide.",
+    "Historical gprof 4.12/3.12/0.01 seconds and percentages are rounded profile entries, not fresh laptop measurements.",
+    "W10L5 f0033 distinguishesD1 7.1% fromLLd near0%; chapter uses actual frame counts without alleging a spoken error.",
+    "The matrix/statistical/caller-cost constructions are original; no hardware counter, native speedup, core dump, attach or unrestricted target-support experiment is claimed.",
+    "Current online tool manuals were opened2026-10-28; installed versions are gprof2.42,Valgrind3.22.0,GDB15.1. All five final listing contracts passed their own fresh captured validation.",
+    "Only transposition is isolated in the small matrix listing; lecture blocking/tiling coverage remains conceptual.",
+    "R1 M1 repair: author reopened GNU gprof Sampling-Error.html \u00a76.1 on2026-10-28 and verified the threading/multithreaded-library boundary and glibc mcount warning. Serial entry-count validation does not establish OpenMP/pthreads count validity."
+  ],
+  "sections": [
+    {
+      "section_id": "model",
+      "section": "A program, an execution and a measurement are different objects",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Formal execution/numerical model and known installed platform.",
+      "research_extension": "Definitions and tool boundaries.",
+      "teaching_construction": "Boundary convention, first-sweep oracle and execution contract.",
+      "evidence_class": "definition"
+    },
+    {
+      "section_id": "benefit",
+      "section": "A time budget identifies valuable changes",
+      "video_id": "U3HNXAuVyQo",
+      "start": 38,
+      "end": 525,
+      "lecture_material": "Sequential/parallel/overhead model; Amdahl; optimization motivation.",
+      "research_extension": "None.",
+      "teaching_construction": "Benefit equation and copy-elimination budget.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section_id": "gprof",
+      "section": "gprof combines counted calls with sampled execution locations",
+      "video_id": "U3HNXAuVyQo",
+      "start": 525,
+      "end": 1132,
+      "lecture_material": "gprof -pg workflow; Laplace driver and measured flat profile.",
+      "research_extension": "GNU implementation/compiling/flat-profile semantics.",
+      "teaching_construction": "Bounded Jacobi source and counted-call checks.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section_id": "uncertainty",
+      "section": "A zero time entry can mean insufficient samples",
+      "video_id": "U3HNXAuVyQo",
+      "start": 1132,
+      "end": 1299,
+      "lecture_material": "4.12/3.12 sampled seconds;1000 calls;56.83/43.03 percentages; initialization and output near zero.",
+      "research_extension": "GNU sampling-error guidance.",
+      "teaching_construction": "Poisson/binomial model, zero-sample calculation, observer-cost analysis.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section_id": "callgraph",
+      "section": "Inclusive cost explains structure, but attribution has assumptions",
+      "video_id": "U3HNXAuVyQo",
+      "start": 1299,
+      "end": 1615,
+      "lecture_material": "main/compute/copy graph;self/children;limitations for short functions, libraries and threading.",
+      "research_extension": "Original gprof paper and GNU caller-cost assumption. GNU sampling-error manual \u00a76.1 threading boundary and glibc mcount warning.",
+      "teaching_construction": "Input-dependent caller counterexample.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section_id": "memory",
+      "section": "Memcheck tests executed memory operations",
+      "video_id": "EFT7lXzkRHo",
+      "start": 6,
+      "end": 653,
+      "lecture_material": "Valgrind suite;Memcheck;out-of-bounds five-int write and leak;overhead and reports.",
+      "research_extension": "Valgrind paper;Memcheck shadow state/leak definitions;Quick Start.",
+      "teaching_construction": "Bad/fixed bounded source with explicit status97.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section_id": "cache",
+      "section": "Cachegrind asks a memory-locality question",
+      "video_id": "EFT7lXzkRHo",
+      "start": 653,
+      "end": 1305,
+      "lecture_material": "512-square matrix;transpose/blocking;cache summaries;Laplace loop-order change.",
+      "research_extension": "Cachegrind cache-simulation model and event definitions.",
+      "teaching_construction": "96-square exact integer transpose equivalence and reports.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section_id": "events",
+      "section": "Callgrind counts work; Helgrind diagnoses ordering",
+      "video_id": "EFT7lXzkRHo",
+      "start": 1305,
+      "end": 1637,
+      "lecture_material": "Callgrind instruction annotation;Helgrind counter race;overhead/library caveats.",
+      "research_extension": "Callgrind,Helgrind,Valgrind core manuals.",
+      "teaching_construction": "Small pthread bad/fixed regression and status interpretation.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section_id": "gdb",
+      "section": "GDB stops at the state that can distinguish two explanations",
+      "video_id": "dICh15lNwPw",
+      "start": 6,
+      "end": 886,
+      "lecture_material": "GDB motivation,-g,launch/args/attach concepts;breakpoints,greeting memory,Laplace functions,next,watch/rwatch/awatch,backtrace,core/customization.",
+      "research_extension": "GDB manuals for actual command semantics and limits.",
+      "teaching_construction": "Batch2x2 wrong-factor watchpoint with numerical oracle;no attach or core generation.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section_id": "limits",
+      "section": "What the combined evidence establishes",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Tool overhead,brief-program and library caveats preserved.",
+      "research_extension": "Combined manual limits.",
+      "teaching_construction": "Explicit finite evidence boundaries.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section_id": "exercises",
+      "section": "Six exercises with reasoned solutions",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "All three recordings motivate problems.",
+      "research_extension": "Caller-cost and event semantics.",
+      "teaching_construction": "Exactly six fully reasoned solutions.",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "Graham, Kessler and McKusick (1982), gprof: a Call Graph Execution Profiler",
+      "url": "https://www.cs.umd.edu/class/fall2019/cmsc714/readings/Graham-gprof.pdf",
+      "page_checked": "pp.120\u2013122, \u00a7\u00a72\u20133",
+      "supports": "Dynamic call graph, entry counts, sampled locations and propagated costs.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "GNU gprof: implementation",
+      "url": "https://sourceware.org/binutils/docs/gprof/Implementation.html",
+      "page_checked": "\u00a79.1",
+      "supports": "Entry instrumentation and call-arc accounting.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "GNU gprof: compiling",
+      "url": "https://sourceware.org/binutils/docs/gprof/Compiling.html",
+      "page_checked": "\u00a72.1",
+      "supports": "-pg during compilation and linking.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "GNU gprof: flat profile",
+      "url": "https://sourceware.org/binutils/docs/gprof/Flat-Profile.html",
+      "page_checked": "\u00a75.1",
+      "supports": "Self/cumulative time, calls and sampling period.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "GNU gprof: sampling error",
+      "url": "https://sourceware.org/binutils/docs/gprof/Sampling-Error.html",
+      "page_checked": "\u00a76.1, including paragraph on deterministic single-thread counts and thread-safety",
+      "supports": "Square-root sample uncertainty; counted versus sampled data; thread-safe counting requirement for threaded programs/libraries and glibc mcount warning.",
+      "accessed": "2026-10-28",
+      "opened": true,
+      "rechecked_at_utc": "2026-10-28T12:59:06.496Z"
+    },
+    {
+      "title": "GNU gprof: call graph",
+      "url": "https://sourceware.org/binutils/docs/gprof/Call-Graph.html",
+      "page_checked": "\u00a75.2",
+      "supports": "Self and children attribution.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "GNU gprof: estimating children times",
+      "url": "https://sourceware.org/binutils/docs/gprof/Assumptions.html",
+      "page_checked": "\u00a76.2",
+      "supports": "Caller-independent average callee time assumption.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "Nethercote and Seward (2007), Valgrind: A Framework for Heavyweight Dynamic Binary Instrumentation",
+      "url": "https://nnethercote.github.io/pubs/valgrind2007.pdf",
+      "page_checked": "\u00a7\u00a71\u20133",
+      "supports": "Dynamic instrumentation, shadow values and additional execution/state.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "Valgrind Memcheck manual",
+      "url": "https://valgrind.org/docs/manual/mc-manual.html",
+      "page_checked": "\u00a7\u00a74.2,4.3,4.5",
+      "supports": "Addressability/definedness, illegal writes, leak categories and leak-error options.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "Valgrind Quick Start",
+      "url": "https://valgrind.org/docs/manual/quick-start.html",
+      "page_checked": "\u00a7\u00a72\u20134",
+      "supports": "Debug information and investigating errors in report order.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "Valgrind Cachegrind manual",
+      "url": "https://valgrind.org/docs/manual/cg-manual.html",
+      "page_checked": "\u00a7\u00a75.2.11,5.3,5.8",
+      "supports": "Cache-simulation switch, counted events and model limitations.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "Valgrind Callgrind manual",
+      "url": "https://valgrind.org/docs/manual/cl-manual.html",
+      "page_checked": "\u00a7\u00a76.1,6.6",
+      "supports": "Instruction/call profiling and inclusive annotation.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "Valgrind Helgrind manual",
+      "url": "https://valgrind.org/docs/manual/hg-manual.html",
+      "page_checked": "\u00a7\u00a77.1\u20137.4",
+      "supports": "POSIX-thread synchronization, lock-order and race diagnostics.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "Valgrind core manual",
+      "url": "https://valgrind.org/docs/manual/manual-core.html",
+      "page_checked": "\u00a7\u00a72.7.2\u20132.7.3",
+      "supports": "Logs, --error-exitcode semantics and --vgdb=no debugger-bridge disabling.",
+      "accessed": "2026-10-28",
+      "opened": true,
+      "rechecked_at_utc": "2026-10-28T12:59:06.498Z"
+    },
+    {
+      "title": "GDB: debugging optimized code",
+      "url": "https://sourceware.org/gdb/current/onlinedocs/gdb.html/Optimized-Code.html",
+      "page_checked": "\u00a711",
+      "supports": "Optimization changes stepping and variable availability.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "GDB: setting breakpoints",
+      "url": "https://sourceware.org/gdb/current/onlinedocs/gdb.html/Set-Breaks.html",
+      "page_checked": "\u00a75.1.1",
+      "supports": "Function and line breakpoints and conditions.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "GDB: examining memory",
+      "url": "https://sourceware.org/gdb/current/onlinedocs/gdb.html/Memory.html",
+      "page_checked": "\u00a710.6",
+      "supports": "x command count, display format and unit size.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "GDB: continuing and stepping",
+      "url": "https://sourceware.org/gdb/current/onlinedocs/gdb.html/Continuing-and-Stepping.html",
+      "page_checked": "\u00a75.2",
+      "supports": "next,step,finish,continue execution controls.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "GDB: watchpoints",
+      "url": "https://sourceware.org/gdb/current/onlinedocs/gdb.html/Set-Watchpoints.html",
+      "page_checked": "\u00a75.1.2",
+      "supports": "watch/rwatch/awatch and hardware/software constraints.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "GDB: backtraces",
+      "url": "https://sourceware.org/gdb/current/onlinedocs/gdb.html/Backtrace.html",
+      "page_checked": "\u00a78.2",
+      "supports": "Current stack frames and active callers.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "GDB: mode options",
+      "url": "https://sourceware.org/gdb/current/onlinedocs/gdb.html/Mode-Options.html",
+      "page_checked": "\u00a72.1.2",
+      "supports": "Batch, -nx and debugger versus inferior exit behavior.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "GDB: command history",
+      "url": "https://sourceware.org/gdb/current/onlinedocs/gdb.html/Command-History.html",
+      "page_checked": "\u00a722.3",
+      "supports": "History-saving control.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "GDB: auto-loading",
+      "url": "https://sourceware.org/gdb/current/onlinedocs/gdb.html/Auto_002dloading.html",
+      "page_checked": "\u00a722.8",
+      "supports": "Disable associated-file loading with -iex before executable processing.",
+      "accessed": "2026-10-28",
+      "opened": true
+    },
+    {
+      "title": "C11 committee draft N1570 (2011)",
+      "url": "https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf",
+      "page_checked": "\u00a76.5.6 paragraph8;\u00a75.1.2.4 paragraph25",
+      "supports": "One-past pointers must not be dereferenced; conflicting non-atomic accesses lacking happens-before ordering cause undefined behavior.",
+      "accessed": "2026-10-28",
+      "opened": true
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "N,u,unew,k,r_k,h_g",
+      "first_section": "model",
+      "definition": "Interior grid width;two grids;iteration;maximum update norm;unit-square spacing."
+    },
+    {
+      "symbol": "p,T_1,T_p,S_p,E_p,sigma,varphi,kappa,f",
+      "first_section": "benefit",
+      "definition": "Processing elements;wall times;speedup;efficiency;sequential/parallel work times;parallel overhead;sequential fraction."
+    },
+    {
+      "symbol": "a,q,G,T_new,T_old",
+      "first_section": "benefit",
+      "definition": "Affected time fraction;local speedup;overall gain;modified and baseline times."
+    },
+    {
+      "symbol": "Delta,m,t_hat,M_s,theta,mu,C_e,c_e",
+      "first_section": "uncertainty",
+      "definition": "Sample period;sample count;self-time estimate;total samples;time fraction;Poisson mean;instrumented entries;cost per entry."
+    },
+    {
+      "symbol": "M,A,B,BT,C",
+      "first_section": "cache",
+      "definition": "Matrix dimension;left/right/transposed-right/result matrices."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B nptel-high-performance-scientific-computing-notes/tools/check_chapter_code.py --file work/ch27-sol/chapter-27-serial-profiling-debugging-gprof-valgrind-gdb.html --report work/ch27-sol/code-validation.json",
+    "listings": 5,
+    "all_passed": true,
+    "checked_at_utc": "2026-10-28T12:46:17.097119+00:00",
+    "report": "code-validation.json",
+    "fingerprint_sha256": "984714a2d6a0054ec98fb527bd641e266f2bfe11034253dfa5a6cccba7bcc410",
+    "scope": "Fresh selected private chapter;3 exact diagnostic-summary contracts and2 variable profile outputs checked by successful return with internal structural/numerical assertions."
+  },
+  "authoring_checks": {
+    "complete_transcripts_read": 3,
+    "original_frames_viewed": 26,
+    "prose_words_approx": 8039,
+    "solutions": 6,
+    "exemplars_read": [
+      "work/exemplar/turbulence-ch05-body.html",
+      "work/exemplar/turbulence-ch05.meta.json",
+      "work/remaining-release/references/stanford-aa203-lecture07.html",
+      "built chapter12"
+    ]
+  },
+  "execution_evidence": {
+    "manual_capture": "manual-captures.json",
+    "formal_capture": "formal-driver-capture.json",
+    "retained_failure": "manual-captures-attempt1.json and manual-driver-attempt1.json preserve failed startup status/command/timing. initial-fifo-failure-observed.txt saves the exact tool readback of the original bad.log before that path was overwritten by a successful retry. Final commands use --vgdb=no.",
+    "tool_details": "../ch26-sol/chapter27-tools-readonly.json",
+    "core_dumps": "disabled in helper,manual prefix and all intentional-fault run commands",
+    "gdb": "-nx -batch;auto-load off;history save off;launch only;no attach/core generation",
+    "sample_profile": "gprof0.30s jacobi_step/0.10s copy_grid;1200 calls each;sampled timing is variable",
+    "cache_result": "Final displayed manual capture4794 strided D1 misses versus5910 transposed including preparation; no native speedup claim",
+    "correctness_limits": "Finite tests and expected diagnostics only; no universal memory-safety or numerical-convergence proof",
+    "prose_repair_evidence": "R1 repairs are prose/source-only; prior final execution evidence remains dated2026-10-28T12:46:17.097119+00:00. Full fingerprint rechecked without executing listings."
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "REVISE",
+      "blocking": 1,
+      "major": 1,
+      "minor": 1,
+      "report": "work/reviews/ch27-r1.md",
+      "reviewed_html_sha256": "d4730def36ea83e7ed6d8062611de252f56848e7770c0b67b85c219c644f515c",
+      "reviewed_meta_sha256": "29744a709e4577bc1900ebf942ba087656d1ba3686a549cdead0f179263bcfb2",
+      "repairs_applied": [
+        "B1",
+        "M1",
+        "m1"
+      ],
+      "resolution": "Author repairs applied; independent round2 verdict pending. Original round1 verdict preserved."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch27-r2.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    }
+  ]
+}

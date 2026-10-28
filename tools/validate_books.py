@@ -41,6 +41,13 @@ def seconds(value):
     return None
 
 
+def has_private_local_path(text):
+    """Find local path tokens without treating a web URL's /users/ segment as local."""
+    return bool(re.search(
+        r'(?:[A-Za-z]:[\\/]Users[\\/][^\\/\s]+|/mnt/[a-z]/Users|file:///|(?<![A-Za-z0-9_./%~-])/Users/[^/\s]+)',
+        text, re.I))
+
+
 def static_checks(repo):
     files = sorted(repo.glob('*.html'))
     failures = []
@@ -60,7 +67,7 @@ def static_checks(repo):
         duplicates = [key for key, count in collections.Counter(document.ids).items() if count > 1]
         if duplicates:
             failures.append(f'{path.name}: duplicate IDs: {duplicates}')
-        if re.search(r'(?:[A-Za-z]:[\\/]Users[\\/][^\\/\s]+|/mnt/[a-z]/Users|file:///|/Users/[^/\s]+)', text, re.I):
+        if has_private_local_path(text):
             failures.append(f'{path.name}: private local path found')
         if path.name.startswith('chapter-'):
             try:

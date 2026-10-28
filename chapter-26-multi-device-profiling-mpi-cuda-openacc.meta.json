@@ -1,0 +1,450 @@
+{
+  "chapter": 26,
+  "title": "Multi-device programs: profiling-driven OpenACC, MPI with CUDA, and MPI with OpenACC",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "qgQuj0ZbdFc",
+      "label": "W10L1",
+      "playlist_index": 58,
+      "duration_seconds": 1376
+    },
+    {
+      "video_id": "fWt2N3mhbfU",
+      "label": "W10L2",
+      "playlist_index": 59,
+      "duration_seconds": 1493
+    },
+    {
+      "video_id": "3ga9YmuxB5o",
+      "label": "W10L3",
+      "playlist_index": 60,
+      "duration_seconds": 929
+    }
+  ],
+  "frames_viewed": {
+    "qgQuj0ZbdFc": [
+      "f0004",
+      "f0008",
+      "f0010",
+      "f0016",
+      "f0018",
+      "f0020",
+      "f0024",
+      "f0027",
+      "f0031",
+      "f0038",
+      "f0041",
+      "f0043",
+      "f0044"
+    ],
+    "fWt2N3mhbfU": [
+      "f0007",
+      "f0010",
+      "f0013",
+      "f0017",
+      "f0022",
+      "f0029",
+      "f0033",
+      "f0036",
+      "f0039",
+      "f0046"
+    ],
+    "3ga9YmuxB5o": [
+      "f0004",
+      "f0007",
+      "f0009",
+      "f0012",
+      "f0015",
+      "f0019",
+      "f0022",
+      "f0024",
+      "f0027"
+    ]
+  },
+  "source_uncertainties": [
+    "No original audio replay was performed; public corrections concern visible source frames, not unverified speech.",
+    "One physical GPU only. No multi-GPU speedup, peer transfer, cross-node scaling, GPU-aware MPI operation or asynchronous-overlap experiment was performed.",
+    "Open MPI 4.1.6 reports built_with_cuda_support false; every executed MPI buffer is host memory.",
+    "The source profiling slide shows phase times summing to40.53s alongside a39.43s total; its intervals do not resolve the inconsistency.",
+    "The teaching unsigned mixer is not a certified Monte Carlo generator; no independence or confidence-interval guarantee is claimed."
+  ],
+  "lecture_corrections": [
+    {
+      "video_id": "qgQuj0ZbdFc",
+      "frames": [
+        "f0031",
+        "f0038"
+      ],
+      "finding": "Nested range percentages do not establish disjoint wall-time fractions; displayed phase19.04s+21.49s does not equal total39.43s."
+    },
+    {
+      "video_id": "fWt2N3mhbfU",
+      "frames": [
+        "f0007",
+        "f0017"
+      ],
+      "finding": "Fixed CURAND initialization seed1234 and sequenceidx omit rank; equal per-rank work and geometry repeat streams."
+    },
+    {
+      "video_id": "fWt2N3mhbfU",
+      "frames": [
+        "f0033",
+        "f0036",
+        "f0046"
+      ],
+      "finding": "Kernel includes left endpoint and host positive endpoint correction counts it once extra. h*sum g(rank/p) predicts shown two-/four-rank outputs. Source display has3.1415933736 and3.1415940061; machine transcript3.1459 is not a reliable displayed value."
+    },
+    {
+      "video_id": "3ga9YmuxB5o",
+      "frames": [
+        "f0004",
+        "f0007",
+        "f0024"
+      ],
+      "finding": "Quarter-disk predicate differs from rational-integral comment; rand() is not a portable offload generator; trapezoid interior loop beginning1 is correctly weighted."
+    }
+  ],
+  "sections": [
+    {
+      "section": "Processes, devices, values, and the running case",
+      "id": "model",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Formal objects reconstructed for chapter",
+      "research_extension": "Explicit value/rank/location/version/completion model",
+      "teaching_construction": "Original definitions, reasoning, checks and limitations",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "Choose the work before choosing the directive W10L1 0:38",
+      "id": "profile",
+      "video_id": "qgQuj0ZbdFc",
+      "start": 38,
+      "end": 1147,
+      "lecture_material": "Compiler feedback; profiling; Nsight; NVTX; hotspot iteration",
+      "research_extension": "Primary sources inline and in references; current installed capabilities inspected read-only",
+      "teaching_construction": "Original definitions, reasoning, checks and limitations",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Prove independence, then measure the generated work W10L1 19:07",
+      "id": "dependence",
+      "video_id": "qgQuj0ZbdFc",
+      "start": 1147,
+      "end": 1376,
+      "lecture_material": "Independence analysis and generated OpenACC work",
+      "research_extension": "Primary sources inline and in references; current installed capabilities inspected read-only",
+      "teaching_construction": "128x128 serial/OpenACC comparison and real NVTX trace",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "MPI with CUDA: partition samples, select devices, stage results W10L2 1:11",
+      "id": "cuda-mpi",
+      "video_id": "fWt2N3mhbfU",
+      "start": 71,
+      "end": 914,
+      "lecture_material": "MPI CUDA Monte Carlo; rank-local kernels; device synchronization; compile/link workflow",
+      "research_extension": "Primary sources inline and in references; current installed capabilities inspected read-only",
+      "teaching_construction": "Global-ID deterministic sampling and host-staging ownership",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Trapezoids: endpoint weights before parallel reductions W10L2 15:14",
+      "id": "trapezoid",
+      "video_id": "fWt2N3mhbfU",
+      "start": 914,
+      "end": 1493,
+      "lecture_material": "MPI CUDA trapezoid method and visible endpoint/source-output audit",
+      "research_extension": "Primary sources inline and in references; current installed capabilities inspected read-only",
+      "teaching_construction": "Panel formula, endpoint bias derivation, Python audit, complete CUDA listing",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "MPI with OpenACC: shorter source, unchanged obligations W10L3 1:49",
+      "id": "mpi-openacc",
+      "video_id": "3ga9YmuxB5o",
+      "start": 109,
+      "end": 822,
+      "lecture_material": "MPI OpenACC Monte Carlo and trapezoids; compilation and reductions",
+      "research_extension": "Primary sources inline and in references; current installed capabilities inspected read-only",
+      "teaching_construction": "Equivalent full-payload OpenACC checks",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "From independent integrals to device-resident halo exchange W10L3 13:42",
+      "id": "halos",
+      "video_id": "3ga9YmuxB5o",
+      "start": 822,
+      "end": 929,
+      "lecture_material": "Distributed accelerator context; halo example is original extension",
+      "research_extension": "Primary sources inline and in references; current installed capabilities inspected read-only",
+      "teaching_construction": "32x32 two-rank staged Jacobi with complete serial comparison",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "What the checks establish, and what still needs a machine",
+      "id": "limits",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Evidence limits",
+      "research_extension": "Evidence and applicability boundaries",
+      "teaching_construction": "Original definitions, reasoning, checks and limitations",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Six worked exercises",
+      "id": "exercises",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Six original exercises",
+      "research_extension": "Evidence and applicability boundaries",
+      "teaching_construction": "Original definitions, reasoning, checks and limitations",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Recordings and primary sources",
+      "id": "primary-sources",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Source ledger",
+      "research_extension": "Evidence and applicability boundaries",
+      "teaching_construction": "Original definitions, reasoning, checks and limitations",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "NVIDIA HPC Compilers User\u2019s Guide 26.9",
+      "url": "https://docs.nvidia.com/hpc-sdk/compilers/hpc-compilers-user-guide/index.html",
+      "supports": "Compiler names and compile-time optimization feedback, distinct from runtime profiling.",
+      "page_checked": "Table 1; \u00a73.2.2 -Minfo."
+    },
+    {
+      "title": "NVIDIA Nsight Systems User Guide",
+      "url": "https://docs.nvidia.com/nsight-systems/UserGuide/index.html",
+      "supports": "Focused profiling, NVTX-labelled regions, collection and timeline scope.",
+      "page_checked": "Preparing Your Application for Profiling; Marking and Labeling Regions; Profiling from the CLI."
+    },
+    {
+      "title": "NVTX documentation",
+      "url": "https://nvidia.github.io/NVTX/",
+      "supports": "Annotations give tools context and normally do nothing without a consuming tool.",
+      "page_checked": "What does NVTX do?."
+    },
+    {
+      "title": "CUDA Runtime API: Device Management",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html",
+      "supports": "Device selection and host-side completion of preceding device tasks.",
+      "page_checked": "cudaSetDevice; cudaDeviceSynchronize."
+    },
+    {
+      "title": "MPI 4.1 \u00a77.9.1 Reduce",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node130.htm",
+      "supports": "Reduction input/output semantics and permitted reassociation affecting floating-point results.",
+      "page_checked": "\u00a77.9.1 including advice to users."
+    },
+    {
+      "title": "Open MPI CUDA documentation",
+      "url": "https://docs.open-mpi.org/en/v5.0.x/tuning-apps/networking/cuda.html",
+      "supports": "CUDA-aware support is implementation capability; ompi_info query identifies build support. Actual installed version was inspected separately.",
+      "page_checked": "\u00a711.2.6.1\u20133 and \u00a711.2.6.5."
+    },
+    {
+      "title": "OpenACC 3.3 specification, November 2022",
+      "url": "https://www.openacc.org/sites/default/files/inline-images/Specification/OpenACC-3.3-final.pdf",
+      "supports": "Data mappings, host_data use_device address exposure, update and wait semantics.",
+      "page_checked": "\u00a7\u00a72.6\u20132.8 pp.38\u201356; \u00a72.14.4 pp.80\u201382; \u00a72.16 pp.87\u201390."
+    },
+    {
+      "title": "GCC 13.3 NVIDIA PTX target options",
+      "url": "https://gcc.gnu.org/onlinedocs/gcc-13.3.0/gcc/Nvidia-PTX-Options.html",
+      "supports": "sm_80 is a supported GCC13.3 PTX target architecture.",
+      "page_checked": "\u00a73.19.35 -march."
+    },
+    {
+      "title": "Salmon, Moraes, Dror and Shaw (2011), Parallel Random Numbers: As Easy as 1, 2, 3",
+      "url": "https://www.thesalmons.org/john/random123/papers/random123sc11.pdf",
+      "supports": "Counter/key organization of parallel pseudorandom generation; does not certify the teaching mixer.",
+      "page_checked": "Abstract and \u00a72."
+    },
+    {
+      "title": "MPI 4.1 \u00a74.2.7 Blocking Send-Receive",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node62.htm",
+      "supports": "Combined blocking send/receive semantics, avoidance of cyclic shift dependencies, and disjoint buffers.",
+      "page_checked": "\u00a74.2.7."
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "p",
+      "first_section": "model",
+      "definition": "Number of MPI processes"
+    },
+    {
+      "symbol": "r",
+      "first_section": "model",
+      "definition": "Rank within a communicator"
+    },
+    {
+      "symbol": "H_r(v,k)",
+      "first_section": "model",
+      "definition": "Rank-local host storage with versionk of logical valuev"
+    },
+    {
+      "symbol": "G_{r,d}(v,k)",
+      "first_section": "model",
+      "definition": "Rank-local device storage on visible ordinald, versionk"
+    },
+    {
+      "symbol": "N",
+      "first_section": "model",
+      "definition": "Interior grid points per coordinate"
+    },
+    {
+      "symbol": "h_g",
+      "first_section": "model",
+      "definition": "Grid spacing1/(N+1)"
+    },
+    {
+      "symbol": "u,unew",
+      "first_section": "model",
+      "definition": "Old and new Jacobi grid allocations"
+    },
+    {
+      "symbol": "delta_k",
+      "first_section": "model",
+      "definition": "Maximum absolute update at iterationk"
+    },
+    {
+      "symbol": "n",
+      "first_section": "model",
+      "definition": "Global integration sample or panel count"
+    },
+    {
+      "symbol": "g(x)",
+      "first_section": "model",
+      "definition": "Rational integrand4/(1+x*x)"
+    },
+    {
+      "symbol": "f",
+      "first_section": "profile",
+      "definition": "Unaffected serial baseline fraction"
+    },
+    {
+      "symbol": "a",
+      "first_section": "profile",
+      "definition": "Speed factor for accelerated fraction"
+    },
+    {
+      "symbol": "t_o",
+      "first_section": "profile",
+      "definition": "New overhead in seconds"
+    },
+    {
+      "symbol": "T_1",
+      "first_section": "profile",
+      "definition": "Serial baseline elapsed seconds"
+    },
+    {
+      "symbol": "S",
+      "first_section": "profile",
+      "definition": "Baseline/new elapsed-time ratio"
+    },
+    {
+      "symbol": "Z_i",
+      "first_section": "cuda-mpi",
+      "definition": "Quarter-disk sample indicator"
+    },
+    {
+      "symbol": "q",
+      "first_section": "cuda-mpi",
+      "definition": "Indicator expectationpi/4 under independent uniform model"
+    },
+    {
+      "symbol": "a_r,b_r",
+      "first_section": "cuda-mpi",
+      "definition": "Global half-open sample/panel ownership bounds"
+    },
+    {
+      "symbol": "mathcal T_n",
+      "first_section": "trapezoid",
+      "definition": "Composite trapezoidal estimate"
+    },
+    {
+      "symbol": "alpha,beta",
+      "first_section": "halos",
+      "definition": "Latency seconds; inverse bandwidth seconds/byte"
+    },
+    {
+      "symbol": "t_c,t_s,t_r",
+      "first_section": "halos",
+      "definition": "Local compute, staging, and reduction duration seconds"
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B final_checker.py",
+    "listings": 5,
+    "all_passed": true,
+    "status": "passed; supervised formal5/5 completed; earlier interrupted2/5 retained separately",
+    "manual_checks": {
+      "listings": 5,
+      "all_passed": true,
+      "capture_file": "manual-captures.json"
+    },
+    "interrupted_formal_checks": {
+      "listings_passed": 2,
+      "total_listings": 5,
+      "capture_file": "checker-raw-captures.json",
+      "process_state": "Confirmed absent in read-only process inventory after Node timeout/reset; no final official report was written"
+    },
+    "fingerprint_sha256": "9767d4940c4fab0550073bc5500952e682c1a93495005000d526a2211c283c65",
+    "checked_at_utc": "2026-10-28T12:42:23.357305+00:00",
+    "working_directory": "private chapter work directory",
+    "supervised_formal_checks": {
+      "listings_passed": 5,
+      "total_listings": 5,
+      "report": "code-validation.json",
+      "state_file": "final-checker-state.json",
+      "capture_file": "checker-final-raw-captures.json",
+      "outer_exit_code": 0
+    }
+  },
+  "execution_evidence": {
+    "manual_capture_file": "manual-captures.json",
+    "raw_final_checker": "checker-final-raw-captures.json",
+    "nsight_report": "profile26.nsys-rep",
+    "nsight_sqlite": "profile26.sqlite",
+    "nsight_summary": "nsight-stats.json",
+    "transport": "Open MPI self,tcp; workspace temp/home/cache; PMIx hash; one physical GPU shared bytwo ranks",
+    "warnings": "Unsupported debugger_attach_fifo errno95; GCC vector_length and linker relocation warnings retained",
+    "timing_policy": "Three unprofiled captures plus separately identified profiled capture; final checker timing is a new validation run and not folded into manual sample ranges"
+  },
+  "references_accessed_date": "2026-10-28",
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch26-r1.md",
+      "release_gate_at_review": "Five manual passes and two interrupted formal results; complete formal validation and full R2 required before release."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch26-r2.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    }
+  ]
+}

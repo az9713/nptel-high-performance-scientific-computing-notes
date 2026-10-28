@@ -1,0 +1,387 @@
+{
+  "chapter": 30,
+  "title": "Batch schedulers and scientific visualization",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions; complete assigned transcripts read. Speech not independently audio-verified.",
+  "recordings": [
+    {
+      "video_id": "TwuO7a5KvS8",
+      "label": "W11L5",
+      "playlist_index": 68,
+      "duration_seconds": 984
+    },
+    {
+      "video_id": "VBnF4ZQaQtY",
+      "label": "W11L6",
+      "playlist_index": 69,
+      "duration_seconds": 1243
+    }
+  ],
+  "frames_viewed": {
+    "TwuO7a5KvS8": [
+      "f0003",
+      "f0006",
+      "f0010",
+      "f0013",
+      "f0016",
+      "f0019",
+      "f0023",
+      "f0029"
+    ],
+    "VBnF4ZQaQtY": [
+      "f0003",
+      "f0009",
+      "f0014",
+      "f0019",
+      "f0023",
+      "f0026",
+      "f0029",
+      "f0033",
+      "f0037",
+      "f0039"
+    ]
+  },
+  "source_uncertainties": [
+    "No actual Slurm/PBS commands or services were available. Both cluster scripts are explicitly unsubmitted templates with a hypothetical executable.",
+    "No ParaView, pvpython, pvbatch, VisIt or VTK library was installed in the probed WSL environment. The checked parser accepts only the generated header; actual VTK-reader interoperability is untested.",
+    "Lecture policy/comparison percentages and unnamed 30%/25%/20% case-study changes have no reproducible baseline in inspected sources and are excluded from estimates.",
+    "No independent audio verification. Command-name discrepancies in automatic transcription were reconciled with original frames and official documentation; no allegation of a speech error is made.",
+    "The actual Windows Matplotlib artifact render took 38.63 seconds including import/font-cache setup, separate from the sub-second WSL educational listings."
+  ],
+  "sections": [
+    {
+      "section": "model",
+      "video_id": null,
+      "start": 0,
+      "end": 0,
+      "lecture_material": "Formal objects and running case",
+      "research_extension": "resource vocabulary",
+      "teaching_construction": "heat case and pipeline split",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "shared",
+      "video_id": "TwuO7a5KvS8",
+      "start": 6,
+      "end": 136,
+      "lecture_material": "shared resources and fairness",
+      "research_extension": "Slurm resource terms",
+      "teaching_construction": "request/memory arithmetic",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "slurm",
+      "video_id": "TwuO7a5KvS8",
+      "start": 136,
+      "end": 365,
+      "lecture_material": "deployment context; submission and monitoring",
+      "research_extension": "commands and exit semantics",
+      "teaching_construction": "unsubmitted template and failure contract",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "policy",
+      "video_id": "TwuO7a5KvS8",
+      "start": 365,
+      "end": 490,
+      "lecture_material": "fair share, dependencies, checkpointing and arrays",
+      "research_extension": "backfill and priority documentation",
+      "teaching_construction": "finite non-delay model",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "pbs",
+      "video_id": "TwuO7a5KvS8",
+      "start": 490,
+      "end": 984,
+      "lecture_material": "PBS resources, arrays, comparison, hybrid systems and optimization",
+      "research_extension": "OpenPBS manuals",
+      "teaching_construction": "comparison evidence table and workflow integrity",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "visualization",
+      "video_id": "VBnF4ZQaQtY",
+      "start": 6,
+      "end": 531,
+      "lecture_material": "purposes, data domains, modular software, ParaView/VTK",
+      "research_extension": "typed datasets and rendering concepts",
+      "teaching_construction": "storage and sampling examples",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "pipeline",
+      "video_id": "VBnF4ZQaQtY",
+      "start": 531,
+      "end": 1089,
+      "lecture_material": "client/data/render architecture; interface, filters, annotation and probes",
+      "research_extension": "ParaView filters and remote/parallel documentation",
+      "teaching_construction": "image payload arithmetic; partition-neighbor checks",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "encoding",
+      "video_id": "VBnF4ZQaQtY",
+      "start": 1089,
+      "end": 1243,
+      "lecture_material": "classic VTK and scientific input formats",
+      "research_extension": "legacy geometry, ordering and attributes",
+      "teaching_construction": "bijection, marker and association tests",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "checks",
+      "video_id": null,
+      "start": 0,
+      "end": 0,
+      "lecture_material": "",
+      "research_extension": "Matplotlib normalization/map/shading",
+      "teaching_construction": "Jacobi barrier bound; checked writer and rendered figure",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "limits",
+      "video_id": null,
+      "start": 0,
+      "end": 0,
+      "lecture_material": "",
+      "research_extension": "",
+      "teaching_construction": "scope of actual verification",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "SchedMD Quick Start User Guide",
+      "url": "https://slurm.schedmd.com/quickstart.html",
+      "supports": "submission, launching, monitoring and cancellation roles",
+      "page_checked": "Overview and command list",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "SchedMD sbatch",
+      "url": "https://slurm.schedmd.com/sbatch.html",
+      "supports": "resource directives, CPU/task distinction and afterok dependency semantics",
+      "page_checked": "Description; --nodes, --ntasks-per-node, --cpus-per-task, --mem, --time, --dependency",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "SchedMD Multifactor Priority Plugin",
+      "url": "https://slurm.schedmd.com/priority_multifactor.html",
+      "supports": "configurable factors, weights and priority constraints",
+      "page_checked": "Multifactor Factors; Configuration",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "SchedMD Scheduling Configuration Guide",
+      "url": "https://slurm.schedmd.com/sched_config.html",
+      "supports": "non-delaying backfill and importance of declared time limits",
+      "page_checked": "Backfill Scheduling",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "SchedMD Job Exit Codes",
+      "url": "https://slurm.schedmd.com/job_exit_code.html",
+      "supports": "batch script exit versus step exits and derived exit",
+      "page_checked": "Job Exit Codes; Job Step Exit Codes; Derived Exit Code",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "SchedMD FAQ",
+      "url": "https://slurm.schedmd.com/faq.html",
+      "supports": "killed-job and requeue distinctions; resources and operational configuration",
+      "page_checked": "Killed Jobs; Managing Jobs",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenPBS qsub manual",
+      "url": "https://raw.githubusercontent.com/openpbs/openpbs/master/doc/man1/qsub.1B",
+      "supports": "submission, select chunks and place=scatter",
+      "page_checked": "Description; -l; selection and placement statements",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenPBS pbs_resources manual",
+      "url": "https://raw.githubusercontent.com/openpbs/openpbs/master/doc/man1/pbs_resources.7B",
+      "supports": "ncpus/mpiprocs/ompthreads and per-chunk resources",
+      "page_checked": "Resources Built Into PBS; ncpus, mpiprocs, ompthreads",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenPBS qstat manual",
+      "url": "https://raw.githubusercontent.com/openpbs/openpbs/master/doc/man1/qstat.1B",
+      "supports": "status command and display formats",
+      "page_checked": "Description; Display Formats",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "OpenPBS qdel manual",
+      "url": "https://raw.githubusercontent.com/openpbs/openpbs/master/doc/man1/qdel.1B",
+      "supports": "deletion of queued/running jobs",
+      "page_checked": "Description; Usage",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "ParaView filtering data",
+      "url": "https://docs.paraview.org/en/latest/UsersGuide/filteringData.html",
+      "supports": "typed inputs and outputs in pipelines",
+      "page_checked": "6.1 Understanding filters",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "ParaView remote and parallel visualization",
+      "url": "https://docs.paraview.org/en/latest/ReferenceManual/parallelDataVisualization.html",
+      "supports": "remote/parallel distinction; geometry versus image delivery",
+      "page_checked": "8 opening; 8.1 Understanding remote processing",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "VTK Simple Legacy Formats",
+      "url": "https://docs.vtk.org/en/latest/vtk_file_formats/vtk_legacy_file_format.html",
+      "supports": "structured grid geometry, x-fastest order, point/cell scalar association",
+      "page_checked": "Dataset Format; Dataset Attribute Format; Scalars",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "Matplotlib Colormap normalization",
+      "url": "https://matplotlib.org/stable/users/explain/colors/colormapnorms.html",
+      "supports": "normalization separate from scalar-to-color map",
+      "page_checked": "opening; Normalize",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "Matplotlib Choosing Colormaps",
+      "url": "https://matplotlib.org/stable/users/explain/colors/colormaps.html",
+      "supports": "sequential maps and orderly lightness",
+      "page_checked": "Overview; Classes of colormaps",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "Matplotlib pcolormesh API",
+      "url": "https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.pcolormesh.html",
+      "supports": "nearest shading centers colors on samples; no added scientific resolution",
+      "page_checked": "Parameters: shading",
+      "opened_utc_date": "2026-10-28"
+    },
+    {
+      "title": "Oracle Numerical Computation Guide: IEEE Arithmetic",
+      "url": "https://docs.oracle.com/cd/E19957-01/806-3568/ncg_math.html",
+      "supports": "IEEE double: 52 stored fraction bits,11 exponent bits,1sign bit;53-bit normal significand precision",
+      "page_checked": "Double Format; storage figure and Table2-4",
+      "opened_utc_date": "2026-10-28"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "n_n",
+      "first_section": "model",
+      "definition": "allocated node count"
+    },
+    {
+      "symbol": "r_n",
+      "first_section": "model",
+      "definition": "tasks per node"
+    },
+    {
+      "symbol": "c_r",
+      "first_section": "model",
+      "definition": "allocated CPUs per task"
+    },
+    {
+      "symbol": "p",
+      "first_section": "model",
+      "definition": "MPI task count"
+    },
+    {
+      "symbol": "tau",
+      "first_section": "model",
+      "definition": "requested elapsed wall limit"
+    },
+    {
+      "symbol": "u",
+      "first_section": "model",
+      "definition": "dimensionless temperature"
+    },
+    {
+      "symbol": "N",
+      "first_section": "model",
+      "definition": "interior grid points per direction"
+    },
+    {
+      "symbol": "h",
+      "first_section": "model",
+      "definition": "1/(N+1) grid spacing"
+    },
+    {
+      "symbol": "i,j",
+      "first_section": "model",
+      "definition": "solver row down from top and column right"
+    },
+    {
+      "symbol": "H,C,b(t)",
+      "first_section": "shared",
+      "definition": "observation minutes, available nodes and occupied nodes"
+    },
+    {
+      "symbol": "a,t_r,n_j,d_j,t_0",
+      "first_section": "policy",
+      "definition": "available nodes, reservation time, candidate node count/duration and start"
+    },
+    {
+      "symbol": "K,s",
+      "first_section": "visualization",
+      "definition": "saved states and scalar fields per point"
+    },
+    {
+      "symbol": "k,ell,n_x,n_y,n_z,q",
+      "first_section": "encoding",
+      "definition": "increasing y/z indices, grid dimensions and linear point index"
+    },
+    {
+      "symbol": "A_h,r,R",
+      "first_section": "checks",
+      "definition": "discrete negative Laplacian, residual and maximum residual norm"
+    },
+    {
+      "symbol": "u_h,e,b(x,y)",
+      "first_section": "checks",
+      "definition": "exact discrete solution, iteration error and barrier field"
+    },
+    {
+      "symbol": "eta,u_min,u_max",
+      "first_section": "checks",
+      "definition": "normalized scalar and fixed color limits"
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B tools/check_chapter_code.py --file <private chapter30 HTML> --report <private code-validation.json>",
+    "listings": 3,
+    "all_passed": true,
+    "status": "fresh formal extracted 3/3 exact checks passed",
+    "fingerprint_sha256": "c102403711ab6a8eba4672fbb8e90087d2115b4adcc7525028566f8442217810",
+    "checked_at_utc": "2026-10-28T13:26:02.850091+00:00",
+    "execution_environment": "WSL Ubuntu 24.04, Python 3.12.3, workspace-contained; no MPI/GPU/scheduler use"
+  },
+  "render_evidence": "render-capture.json",
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch30-r1.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch30-r2.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    }
+  ]
+}

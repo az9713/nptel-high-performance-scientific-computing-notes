@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="26f081501cd3cb05a2eda68ff40784141ce9b95d66e47952ecaf145e138da195"><title>Multi-device programs: profiling-driven OpenACC, MPI with CUDA, and MPI with OpenACC · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>Multi-device programs: profiling-driven OpenACC, MPI with CUDA, and MPI with OpenACC</h1>
+<p class="lead">A program can launch two MPI processes, execute GPU kernels from both, and still use only one physical accelerator. It can also reproduce the same Monte Carlo estimate on every rank because every rank generated the same samples. Neither observation establishes scaling. The running task is to accelerate a Jacobi heat solver and two estimates of π while preserving the mathematical work, the ownership of every buffer, and the meaning of each clock. A small checked integration uses 65,539 samples and 65,537 trapezoids, deliberately indivisible by two. A separate 32 × 32 Jacobi test checks every distributed row against a serial reference after twenty iterations. These are correctness experiments on one GPU; their scope is narrower than a multi-GPU performance experiment.</p>
+<p class="source-note">Grounded in <a href="https://www.youtube.com/watch?v=qgQuj0ZbdFc">W10L1: Profiling and parallelizing the serial code using OpenACC</a>, <a href="https://www.youtube.com/watch?v=fWt2N3mhbfU">W10L2: Programming for multiple-device architecture using MPI and CUDA</a>, and <a href="https://www.youtube.com/watch?v=3ga9YmuxB5o">W10L3: Programming for multiple-device architecture using MPI and OpenACC</a>. <strong>Lecture material:</strong> compiler feedback, the analyze–parallelize–check–optimize cycle, Nsight Systems and NVTX ranges, hotspot selection, Monte Carlo and trapezoidal integration with MPI and CUDA, compilation and linking, and the equivalent MPI/OpenACC construction. <strong>Research extensions:</strong> NVIDIA’s compiler guide distinguishes compile-time feedback from runtime tracing; Nsight Systems and NVTX documentation define annotation and timeline scope; CUDA’s runtime reference defines device selection and synchronization; MPI 4.1 defines reduction ordering; Open MPI documents CUDA-aware capability checks; OpenACC 3.3 defines data updates and device-address exposure; GCC 13.3 documents its supported PTX targets; Salmon and colleagues explain counter-based random generators. <strong>Original teaching constructions:</strong> the ownership model, partition and endpoint audits, corrected panel formula, deterministic sample identifiers, host-staging protocols, all bounded programs, the halo extension, and six worked exercises. Numerical and code discrepancies below are attributed to visible source frames; no claim about unverified spoken wording is needed.</p>
+
+<h2 id="model">Processes, devices, values, and the running case</h2>
+<p>A process is a running program with its own virtual address space. The Message Passing Interface, MPI, supplies operations for exchanging typed data between processes. A communicator identifies a group and a communication context; a rank is an integer identifying one member within that communicator. Here \(p\) is the number of MPI processes, with ranks \(r=0,\ldots,p-1\). The host is the central processing unit, CPU, and its accessible memory. A device is an accelerator, here a graphics processing unit, GPU. CUDA is NVIDIA’s programming platform for such devices; OpenACC is a directive-based interface that lets a compiler generate accelerator work from annotated source. A kernel is a function or generated computation executed on a device.</p>
+<p>These are different layers of parallelism. An MPI rank can launch a kernel containing many GPU threads. Two ranks can address the same GPU, and one rank can address multiple GPUs. A pointer is an address interpreted within an address-space and allocation context. An identical numerical address in two ranks does not establish a shared object. Likewise, a host pointer and a device pointer associated with one conceptual array need not refer to the same storage. The formal object for reasoning is therefore a tuple: logical value, owning rank, storage location, version, and completion event. A version is the iteration or update that produced the value. Completion is the event after which a consumer may safely read it.</p>
+<p>Write \(H_r(v,k)\) for rank \(r\)’s host storage containing version \(k\) of logical value \(v\), and \(G_{r,d}(v,k)\) for its device storage on visible device ordinal \(d\). An ordinal is an index in the device list visible to that process; it is not a universal hardware identifier. A correct staging path orders production, completion, device-to-host copy, MPI communication, and host-to-device copy. The notation describes required dependencies, rather than implying that a runtime automatically enforces them. Different ranks have different storage objects even when each selects ordinal zero.</p>
+<p>The heat problem is the steady Laplace equation on a unit square with dimensionless temperature one at the top edge and zero on the remaining edges. An \(N\times N\) interior grid uses spacing \(h_g=1/(N+1)\) and arrays <code>u</code> and <code>unew</code> with \((N+2)^2\) entries, including the boundary. The Jacobi update is</p>
+\[
+u^{k+1}_{i,j}=\frac14\left(u^k_{i-1,j}+u^k_{i+1,j}+u^k_{i,j-1}+u^k_{i,j+1}\right),\qquad
+\delta_k=\max_{1\le i,j\le N}|u^{k+1}_{i,j}-u^k_{i,j}|. \tag{26.1}
+\]
+<p>The superscript \(k\) labels an iteration, not a power. The update norm \(\delta_k\) can control a stopping test against a tolerance <code>tol</code>; <code>max_iter</code> bounds the work. Here fixed iteration counts permit comparisons of identical work. A small update alone is not a bound on the error in the continuous temperature field. Discretization, incomplete convergence, and floating-point arithmetic are separate error sources.</p>
+<p>The integration problems have a different ownership pattern. Each sample or trapezoid contributes independently to a scalar sum, so the global operation combines rank-local results. The function \(g(x)=4/(1+x^2)\) satisfies \(\int_0^1g(x)\,dx=\pi\). A second construction estimates π from the area of a quarter unit disk. We reserve \(n\) for the number of integration panels or samples and retain \(N\) for grid size. C <code>double</code> is used here as binary64, a floating-point format with 53 significant binary digits; that precision does not make addition associative.</p>
+<p>All accelerator checks were made on the available NVIDIA GeForce RTX 3050 Laptop GPU under Ubuntu 24.04 in the Windows Subsystem for Linux, WSL. The installed GNU Compiler Collection, GCC, is version 13.3; CUDA compilation tools are version 13.3; Open MPI is version 4.1.6. There is one physical GPU. Both ranks deliberately select visible ordinal zero. The installed MPI reports CUDA support false, so every MPI data buffer in the listings is host storage. Explicit NVIDIA device checks prevent a successful host fallback from being described as accelerator execution. Compiler and runtime versions are distinct from compute capability, the hardware feature level used to choose device instructions.</p>
+
+<h2 id="profile">Choose the work before choosing the directive <a class="timestamp" href="https://www.youtube.com/watch?v=qgQuj0ZbdFc&amp;t=38s">W10L1 0:38</a></h2>
+<p>A compiler translates source into executable instructions; a profiler observes an execution. Their reports answer different questions. The source sequence starts with NVIDIA’s <code>nvc</code>, <code>nvc++</code>, and <code>nvfortran</code> compiler commands and the optimization-feedback option <code>-Minfo</code>. The <a href="https://docs.nvidia.com/hpc-sdk/compilers/hpc-compilers-user-guide/index.html#minfo">NVIDIA HPC compiler guide, §3.2.2</a>, describes this as compile-time feedback. A generated-kernel message establishes that code was emitted, not that the emitted kernel dominates elapsed time or even that a particular runtime path selected it. The source also uses <code>-fast</code>, a compiler-specific optimization bundle, whose effect must be checked against both the numerical result and elapsed time. The NVIDIA compiler is not installed in this experiment; the checked builds use GCC’s different options.</p>
+<p>Profiling begins with a representative workload and a correctness reference. Representative means that the input size, iteration count, data layout, and communication resemble the intended job closely enough that its bottleneck is relevant. A tiny grid may spend most of its time launching kernels, while a large resident grid may spend most of its time accessing device memory. Optimizing the first as if it were the second is a change of problem. Record both the final state and the stopping rule before changing the execution mechanism. Otherwise an apparent acceleration could simply be fewer iterations.</p>
+<p>A hotspot is a region accounting for a substantial share of the measured execution cost. Let \(f\) be the fraction of a serial baseline that remains unaffected, let \(a\) be the speed factor applied to the remaining fraction, and let \(t_o\) be new overhead in seconds. With baseline elapsed time \(T_1\), the elementary model gives</p>
+\[
+T_{\mathrm{new}}=T_1\left[f+\frac{1-f}{a}\right]+t_o,\qquad
+S=\frac{T_1}{T_{\mathrm{new}}}. \tag{26.2}
+\]
+<p>This is Amdahl’s fixed-work argument with an explicit overhead term. Every term must refer to the same input and timing scope. The W10L1 conjugate-gradient slide reports a total of 22.38 seconds, with 83% in a matrix–vector product and 6% in a dot product. Treat those as source measurements, rather than measurements of this laptop. Accelerating only the 83% portion tenfold, with no overhead, predicts \(S=1/(0.17+0.083)=3.95\). Its infinite-acceleration limit is \(1/0.17=5.88\). Once the large region is accelerated, the next profile is essential: the residual fraction has become the main problem.</p>
+<p>The model also tells us when an optimization is not worth applying. Replacing a kernel of duration \(t_c\) by one running \(a\) times faster saves \(t_c(1-1/a)\). It helps only if that saving exceeds the extra transfer, launch, synchronization, and setup costs. A tenfold kernel improvement can lose overall when it accelerates a 10-microsecond operation but adds 100 microseconds of overhead. This is a comparison of quantities with the same units; a kernel throughput ratio by itself supplies neither side of the inequality.</p>
+<p>The next stage in the source sequence is NVIDIA Nsight Systems, a timeline profiler, followed by NVTX, the NVIDIA Tools Extension annotation interface. An application programming interface, API, is a set of callable operations exposed by a software component. A trace records individual events and their timing; sampling observes selected execution states at intervals. A range labels a time interval in application code. The <a href="https://nvidia.github.io/NVTX/">NVTX documentation</a> explains that annotations supply context to tools and normally do nothing without a tool consuming them. A label does not perform synchronization. Placing a push before an asynchronous launch and a pop immediately afterward labels submission, unless an explicit completion is also inside the range.</p>
+<p>A timeline can show host-thread states, library calls, kernel execution, and memory copies. cuBLAS is NVIDIA’s GPU linear-algebra library; cuDNN supplies neural-network operations. Library traces can connect those calls to GPU work, but a missing timeline row can mean the relevant collection was disabled. A thread moving between CPU cores is migration; waiting and blocked states require interpretation in their actual dependency chain. A waiting host may be correctly waiting for a busy accelerator. Treating all waiting time as removable waste would violate the program’s ordering requirements.</p>
+<p>Inclusive time includes work in nested ranges; exclusive time removes nested work attributed separately. These denominators matter. The source NVTX display nests <code>calc</code> and <code>swap</code> inside <code>while</code>. A table that sums the duration of every recorded range counts the enclosing interval and its children. Its percentages, approximately 49.9% for the enclosing loop and roughly 26.6% and 23.4% for its children, are therefore not three disjoint fractions of application wall time. In an idealized loop whose children cover it exactly, cumulative range duration is twice the loop duration. A child occupying half the loop would then appear as one quarter of that cumulative total.</p>
+<p>Another visible source slide lists <code>swap</code> at 19.04 seconds and <code>calcNext</code> at 21.49 seconds while labelling total runtime 39.43 seconds. Their sum is 40.53 seconds. The slide does not establish mutually exclusive measurement intervals that reconcile these numbers. We retain the displayed numbers and their inconsistency, and do not normalize them into an alleged exact decomposition. The accelerated timeline is likewise an illustrative source result, not an independently reproduced speedup or a forecast for the small test below. Interpretation requires matching input, compiler, hardware, data lifetimes, and timing boundaries.</p>
+<p>Nsight Systems’ <a href="https://docs.nvidia.com/nsight-systems/UserGuide/index.html#preparing-your-application-for-profiling">user guide, “Preparing Your Application for Profiling”</a>, supports focusing collection and using ranges to connect application phases with device activity. The chapter uses one original bounded experiment with ranges named <code>serial-copy</code> and <code>resident-acc</code>. Its printed times use a monotonic host clock, a clock that measures elapsed duration without civil-time adjustments. The first two times separately accumulate serial stencil and array-copy phases. The last includes a complete resident OpenACC phase with its data-region entry and exit. Those scopes intentionally answer different questions: where the serial work goes, and what the tested accelerator alternative costs end to end.</p>
+
+<h2 id="dependence">Prove independence, then measure the generated work <a class="timestamp" href="https://www.youtube.com/watch?v=qgQuj0ZbdFc&amp;t=1147s">W10L1 19:07</a></h2>
+<p>A directive cannot remove a mathematical dependency. For the source pairing example, \(y_i=x_{2i}+x_{2i+1}\), iteration \(i\) reads two inputs and writes one unique output. Different iterations have disjoint write locations. Parallel evaluation is valid if input and output storage do not overlap in a way that destroys a later input. With \(x=(1,2,3,4,5,6)\), the answer is \((3,7,11)\). If an implementation instead writes into an overlapping input slice, the independence argument must be repeated for the actual addresses, rather than for the array names.</p>
+<p>Jacobi’s separate arrays make the same proof easy. Every iteration of the spatial loop reads version \(k\) and writes version \(k+1\) at its own cell. In-place updates change the algorithm: an iteration may read a neighbor already overwritten during the same sweep. That is no longer the Jacobi update in (26.1), and parallelizing it without an ordering protocol creates conflicting accesses. A reduction for the maximum update handles a different dependency: many spatial iterations contribute to one scalar. It requires a collective combination, not arbitrary unsynchronized writes to a shared maximum.</p>
+<p>The serial source’s <code>swap</code> region copies array elements; swapping two pointer values is a different operation with a different cost. Both can produce the same subsequent Jacobi iterates if both arrays preserve the boundary conditions. The pointer exchange eliminates an interior-array copy, but residency must be reasoned about using allocations and mappings, not the current spelling of a pointer variable. The checked resident test maps both allocations for the enclosing data region. It performs eighty swaps, an even number, so each host pointer again names its original allocation when that region exits. This choice keeps the example’s data-region exit straightforward.</p>
+<p>The following complete listing accepts no external input. It initializes a 128 × 128 interior, executes eighty serial copy-based sweeps, then executes eighty resident accelerator sweeps with pointer exchanges. It returns success only if the device confirms NVIDIA execution and every grid entry and the final update norm match the serial result within \(10^{-13}\). Four arrays of 16,900 binary64 values occupy 540,800 host bytes; the two device grid arrays occupy 270,400 bytes, excluding runtime-managed allocations. Runtime reduction storage is implementation-dependent. The experiment remains far below the device-memory budget.</p>
+<pre><code class="language-c" data-file="profile_acc.c" data-build="gcc -O2 -fopenacc -foffload=nvptx-none -foffload-options=nvptx-none=-march=sm_80 -fcf-protection=none -I/usr/local/cuda/include profile_acc.c -lm -ldl -o profile_acc" data-run="ACC_DEVICE_TYPE=nvidia timeout 20 ./profile_acc" data-needs="gpu" data-check="returncode">#define _POSIX_C_SOURCE 200809L
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+#include &lt;time.h&gt;
+#include &lt;openacc.h&gt;
+#include &lt;nvtx3/nvToolsExt.h&gt;
+#define N 128
+#define M ((N+2)*(N+2))
+#define IDX(i,j) ((i)*(N+2)+(j))
+static double seconds(void) {
+    struct timespec t; clock_gettime(CLOCK_MONOTONIC,&amp;t);
+    return t.tv_sec+1e-9*t.tv_nsec;
+}
+static void init(double *u,double *unew) {
+    for(int k=0;k&lt;M;k++) u[k]=unew[k]=0;
+    for(int j=1;j&lt;=N;j++) u[IDX(0,j)]=unew[IDX(0,j)]=1;
+}
+static double jacobi_step(const double *u,double *unew) {
+    double d=0;
+    for(int i=1;i&lt;=N;i++) for(int j=1;j&lt;=N;j++) {
+        int k=IDX(i,j);
+        unew[k]=0.25*(u[k-N-2]+u[k+N+2]+u[k-1]+u[k+1]);
+        d=fmax(d,fabs(unew[k]-u[k]));
+    }
+    return d;
+}
+int main(void) {
+    double *u=calloc(M,sizeof(double)),*unew=calloc(M,sizeof(double));
+    double *ref=calloc(M,sizeof(double)),*tmp=calloc(M,sizeof(double));
+    if(!u||!unew||!ref||!tmp) return 2;
+    if(acc_get_num_devices(acc_device_nvidia)&lt;1) return 3;
+    acc_set_device_num(0,acc_device_nvidia);
+    init(ref,tmp);
+    double calc=0,copy=0,serial_diff=0;
+    nvtxRangePushA(&quot;serial-copy&quot;);
+    for(int it=0;it&lt;80;it++) {
+        double t=seconds(); serial_diff=jacobi_step(ref,tmp); calc+=seconds()-t;
+        t=seconds();
+        for(int k=0;k&lt;M;k++) ref[k]=tmp[k];
+        copy+=seconds()-t;
+    }
+    nvtxRangePop();
+    init(u,unew);
+    int on_gpu=0; double diff=0;
+    double t=seconds();
+    nvtxRangePushA(&quot;resident-acc&quot;);
+    #pragma acc data copy(u[0:M],unew[0:M])
+    {
+        #pragma acc serial copyout(on_gpu)
+        on_gpu=acc_on_device(acc_device_nvidia);
+        for(int it=0;it&lt;80;it++) {
+            diff=0;
+            #pragma acc parallel loop collapse(2) present(u[0:M],unew[0:M]) reduction(max:diff)
+            for(int i=1;i&lt;=N;i++) for(int j=1;j&lt;=N;j++) {
+                int k=IDX(i,j);
+                unew[k]=0.25*(u[k-N-2]+u[k+N+2]+u[k-1]+u[k+1]);
+                double d=fabs(unew[k]-u[k]); if(d&gt;diff) diff=d;
+            }
+            double *p=u;u=unew;unew=p;
+        }
+    }
+    nvtxRangePop();
+    double acc_time=seconds()-t,err=0;
+    for(int k=0;k&lt;M;k++) err=fmax(err,fabs(u[k]-ref[k]));
+    int ok=on_gpu &amp;&amp; err&lt;1e-13 &amp;&amp; fabs(diff-serial_diff)&lt;1e-13;
+    printf(&quot;serial_calc_ms=%.3f serial_copy_ms=%.3f resident_acc_ms=%.3f\n&quot;,1000*calc,1000*copy,1000*acc_time);
+    printf(&quot;cells=%d steps=80 gpu=%d full_grid_check=%s\n&quot;,N*N,on_gpu,ok?&quot;PASS&quot;:&quot;FAIL&quot;);
+    free(u);free(unew);free(ref);free(tmp);
+    return ok?0:4;
+}
+</code></pre>
+<pre><code class="output">serial_calc_ms=2.067 serial_copy_ms=0.195 resident_acc_ms=19.799
+cells=16384 steps=80 gpu=1 full_grid_check=PASS</code></pre>
+<p>The shown output is one unprofiled sample. Three separately captured unprofiled runs gave stencil time 2.020–2.185 milliseconds, copy time 0.191–0.206 milliseconds, and resident accelerator phase 8.681–19.799 milliseconds. All passed the full comparison. The accelerator version is slower for this bounded workload despite removing the full-grid copy. These short intervals are sensitive to scheduling and frequency; they do not fit a robust transfer-bandwidth model. The timing comparison includes an algorithmic copy-removal change and different generated code, so it cannot isolate the contribution of GPU arithmetic.</p>
+<p>An additional captured Nsight Systems run used CUDA and NVTX tracing with CPU sampling and context-switch tracing disabled. Its two NVTX range durations were 2.262223 milliseconds for <code>serial-copy</code> and 14.366952 milliseconds for <code>resident-acc</code>. The sum of eighty stencil-kernel durations was 0.778412 milliseconds; the device-check kernel added 0.001823 milliseconds. The difference between range time and kernel time is not idle hardware proved by subtraction. The range includes copies, reductions, launches, allocations, and waiting, and some categories can overlap. The API summary recorded 81 stream synchronizations and 83 copies in each direction, demonstrating that keeping grid arrays resident does not eliminate scalar-reduction traffic.</p>
+<p>Device selection and its initial context setup happen before the accelerator timer in this listing. The trace also contains context creation outside the labelled phase; the phase’s timing is not the complete process lifetime. Instrumentation changes execution, so the profiled time is kept separate from the three unprofiled captures. This distinction is especially important for a few-millisecond benchmark. A useful next optimization would examine whether the convergence norm must return to the host on every sweep. Checking it less frequently changes the stopping protocol and may perform extra sweeps; any speedup must account for that extra mathematical work.</p>
+<p>The GCC build explicitly selects its supported <code>sm_80</code> offload target, rather than assuming its default is appropriate. PTX, Parallel Thread Execution, is NVIDIA’s virtual instruction representation. The <a href="https://gcc.gnu.org/onlinedocs/gcc-13.3.0/gcc/Nvidia-PTX-Options.html">GCC 13.3 PTX target documentation</a> lists <code>sm_80</code> among supported values. This target choice is a toolchain compatibility decision; the actual laptop has compute capability 8.6. Compiler diagnostics about the serial construct’s vector length (the width of its innermost parallel execution level) and linker text relocations were retained in the private captures. They do not replace the explicit device and numerical checks.</p>
+
+<h2 id="cuda-mpi">MPI with CUDA: partition samples, select devices, stage results <a class="timestamp" href="https://www.youtube.com/watch?v=fWt2N3mhbfU&amp;t=71s">W10L2 1:11</a></h2>
+<p>Monte Carlo integration uses random samples to estimate an expectation. For the quarter-disk construction, sample \((X_i,Y_i)\) uniformly in the unit square and define the indicator \(Z_i=1\) when \(X_i^2+Y_i^2\le1\), otherwise zero. Under independent uniform sampling, \(q=\mathbb E[Z_i]=\pi/4\), so \(\widehat\pi=4\sum_i Z_i/n\) is unbiased and</p>
+\[
+\operatorname{Var}(\widehat\pi)=\frac{16q(1-q)}n,\qquad
+\operatorname{sd}(\widehat\pi)\approx\frac{1.64}{\sqrt n}. \tag{26.3}
+\]
+<p>Here expectation is the mean over repeated sampling, variance is the mean squared deviation from that expectation, and standard deviation is its square root. The derivation uses \(Z_i^2=Z_i\), hence variance \(q-q^2\), and zero covariance for distinct independent samples. The inverse square-root convergence follows from the statistical model, not merely from labelling a loop Monte Carlo. A fixed deterministic pseudorandom sequence needs empirical or theoretical justification before this model can be treated as its error guarantee.</p>
+<p>A fixed seed can make repeated runs reproduce the same sequence. It does not give independent sequences to different MPI ranks. The visible W10L2 kernel calls <code>curand_init(1234, idx, 0, ...)</code>; CURAND is NVIDIA’s random-number library. The displayed main function gives each rank the same local sample count, and rank is absent from the initialization arguments shown. With identical kernel geometry and sample counts, each rank generates the same sequence and repeats the same experiment. Averaging identical estimates leaves the estimate unchanged. Increasing total executed work then supplies no additional independent information.</p>
+<p>The contrast can be stated quantitatively. If each rank has an unbiased estimate with variance \(\sigma^2\), the variance of the mean over \(p\) independent estimates is \(\sigma^2/p\). If all ranks repeat the identical random variable, all pairwise covariances equal \(\sigma^2\), and the mean’s variance remains \(\sigma^2\). A reproducible output can therefore be evidence of an ownership mistake rather than an especially stable estimator. Distinct seeds or subsequences are an engineering mechanism for separating streams; they are not by themselves a mathematical proof of independence.</p>
+<p>Give each conceptual sample a global identifier before assigning it to hardware. For fixed global work \(n\), rank \(r\) owns the half-open integer interval</p>
+\[
+a_r=\left\lfloor\frac{rn}{p}\right\rfloor,\quad
+b_r=\left\lfloor\frac{(r+1)n}{p}\right\rfloor,\qquad
+\mathcal J_r=\{a_r,\ldots,b_r-1\}. \tag{26.4}
+\]
+<p>Half-open means that the lower endpoint is included and the upper endpoint excluded. Adjacent intervals touch without overlap, \(b_r=a_{r+1}\), and the first and last endpoints are zero and \(n\). Their sizes sum to \(n\), including any remainder. For 65,539 samples and two ranks, the sizes are 32,769 and 32,770. The sample associated with global identifier \(i\) must be the same regardless of which rank computes it. Changing \(p\) can then change scheduling without changing the sample set.</p>
+<p><a href="https://www.thesalmons.org/john/random123/papers/random123sc11.pdf">Salmon, Moraes, Dror, and Shaw, “Parallel Random Numbers: As Easy as 1, 2, 3,” §2</a>, develops counter-based generators that make a random value a function of a counter and key. The small teaching program below uses a transparent unsigned-integer mixer of sample identifiers to demonstrate stable ownership. It is not Random123 or CURAND, and no statistical quality, independence, or uncertainty calibration is claimed for that mixer. Unsigned 32-bit arithmetic makes the overflow behavior defined. A half-unit offset maps integers to the open unit interval. This deterministic test can detect omitted or duplicated work without depending on a particular vendor generator.</p>
+<p>Device assignment is another explicit mapping. An MPI rank number does not automatically select a GPU. On a cluster, a scheduler may expose one device to each process, or several devices to all processes. In the first case every process can correctly select its visible ordinal zero. In the second, one commonly constructs a node-local communicator and maps its local ranks to devices subject to an allocation policy. Global rank modulo local device count works only under assumptions about placement and visibility that must be checked. The examples here deliberately share device zero and make no claim to implement a cluster scheduler’s policy.</p>
+<p>The <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html">CUDA runtime’s device-management reference, <code>cudaSetDevice</code> and <code>cudaDeviceSynchronize</code></a>, supplies the local device operations. A device synchronization call waits for preceding work in the calling process’s CUDA context; it is not an MPI barrier and does not complete another process’s independent work. An MPI barrier coordinates processes, but does not itself synchronize their CUDA streams. Neither can replace the other simply because both contain the idea of waiting.</p>
+<p>The CUDA listing below computes both the deterministic sample flags and the corrected trapezoid contributions derived in the next section. Each rank checks every returned flag against the host function and every panel value against a host calculation. It copies completed device arrays into host buffers, sums locally, and reduces those host scalars through MPI. Root also recomputes the complete sample count serially. The largest application device array per rank is about 262 kilobytes. No device pointer is passed to MPI. Launch errors and execution errors are checked separately before a result is consumed.</p>
+<p>Compilation deliberately has two stages, matching the source’s workflow. <code>nvcc -c</code> creates an object file containing host and device support. The installed MPI wrapper supplies header options, and <code>mpicxx</code> performs the final link with the CUDA runtime. A wrapper is a command that invokes an underlying compiler with additional MPI arguments; its presence does not make arbitrary device code compilable. The native architecture option selects this installed GPU; it is not a portable binary promise. The <code>--fmad=false</code> option disables CUDA’s multiplication/addition contraction for this cross-implementation predicate check. A fused multiply-add evaluates a product plus a sum with one final rounding; changing that rounding can change an indicator exactly at a geometric boundary.</p>
+
+<h2 id="trapezoid">Trapezoids: endpoint weights before parallel reductions <a class="timestamp" href="https://www.youtube.com/watch?v=fWt2N3mhbfU&amp;t=914s">W10L2 15:14</a></h2>
+<p>The trapezoidal rule integrates a piecewise linear interpolant. On panel \([x_i,x_{i+1}]\), with \(x_i=i/n\) and width \(h=1/n\), that interpolant has average height \((g(x_i)+g(x_{i+1}))/2\). Summing its area gives</p>
+\[
+\mathcal T_n=\frac h2\sum_{i=0}^{n-1}[g(x_i)+g(x_{i+1})]
+=h\left[\frac{g(0)+g(1)}2+\sum_{i=1}^{n-1}g(x_i)\right]. \tag{26.5}
+\]
+<p>An interior endpoint belongs to two adjacent panels, each contributing half of its weight. The physical endpoints belong to one panel each. This explains the weights without relying on a mnemonic. The panel form is especially convenient for MPI: assign panel indices using (26.4), and each rank computes the sum of exactly those panels. There is no special cross-rank endpoint correction. With 65,537 panels, the two ranks own 32,768 and 32,769 panels. Sharing an endpoint’s value between two panels is mathematically required, whereas computing the same panel twice is an ownership error.</p>
+<p>The visible CUDA source uses a different, problematic combination. Its kernel sums \(g(a+ih)\) for local indices \(i=0,\ldots,m-1\), where \([a,b]\) is a rank’s subinterval and \(m\) its panel count. The host then adds the positive endpoint term \(h[g(a)+g(b)]/2\). A correct interior-point formula would start the sum at one. Equivalently, if retaining the left-endpoint sum, the correction must be \(h[g(b)-g(a)]/2\). Combining a left-endpoint sum with a positive two-endpoint correction adds one extra \(hg(a)\) per rank.</p>
+\[
+\mathcal T_{\mathrm{shown}}-\mathcal T_n
+=h\sum_{r=0}^{p-1}g(a_rh), \tag{26.6}
+\]
+<p>Here \(a_r\) is the global lower panel index in (26.4), not the coordinate itself. This formula assumes a partition covering all panels and the same global spacing. For the source’s ten-million-panel example with equal partitions, two ranks predict extra area \(10^{-7}[g(0)+g(1/2)]=7.2\times10^{-7}\). Adding it to π predicts 3.1415933736 after rounding to ten decimal places, matching the visible two-rank output. Four ranks give \(10^{-7}[4+4/1.0625+3.2+2.56]\), predicting 3.1415940061, also matching the displayed output. Thus the rank-dependent change has a concrete indexing explanation visible in the code. It need not be attributed to an MPI library discarding low-order bits.</p>
+<p>Partition truncation is an independent problem. Assigning every rank <code>n/p</code> panels with integer division drops \(n-p\lfloor n/p\rfloor\) panels unless the remainder is handled. Recomputing each local width from a truncated interval can disguise that omission by changing the effective global problem. Global panel identifiers preserve both the spacing and the work count. The following Python audit checks a deliberately nondivisible case, derives the endpoint excess numerically, and verifies the corrected trapezoidal result against an analytic error bound.</p>
+<pre><code class="language-python" data-file="quadrature_audit.py" data-run="python3 -B quadrature_audit.py">import math
+
+def bounds(n, p, r):
+    return r*n//p, (r+1)*n//p
+
+def g(x):
+    return 4/(1+x*x)
+
+n, p = 100, 3
+parts = [bounds(n,p,r) for r in range(p)]
+assert parts == [(0,33),(33,66),(66,100)]
+h = 1/n
+correct = wrong = bias = 0.0
+for lo, hi in parts:
+    a, b = lo*h, hi*h
+    interior = sum(g(i*h) for i in range(lo+1,hi))
+    correct += h*((g(a)+g(b))/2+interior)
+    wrong += h*((g(a)+g(b))/2+sum(g(i*h) for i in range(lo,hi)))
+    bias += h*g(a)
+assert abs((wrong-correct)-bias) &lt; 1e-14
+assert abs(correct-math.pi) &lt; 2/(3*n*n)
+print('interval counts:',*[b-a for a,b in parts])
+print(f'correct={correct:.9f} wrong={wrong:.9f}')
+print(f'extra_left_endpoints={bias:.9f}')
+print('partition and endpoint checks: PASS')
+</code></pre>
+<pre><code class="output">interval counts: 33 33 34
+correct=3.141575987 wrong=3.245510684
+extra_left_endpoints=0.103934697
+partition and endpoint checks: PASS</code></pre>
+<p>The extra area is large here because one hundred panels make the endpoint mistake visible. It is not a bound on floating-point error. For a twice continuously differentiable function, Taylor expansion of the interpolation error on a panel yields an integral error bounded by \(h^3\max|g''|/12\). Adding \(n\) equal panels gives \(|\mathcal T_n-\int_0^1g|\le\max|g''|/(12n^2)\). Here \(g''(x)=8(3x^2-1)/(1+x^2)^3\), and \(\max_{[0,1]}|g''|\le8\), so the bound is \(2/(3n^2)\). For 65,537 panels it is about \(1.55\times10^{-10}\). The programs’ \(10^{-9}\) acceptance tolerance leaves room for accumulated rounding while remaining much smaller than the source endpoint bias.</p>
+<p>Floating-point reduction supplies another reason outputs can change with process count. The <a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node130.htm">MPI 4.1 standard, §7.9.1, “Reduce”</a>, permits reassociation and explicitly discusses floating-point nonassociativity. Even when every transmitted <code>MPI_DOUBLE</code> value has the declared type, different local groupings and reduction trees can round differently. A deterministic serial ordering, a compensated sum, a reproducible accumulator, and a statistical confidence interval solve different problems. None repairs a missing panel or a duplicated endpoint. The correct diagnostic order is to verify ownership and formula, then analyze arithmetic ordering and numerical tolerance.</p>
+<p>The complete MPI/CUDA program follows both integration models. It avoids a heavily contended global atomic sum by returning per-item contributions and accumulating them on the host. An atomic addition makes each update indivisible with respect to other atomic updates; it does not impose a unique numerical order. This teaching implementation spends memory and copy traffic to make every result inspectable. It is a correctness reference for subsequent optimization, not a claim to be the fastest reduction design.</p>
+<pre><code class="language-cuda" data-file="mpi_cuda_pi.cu" data-build="nvcc -O2 -arch=native --fmad=false -DOMPI_SKIP_MPICXX=1 $(mpicxx --showme:compile) -c mpi_cuda_pi.cu -o mpi_cuda_pi.o &amp;&amp; mpicxx mpi_cuda_pi.o -L/usr/local/cuda/lib64 -Wl,-rpath,/usr/local/cuda/lib64 -lcudart -o mpi_cuda_pi" data-run="timeout 20 mpirun -np 2 ./mpi_cuda_pi" data-needs="gpu mpi">#include &lt;mpi.h&gt;
+#include &lt;cuda_runtime.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+#define SAMPLES 65539
+#define PANELS 65537
+#define CK(call) do { cudaError_t e=(call); if(e!=cudaSuccess) { fprintf(stderr,&quot;CUDA: %s\n&quot;,cudaGetErrorString(e)); MPI_Abort(MPI_COMM_WORLD,2); } } while(0)
+__host__ __device__ unsigned mix(unsigned x) {
+    x^=x&gt;&gt;16; x*=0x7feb352dU; x^=x&gt;&gt;15; x*=0x846ca68bU; return x^(x&gt;&gt;16);
+}
+__host__ __device__ unsigned hit(int i) {
+    double x=(mix(2U*(unsigned)i)+0.5)/4294967296.0;
+    double y=(mix(2U*(unsigned)i+1U)+0.5)/4294967296.0;
+    return x*x+y*y&lt;=1.0;
+}
+__host__ __device__ double g(double x) { return 4.0/(1.0+x*x); }
+__global__ void sample(int lo,int hi,unsigned *a) {
+    int k=blockIdx.x*blockDim.x+threadIdx.x;
+    if(lo+k&lt;hi) a[k]=hit(lo+k);
+}
+__global__ void trap(int lo,int hi,double *a) {
+    int k=blockIdx.x*blockDim.x+threadIdx.x;
+    if(lo+k&lt;hi) {
+        double h=1.0/PANELS,x=(lo+k)*h;
+        a[k]=0.5*h*(g(x)+g(x+h));
+    }
+}
+int main(int argc,char **argv) {
+    MPI_Init(&amp;argc,&amp;argv);
+    int rank,p,nd;MPI_Comm_rank(MPI_COMM_WORLD,&amp;rank);MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    if(p!=2) MPI_Abort(MPI_COMM_WORLD,3);
+    CK(cudaGetDeviceCount(&amp;nd)); if(nd&lt;1) MPI_Abort(MPI_COMM_WORLD,4);
+    CK(cudaSetDevice(0));
+    int lo=rank*SAMPLES/p,hi=(rank+1)*SAMPLES/p,n=hi-lo;
+    unsigned *d,*a=(unsigned*)malloc(n*sizeof(unsigned));
+    if(!a) MPI_Abort(MPI_COMM_WORLD,5);
+    CK(cudaMalloc(&amp;d,n*sizeof(unsigned)));
+    sample&lt;&lt;&lt;(n+127)/128,128&gt;&gt;&gt;(lo,hi,d);
+    CK(cudaGetLastError());CK(cudaDeviceSynchronize());
+    CK(cudaMemcpy(a,d,n*sizeof(unsigned),cudaMemcpyDeviceToHost));
+    unsigned long long count=0,total=0;int ok=1,all;
+    for(int k=0;k&lt;n;k++) {if(a[k]!=hit(lo+k)) ok=0;count+=a[k];}
+    CK(cudaFree(d));free(a);
+    lo=rank*PANELS/p;hi=(rank+1)*PANELS/p;n=hi-lo;
+    double *dt,*ht=(double*)malloc(n*sizeof(double));
+    if(!ht) MPI_Abort(MPI_COMM_WORLD,5);
+    CK(cudaMalloc(&amp;dt,n*sizeof(double)));
+    trap&lt;&lt;&lt;(n+127)/128,128&gt;&gt;&gt;(lo,hi,dt);
+    CK(cudaGetLastError());CK(cudaDeviceSynchronize());
+    CK(cudaMemcpy(ht,dt,n*sizeof(double),cudaMemcpyDeviceToHost));
+    double local=0,integral=0,h=1.0/PANELS;
+    for(int k=0;k&lt;n;k++) {
+        double x=(lo+k)*h,ref=0.5*h*(g(x)+g(x+h));
+        if(fabs(ht[k]-ref)&gt;1e-15) ok=0;local+=ht[k];
+    }
+    CK(cudaFree(dt));free(ht);
+    /* Every MPI buffer below belongs to host memory. */
+    MPI_Reduce(&amp;count,&amp;total,1,MPI_UNSIGNED_LONG_LONG,MPI_SUM,0,MPI_COMM_WORLD);
+    MPI_Reduce(&amp;local,&amp;integral,1,MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD);
+    MPI_Allreduce(&amp;ok,&amp;all,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD);
+    if(rank==0) {
+        unsigned long long ref=0;for(int i=0;i&lt;SAMPLES;i++) ref+=hit(i);
+        all=all &amp;&amp; total==ref &amp;&amp; fabs(integral-acos(-1.0))&lt;1e-9;
+        printf(&quot;ranks=2 selected_device=0 host_staging=1\n&quot;);
+        printf(&quot;samples=%d count=%llu panels=%d\n&quot;,SAMPLES,total,PANELS);
+        printf(&quot;cuda_payloads_and_integrals=%s\n&quot;,all?&quot;PASS&quot;:&quot;FAIL&quot;);
+    }
+    MPI_Bcast(&amp;all,1,MPI_INT,0,MPI_COMM_WORLD);
+    MPI_Finalize();return all?0:6;
+}
+</code></pre>
+<pre><code class="output">ranks=2 selected_device=0 host_staging=1
+samples=65539 count=51531 panels=65537
+cuda_payloads_and_integrals=PASS</code></pre>
+<p>The matching total of 51,531 flags verifies this sample set and partition on the tested implementation. It corresponds to \(4(51531)/65539\approx3.14506\); its distance from π does not invalidate the payload check. That check asks whether the specified experiment was executed correctly, whereas statistical adequacy asks whether the experiment estimates the desired quantity accurately. The trapezoidal result is tested against π to \(10^{-9}\), and all individual contributions are checked separately. A checksum or a plausible-looking final estimate alone would not detect every indexing error.</p>
+
+<h2 id="mpi-openacc">MPI with OpenACC: shorter source, unchanged obligations <a class="timestamp" href="https://www.youtube.com/watch?v=3ga9YmuxB5o&amp;t=109s">W10L3 1:49</a></h2>
+<p>The next source construction keeps MPI’s decomposition and replaces explicit CUDA kernels with OpenACC loops. A reduction clause provides private partial accumulators and combines them into the original scalar. A device data region controls the lifetime and movement of mapped objects. The absence of explicit allocation and copy calls in the application does not mean that those operations disappeared. They are now generated or managed by the compiler and runtime, and still have a cost and a correctness contract.</p>
+<p>The visible Monte Carlo OpenACC source contains <code>rand()</code> calls inside an accelerated loop. C’s familiar host random routine is not a portable device routine merely because its call appears beneath a directive. It may have hidden mutable state; availability and behavior depend on the compiler and device implementation. The slide’s function comment names integration of \(4/(1+x^2)\), while its actual predicate tests membership in a quarter disk. Both can estimate π, but they are different estimators with different sample objects. The checked replacement therefore states its predicate explicitly and uses the same global sample identifiers as the CUDA program.</p>
+<p>The displayed OpenACC trapezoid loop starts at local index one and stops before the upper endpoint. Its positive endpoint correction is consistent with that interior sum, unlike the displayed CUDA combination. This is a source-visible distinction worth preserving: the mathematical method is not the cause of the CUDA discrepancy. One must inspect actual loop bounds rather than treating two similarly named programs as equivalent. Likewise, dropping the OpenACC flag does not automatically produce a fully equivalent comparison if the program calls OpenACC runtime routines or has device-dependent control flow. The complete checked examples intentionally require offload and are not claimed to work unchanged as pure MPI builds.</p>
+<p>The following program accepts no input and fixes two ranks sharing device zero. It produces the same per-sample flags and panel values as the CUDA listing. Its sample count reduction uses a 64-bit unsigned accumulator on this platform and the matching MPI datatype. Each returned array is compared entry by entry with the host calculation before global reduction. The local floating-point reduction is also compared with the sequential sum of its returned array. This separates a kernel-indexing test from an arithmetic-grouping test; a global scalar alone cannot distinguish them.</p>
+<pre><code class="language-c" data-file="mpi_acc_pi.c" data-build="mpicc -O2 -fopenacc -foffload=nvptx-none -foffload-options=nvptx-none=-march=sm_80 -fcf-protection=none -ffp-contract=off mpi_acc_pi.c -lm -o mpi_acc_pi" data-run="ACC_DEVICE_TYPE=nvidia timeout 20 mpirun -np 2 ./mpi_acc_pi" data-needs="gpu mpi">#include &lt;mpi.h&gt;
+#include &lt;openacc.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+#define SAMPLES 65539
+#define PANELS 65537
+#pragma acc routine seq
+static unsigned mix(unsigned x) {
+    x^=x&gt;&gt;16;x*=0x7feb352dU;x^=x&gt;&gt;15;x*=0x846ca68bU;return x^(x&gt;&gt;16);
+}
+#pragma acc routine seq
+static unsigned hit(int i) {
+    double x=(mix(2U*(unsigned)i)+0.5)/4294967296.0;
+    double y=(mix(2U*(unsigned)i+1U)+0.5)/4294967296.0;
+    return x*x+y*y&lt;=1.0;
+}
+#pragma acc routine seq
+static double g(double x) {return 4.0/(1.0+x*x);}
+int main(int argc,char **argv) {
+    MPI_Init(&amp;argc,&amp;argv);
+    int rank,p;MPI_Comm_rank(MPI_COMM_WORLD,&amp;rank);MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    if(p!=2 || acc_get_num_devices(acc_device_nvidia)&lt;1) MPI_Abort(MPI_COMM_WORLD,2);
+    acc_set_device_num(0,acc_device_nvidia);
+    int gpu=0;
+    #pragma acc serial copyout(gpu)
+    gpu=acc_on_device(acc_device_nvidia);
+    int lo=rank*SAMPLES/p,hi=(rank+1)*SAMPLES/p,n=hi-lo;
+    unsigned *a=malloc(n*sizeof(unsigned));if(!a) MPI_Abort(MPI_COMM_WORLD,3);
+    unsigned long long count=0,total=0;
+    #pragma acc parallel loop copyout(a[0:n]) reduction(+:count)
+    for(int k=0;k&lt;n;k++) {a[k]=hit(lo+k);count+=a[k];}
+    int ok=gpu,all;unsigned long long host_count=0;
+    for(int k=0;k&lt;n;k++) {if(a[k]!=hit(lo+k)) ok=0;host_count+=a[k];}
+    if(host_count!=count) ok=0;free(a);
+    lo=rank*PANELS/p;hi=(rank+1)*PANELS/p;n=hi-lo;
+    double *q=malloc(n*sizeof(double));if(!q) MPI_Abort(MPI_COMM_WORLD,4);
+    double h=1.0/PANELS,local=0,integral=0;
+    #pragma acc parallel loop copyout(q[0:n]) reduction(+:local)
+    for(int k=0;k&lt;n;k++) {
+        double x=(lo+k)*h;q[k]=0.5*h*(g(x)+g(x+h));local+=q[k];
+    }
+    double host_sum=0;
+    for(int k=0;k&lt;n;k++) {
+        double x=(lo+k)*h,ref=0.5*h*(g(x)+g(x+h));
+        if(fabs(q[k]-ref)&gt;1e-15) ok=0;host_sum+=q[k];
+    }
+    if(fabs(local-host_sum)&gt;1e-11) ok=0;free(q);
+    MPI_Reduce(&amp;count,&amp;total,1,MPI_UNSIGNED_LONG_LONG,MPI_SUM,0,MPI_COMM_WORLD);
+    MPI_Reduce(&amp;local,&amp;integral,1,MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD);
+    MPI_Allreduce(&amp;ok,&amp;all,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD);
+    if(rank==0) {
+        unsigned long long ref=0;for(int i=0;i&lt;SAMPLES;i++) ref+=hit(i);
+        all=all &amp;&amp; total==ref &amp;&amp; fabs(integral-acos(-1.0))&lt;1e-9;
+        printf(&quot;ranks=2 selected_device=0 host_staging=1\n&quot;);
+        printf(&quot;samples=%d count=%llu panels=%d\n&quot;,SAMPLES,total,PANELS);
+        printf(&quot;openacc_payloads_and_integrals=%s\n&quot;,all?&quot;PASS&quot;:&quot;FAIL&quot;);
+    }
+    MPI_Bcast(&amp;all,1,MPI_INT,0,MPI_COMM_WORLD);
+    MPI_Finalize();return all?0:5;
+}
+</code></pre>
+<pre><code class="output">ranks=2 selected_device=0 host_staging=1
+samples=65539 count=51531 panels=65537
+openacc_payloads_and_integrals=PASS</code></pre>
+<p>The flag count again equals 51,531, and the program confirms execution on the accelerator. Its <code>routine seq</code> annotations make the small helper functions available for sequential execution within each device iteration. This is not a call to a host function from a GPU thread. There are no asynchronous directives, so the host consumes outputs only after their synchronous compute/data operations finish. Compilation uses <code>mpicc</code>, an MPI C compiler wrapper, together with GCC’s explicit OpenACC offload flags. A simpler build command is useful, but it is not a proof that this implementation will outperform the explicit CUDA one.</p>
+<p>Host staging means that MPI receives addresses of ordinary host buffers after device results have been copied there. GPU-aware, or CUDA-aware, MPI instead recognizes supported device buffers and arranges their transfer. Those phrases describe an implementation capability, not a property conferred by including <code>cuda_runtime.h</code> or <code>openacc.h</code>. The <a href="https://docs.open-mpi.org/en/v5.0.x/tuning-apps/networking/cuda.html">Open MPI CUDA documentation, “How do I verify that Open MPI has been built with CUDA support?”</a>, identifies a capability query. Our read-only inspection of the installed 4.1.6 build reports <code>mpi_built_with_cuda_support:value:false</code>. The examples therefore use host staging throughout.</p>
+<p>OpenACC’s <a href="https://www.openacc.org/sites/default/files/inline-images/Specification/OpenACC-3.3-final.pdf">3.3 specification, §2.8, pp. 55–56</a>, defines <code>host_data use_device</code> as exposing device addresses to host code. Address exposure neither makes an MPI build GPU-aware nor completes outstanding computation. On a verified capable stack, one would still need a completed producer, a supported MPI operation and datatype, an allocation surviving until communication completes, and a completed receive before a consuming device kernel. This chapter executes no device-buffer MPI operation. A successful host-staged run cannot validate that conditional alternative.</p>
+<p>Peer transfer is also a separate claim. Even a GPU-aware library may choose a path involving host memory. Two processes using one physical GPU do not establish a link between different GPUs, and a successful reduction does not reveal the hardware route. To measure a peer path one would need two distinct devices, a verified topology, the supported transport, and a timing scope that isolates the intended transfer. The present evidence establishes that MPI and accelerator computation cooperate correctly under the conservative host-staging protocol.</p>
+
+<h2 id="halos">From independent integrals to device-resident halo exchange <a class="timestamp" href="https://www.youtube.com/watch?v=3ga9YmuxB5o&amp;t=822s">W10L3 13:42</a></h2>
+<p>The final source discussion places accelerator work inside a distributed-memory program. The integration examples need only a final scalar combination. A spatially decomposed Jacobi solver adds a dependency every iteration, making the ownership model more demanding. The halo example below is an original extension of that discussion, not an additional source demonstration. A halo, also called a ghost region, stores values owned by a neighboring process so that a local stencil can read them.</p>
+<p>Split the grid into horizontal slabs. With two ranks and \(N=32\), each owns sixteen interior rows, plus a top and bottom ghost row. Its local row zero is a physical boundary on rank zero and a neighbor’s row on rank one. The local final row is a physical boundary on rank one and a neighbor’s row on rank zero. Left and right columns remain physical zero boundaries on both ranks. The complete interior decomposition covers all 1,024 unknowns; it does not overlap owned rows. Halo storage is duplicated, ownership is not.</p>
+<p>At iteration \(k\), the topmost owned row needs the neighbor’s bottommost owned row from the same version \(k\). Receiving version \(k-1\) changes the iteration, and receiving partly overwritten data can make the result timing-dependent. The required path for each outgoing row is</p>
+\[
+G_{r,0}(u,k)\;\longrightarrow\;H_r(u,k)\;\longrightarrow\;H_s(u_{\rm ghost},k)\;\longrightarrow\;G_{s,0}(u_{\rm ghost},k), \tag{26.7}
+\]
+<p>where \(s\) is the neighboring rank and each arrow includes completion before consumption. A synchronous update to host precedes communication; completed blocking communication precedes the device update; that update precedes the boundary stencil. Grid residency alone does not keep the host copy fresh. MPI does not know that an OpenACC kernel modified an associated device copy. The <a href="https://www.openacc.org/sites/default/files/inline-images/Specification/OpenACC-3.3-final.pdf">OpenACC 3.3 specification, §§2.14.4 and 2.16, pp. 80–83 and 87–90</a>, distinguishes updates from asynchronous execution and waiting.</p>
+<p>The program uses two blocking send–receive calls. The first sends the first owned row upward and receives the lower neighbor’s first row into the bottom ghost. The second sends the last owned row downward and receives the upper neighbor’s last row into the top ghost. Separate message tags distinguish these logical directions; a tag is an integer used in MPI’s matching rules. <code>MPI_PROC_NULL</code> stands for a nonexistent neighbor at the physical edge, leaving its receive buffer unchanged. Thus the initialized physical top and bottom conditions survive every exchange.</p>
+<p><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node62.htm">MPI 4.1, §4.2.7, “Blocking Send-Receive”</a>, defines the combined operation and requires disjoint send and receive buffers. This structure avoids the cyclic dependency that can arise when every rank first performs a blocking send waiting for another rank’s receive. It does not absolve the program from matching peers, counts, datatypes, and tags. In the example, outgoing owned rows and incoming ghost rows are distinct storage. Updates of separate pieces of the same array use separate directives to satisfy the checked compiler’s accepted form.</p>
+<p>The final norm needs another collective. An all-reduction combines rank-local values and returns the result to every participating rank. Taking the maximum of local update norms gives the global update norm in (26.1), because the owned interior sets partition the grid. A sum would compute a different quantity. Every rank then sees the same stopping information; otherwise some ranks could leave an iteration while others enter its communication calls. This example takes exactly twenty steps, so it verifies a fixed numerical workload without claiming convergence to the steady solution.</p>
+<p>The following listing performs synchronous staging and keeps the two local grids resident. It copies the new interior back into the old interior on the device after each sweep, making the storage-version transition explicit. At the end, root gathers all owned rows, including their physical side columns, and compares every entry with a complete serial twenty-step reference. It separately checks the physical top and bottom boundaries and the final norm. No timing-based acceptance or assumed cross-rank memory visibility enters the test.</p>
+<pre><code class="language-c" data-file="mpi_acc_halo.c" data-build="mpicc -O2 -fopenacc -foffload=nvptx-none -foffload-options=nvptx-none=-march=sm_80 -fcf-protection=none mpi_acc_halo.c -lm -o mpi_acc_halo" data-run="ACC_DEVICE_TYPE=nvidia timeout 20 mpirun -np 2 ./mpi_acc_halo" data-needs="gpu mpi">#include &lt;mpi.h&gt;
+#include &lt;openacc.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+#define N 32
+#define STRIDE (N+2)
+#define IDX(i,j) ((i)*STRIDE+(j))
+static double jacobi_step(const double *u,double *unew) {
+    double diff=0;
+    for(int i=1;i&lt;=N;i++) for(int j=1;j&lt;=N;j++) {
+        int k=IDX(i,j);
+        unew[k]=0.25*(u[k-STRIDE]+u[k+STRIDE]+u[k-1]+u[k+1]);
+        diff=fmax(diff,fabs(unew[k]-u[k]));
+    }
+    return diff;
+}
+int main(int argc,char **argv) {
+    MPI_Init(&amp;argc,&amp;argv);
+    int rank,p;MPI_Comm_rank(MPI_COMM_WORLD,&amp;rank);MPI_Comm_size(MPI_COMM_WORLD,&amp;p);
+    if(p!=2 || acc_get_num_devices(acc_device_nvidia)&lt;1) MPI_Abort(MPI_COMM_WORLD,2);
+    acc_set_device_num(0,acc_device_nvidia);
+    const int rows=N/2,m=(rows+2)*STRIDE,max_iter=20;
+    double *u=calloc(m,sizeof(double)),*unew=calloc(m,sizeof(double));
+    double *joined=calloc(N*STRIDE,sizeof(double));
+    if(!u||!unew||!joined) MPI_Abort(MPI_COMM_WORLD,3);
+    if(rank==0) for(int j=1;j&lt;=N;j++) u[j]=unew[j]=1;
+    int up=rank?rank-1:MPI_PROC_NULL,down=rank+1&lt;p?rank+1:MPI_PROC_NULL;
+    double global_diff=0;int gpu=0;
+    #pragma acc data copy(u[0:m]) copyin(unew[0:m])
+    {
+        #pragma acc serial copyout(gpu)
+        gpu=acc_on_device(acc_device_nvidia);
+        for(int it=0;it&lt;max_iter;it++) {
+            /* These synchronous updates finish before MPI reads host buffers. */
+            #pragma acc update self(u[STRIDE:STRIDE])
+            #pragma acc update self(u[rows*STRIDE:STRIDE])
+            MPI_Sendrecv(u+STRIDE,STRIDE,MPI_DOUBLE,up,10,
+                         u+(rows+1)*STRIDE,STRIDE,MPI_DOUBLE,down,10,
+                         MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+            MPI_Sendrecv(u+rows*STRIDE,STRIDE,MPI_DOUBLE,down,20,
+                         u,STRIDE,MPI_DOUBLE,up,20,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+            #pragma acc update device(u[0:STRIDE])
+            #pragma acc update device(u[(rows+1)*STRIDE:STRIDE])
+            double diff=0;
+            #pragma acc parallel loop collapse(2) present(u[0:m],unew[0:m]) reduction(max:diff)
+            for(int i=1;i&lt;=rows;i++) for(int j=1;j&lt;=N;j++) {
+                int k=IDX(i,j);
+                unew[k]=0.25*(u[k-STRIDE]+u[k+STRIDE]+u[k-1]+u[k+1]);
+                double d=fabs(unew[k]-u[k]);if(d&gt;diff) diff=d;
+            }
+            #pragma acc parallel loop collapse(2) present(u[0:m],unew[0:m])
+            for(int i=1;i&lt;=rows;i++) for(int j=1;j&lt;=N;j++) u[IDX(i,j)]=unew[IDX(i,j)];
+            MPI_Allreduce(&amp;diff,&amp;global_diff,1,MPI_DOUBLE,MPI_MAX,MPI_COMM_WORLD);
+        }
+    }
+    int ok=gpu,all;
+    if(rank==0) for(int j=1;j&lt;=N;j++) if(u[j]!=1) ok=0;
+    if(rank==1) for(int j=0;j&lt;STRIDE;j++) if(u[(rows+1)*STRIDE+j]!=0) ok=0;
+    MPI_Gather(u+STRIDE,rows*STRIDE,MPI_DOUBLE,joined,rows*STRIDE,MPI_DOUBLE,0,MPI_COMM_WORLD);
+    MPI_Allreduce(&amp;ok,&amp;all,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD);
+    if(rank==0) {
+        const int full=(N+2)*STRIDE;
+        double *ref=calloc(full,sizeof(double)),*tmp=calloc(full,sizeof(double));
+        if(!ref||!tmp) MPI_Abort(MPI_COMM_WORLD,4);
+        for(int j=1;j&lt;=N;j++) ref[j]=tmp[j]=1;
+        double d=0,err=0;
+        for(int it=0;it&lt;max_iter;it++) {
+            d=jacobi_step(ref,tmp);
+            for(int k=0;k&lt;full;k++) ref[k]=tmp[k];
+        }
+        for(int i=1;i&lt;=N;i++) for(int j=0;j&lt;STRIDE;j++)
+            err=fmax(err,fabs(joined[(i-1)*STRIDE+j]-ref[IDX(i,j)]));
+        all=all &amp;&amp; err&lt;1e-13 &amp;&amp; fabs(d-global_diff)&lt;1e-13;
+        printf(&quot;ranks=2 device=0 N=32 steps=20 staged_halos=1\n&quot;);
+        printf(&quot;all_rows_boundaries_and_update_norm=%s\n&quot;,all?&quot;PASS&quot;:&quot;FAIL&quot;);
+        free(ref);free(tmp);
+    }
+    MPI_Bcast(&amp;all,1,MPI_INT,0,MPI_COMM_WORLD);
+    free(u);free(unew);free(joined);MPI_Finalize();return all?0:5;
+}
+</code></pre>
+<pre><code class="output">ranks=2 device=0 N=32 steps=20 staged_halos=1
+all_rows_boundaries_and_update_norm=PASS</code></pre>
+<p>Each rank’s two application grid arrays use \(2(18)(34)(8)=9,792\) device bytes. Rows include their two side-boundary values for clarity, so one row is 272 bytes. For the sole internal interface, two rows cross between ranks per iteration, a total MPI payload of 544 bytes. Device-to-host and host-to-device copies add distinct traffic. The example also performs boundary-edge copies for a null neighbor; those copies are intentionally redundant. Omitting them is a possible optimization once the boundary cases and lifetimes are preserved.</p>
+<p>A simple nonoverlapped cost estimate helps choose a future experiment. Let \(t_c(N,p)\) be local stencil time, \(t_s(m)\) one complete staging cost for a message of \(m\) bytes, and \(t_r(p)\) the norm-reduction cost. If \(k_m\) messages are serialized on the critical path, a model is \(T_{\rm step}\approx t_c+k_m[t_s(m)+\alpha+\beta m]+t_r\). Here \(\alpha\) is message startup latency in seconds, and \(\beta\) is inverse bandwidth in seconds per byte. These are fitted transport parameters, not universal constants. More ranks shrink the owned area per rank but do not eliminate startup or the scalar collective. Eventually communication and launch costs dominate.</p>
+<p>Overlap would compute interior cells while halo messages progress, then compute the boundary rows after the receives and device updates complete. That requires independently valid interior input, live send buffers until MPI completion, correctly ordered device queues, and actual communication progress while computation runs. Merely changing a blocking call to a nonblocking call does not establish overlap. Nor does a faster total time prove which stages overlapped. A timeline with matching communication and kernel intervals would supply stronger evidence, but this single-GPU correctness test makes no such measurement claim.</p>
+<p>All local MPI runs use self transport plus Transmission Control Protocol, TCP, with workspace-rooted process-management storage and the PMIx hash component. PMIx is the Process Management Interface for Exascale; its component selection controls part of the launch infrastructure. This configuration avoids the shared-memory backing-file route and is not an inter-node network experiment. MPI emitted an unsupported <code>debugger_attach_fifo</code> warning on the Windows-mounted filesystem, while these programs completed successfully. That establishes neither debugger attachment nor its support. Raw warnings were retained alongside successful numerical checks.</p>
+
+<h2 id="limits">What the checks establish, and what still needs a machine</h2>
+<p>Correctness, numerical accuracy, reproducibility, and scaling are different claims. Correctness here means that the specified partitions, kernel outputs, halo dependencies, and reductions satisfy explicit reference checks. Numerical accuracy relates those computations to π or to the continuous heat equation. Reproducibility identifies which results remain stable under a specified change of decomposition, arithmetic, or software. Scaling compares controlled elapsed times as physical resources change. Evidence for the first claim cannot silently serve as evidence for all four.</p>
+<table><caption>Source claims and their status in the bounded reconstruction</caption><thead><tr><th>Source item</th><th>Checked interpretation</th><th>Boundary</th></tr></thead><tbody>
+<tr><td>Matrix–vector product occupies 83% of a 22.38-second run.</td><td>Useful source profile for the Amdahl calculation.</td><td>Not a laptop measurement.</td></tr>
+<tr><td>Nested NVTX range percentages describe calc, swap, and while.</td><td>Range totals can include nested time; use their actual denominator.</td><td>They are not automatically disjoint application fractions.</td></tr>
+<tr><td>Two Laplace phase times accompany a 39.43-second total.</td><td>Displayed phase times sum to 40.53 seconds.</td><td>The source display does not resolve the mismatch.</td></tr>
+<tr><td>Fixed CUDA seed gives repeatable π.</td><td>Visible rank-independent initialization repeats streams when local work and geometry match.</td><td>Repeatability is not independent sampling.</td></tr>
+<tr><td>CUDA trapezoid outputs vary with rank count.</td><td>The displayed extra left endpoints predict the two- and four-rank outputs.</td><td>Other implementations still require their own arithmetic audit.</td></tr>
+<tr><td>MPI and OpenACC can cooperate.</td><td>Two host-staged ranks pass full payload and grid checks here.</td><td>One physical GPU; no multi-GPU speedup or peer-link result.</td></tr>
+</tbody></table>
+<p>Strong scaling fixes the total mathematical work while increasing physical processing resources. Weak scaling fixes work per resource while increasing the global problem. Merely increasing rank count on one fixed GPU is neither evidence of increased accelerator resources nor a clean weak-scaling test. A performance study must record placement, visible devices, sample ownership, timing scope, transfers, warmup, and repeated variability. The present timing evidence instead shows why small, launch-heavy problems can lose even with correctly generated GPU code.</p>
+<p>These programs use small allocations, bounded iteration counts, and synchronous staging. They do not test two GPUs, a network adapter, GPU-aware MPI, peer-memory access, asynchronous progress, or cluster device assignment. The deterministic mixer has no claimed scientific random-number certification. Twenty Jacobi iterations do not solve the continuous boundary-value problem to a certified tolerance. The next optimization should be chosen from an actual profile while retaining a separately checkable numerical reference and a complete accounting of what work changed.</p>
+
+<h2 id="exercises">Six worked exercises</h2>
+<h3>Exercise 1 — Price the hotspot and the overhead</h3>
+<p>A 22.38-second baseline spends 83% in one kernel. That kernel is accelerated tenfold, but setup and movement add one second. Derive the new elapsed time and speedup. What is the maximum tolerable overhead before the change ceases to help?</p>
+<details><summary>Solution</summary>
+<p>The unchanged fraction is \(f=0.17\). The original kernel occupies \(22.38(0.83)=18.5754\) seconds and the remaining work 3.8046 seconds. The new kernel needs 1.85754 seconds. Including one second gives \(T_{\rm new}=6.66214\) seconds and speedup \(22.38/6.66214\approx3.36\). Ignoring overhead would predict 3.95, which overstates the actual modeled gain.</p>
+<p>The saving before overhead is \(18.5754(1-1/10)=16.71786\) seconds. Overhead must be strictly below that for a strict improvement. Equality gives the original time; more overhead loses. This calculation assumes the untouched work really stays unchanged and the accelerated kernel computes exactly the same task. If transfer restructuring also changes other phases, measure the revised decomposition rather than forcing it into this two-part model.</p>
+</details>
+<h3>Exercise 2 — Reproducible does not mean independent</h3>
+<p>Each of four ranks reports a random estimator with variance \(\sigma^2\). Compare the variance of their average when the ranks use independent streams and when all four repeat the identical stream. Explain why a fixed seed alone cannot decide between the cases.</p>
+<details><summary>Solution</summary>
+<p>For estimates \(A_r\), the variance of \(\bar A=\sum_rA_r/4\) is \(\sum_{r,s}\operatorname{Cov}(A_r,A_s)/16\). With independence, only four diagonal terms remain, giving \(\sigma^2/4\) and half the original standard deviation. With identical streams and identical work, every estimate is the same random variable. All sixteen covariance terms equal \(\sigma^2\), so the result remains \(\sigma^2\). Four times the executed work bought no variance reduction.</p>
+<p>A fixed seed controls repeatability for a particular generator initialization. Stream identity also depends on subsequence, counter, global sample identifier, and how much work each thread consumes. Incorporating rank can distinguish streams, but changes in rank count can then change the sample set. A global counter design preserves sample identity across decompositions; a scientifically suitable generator and its validation are still needed before adopting the independent-uniform statistical model.</p>
+</details>
+<h3>Exercise 3 — Find the missing panels</h3>
+<p>Partition seventeen trapezoids among three ranks. Give every interval from (26.4), prove coverage, and diagnose an implementation that simply assigns five panels to each rank. Would averaging three local estimates repair it?</p>
+<details><summary>Solution</summary>
+<p>The boundaries are \(0,5,11,17\), so the half-open intervals are \([0,5)\), \([5,11)\), and \([11,17)\), containing five, six, and six panels. Adjacent boundaries agree, so there is no gap or overlap; the first boundary is zero and the last seventeen. Summing the counts telescopes to seventeen. This proves ownership independently of the function values.</p>
+<p>Three counts of five cover only fifteen panels. If rank starts also use five-panel strides, the final two panels are absent. Averaging local results cannot invent their contributions. For area sums, combine the disjoint contributions by addition. If instead each local quantity is a normalized mean, combine it with its actual sample count: \(\sum_r n_r\bar g_r/\sum_r n_r\). An unweighted mean gives the five-panel rank the same influence as a six-panel rank, solving a different weighting problem.</p>
+</details>
+<h3>Exercise 4 — Separate an endpoint bug from rounding</h3>
+<p>A local kernel sums the left endpoints \(g(a),g(a+h),\ldots,g(b-h)\). Its driver then adds \(h[g(a)+g(b)]/2\). Derive its excess over the trapezoidal rule, then predict the two-rank bias for ten million global panels. Give two valid repairs.</p>
+<details><summary>Solution</summary>
+<p>The correct trapezoid formula is \(h[g(a)/2+\sum_{i=1}^{m-1}g(a+ih)+g(b)/2]\). The shown combination has coefficient \(3/2\) on \(g(a)\), so its excess is exactly \(hg(a)\) in real arithmetic. Over ranks this becomes (26.6). With two equal subintervals, \(a=0\) and \(a=1/2\), giving \(10^{-7}(4+3.2)=7.2\times10^{-7}\). This is a systematic positive bias with a known dependence on partitioning, not an unspecified communication-precision effect.</p>
+<p>One repair starts the kernel at local index one and retains the positive endpoint correction. The other retains the left-endpoint kernel and uses the signed correction \(h[g(b)-g(a)]/2\). A panel-based sum makes the weights explicit and avoids the separate correction entirely. Each repair still requires complete coverage when the panel count is not divisible by the rank count. Testing a constant function is a particularly transparent preliminary audit: correct quadrature must return the constant times the covered interval length.</p>
+</details>
+<h3>Exercise 5 — Diagnose the missing completion event</h3>
+<p>A rank launches a boundary kernel asynchronously, starts an MPI nonblocking send from a host array, and immediately overwrites that array for the next iteration. List the required ordering events for a correct staged exchange. Would a final MPI barrier repair the sequence?</p>
+<details><summary>Solution</summary>
+<p>The producer kernel must complete before a device-to-host copy reads its result. That copy must complete before MPI reads the host send buffer. A nonblocking MPI initiation starts a request; it does not make the buffer reusable. Completion of the send request must precede overwriting or freeing that buffer. At the receiver, completion of its receive precedes copying the received host data to the device, and completion of that copy precedes a boundary kernel consuming the new halo. These are ownership and version constraints on specific allocations.</p>
+<p>A later barrier does not retroactively fix a send that read stale host data or a buffer overwritten while communication was active. It also does not by itself complete an unrelated device queue. Use explicit accelerator completion and MPI request-completion operations at the required edges. Separate old and new staging buffers can permit overlap, but each buffer still needs its own lifetime. The checked halo listing avoids this particular complexity by using synchronous updates and blocking send–receive operations.</p>
+</details>
+<h3>Exercise 6 — Design the next bounded measurement</h3>
+<p>The three unprofiled captures give serial phase totals of 2.211, 2.391, and 2.262 milliseconds, and resident accelerator times of 8.681, 10.097, and 19.799 milliseconds. Interpret these results without claiming multi-GPU scaling. Propose a bounded test of checking the convergence norm every tenth iteration rather than every iteration, and state what numerical evidence must accompany it.</p>
+<details><summary>Solution</summary>
+<p>Every observed accelerator phase is slower than its matching serial phase total. The matched slowdowns are approximately 3.93, 4.22, and 8.75. The variability is substantial, and the experiment contains one GPU throughout. It therefore establishes neither a stable accelerator speedup nor any multi-GPU scaling law. The trace’s submillisecond stencil total suggests examining launch, reduction, and synchronization costs, but the trace is a different instrumented run and must not be substituted into an unprofiled timing ratio.</p>
+<p>A bounded follow-up could retain the 128 × 128 grid, cap at eighty sweeps, and compare checking the norm at every sweep with checking it at sweeps ten, twenty, and so on. Perform at least three separately captured runs per variant, preserve the initial grid and boundary conditions, and record iteration counts as well as elapsed times. Compare the complete grid and actual update norm against a serial reference at each variant’s final iteration. Reducing the frequency of host decisions can reduce synchronization, while a tolerance-based solve may perform extra iterations before detecting convergence. Report that additional work explicitly. Successful fixed-work checks and a documented stopping comparison would justify discussing the tradeoff; these proposed modified runs have not been performed here.</p>
+</details>
+
+<h2 id="primary-sources">Recordings and primary sources</h2>
+<ol>
+<li><a href="https://www.youtube.com/watch?v=qgQuj0ZbdFc">W10L1, Profiling and parallelizing the serial code using OpenACC (22:56)</a>. Compiler feedback, representative workloads, profiles, NVTX ranges, dependency analysis and OpenACC iteration.</li>
+<li><a href="https://www.youtube.com/watch?v=fWt2N3mhbfU">W10L2, Programming for multiple-device architecture using MPI and CUDA (24:53)</a>. Monte Carlo and trapezoid kernels, rank-local results, MPI reductions, object compilation and linking.</li>
+<li><a href="https://www.youtube.com/watch?v=3ga9YmuxB5o">W10L3, Programming for multiple-device architecture using MPI and OpenACC (15:29)</a>. Directive-based integration, local reductions, compiler workflow and distributed accelerator organization.</li>
+<li><a href="https://docs.nvidia.com/hpc-sdk/compilers/hpc-compilers-user-guide/index.html">NVIDIA HPC Compilers User’s Guide 26.9</a>. Compiler names and compile-time optimization feedback, distinct from runtime profiling. Checked: Table 1; §3.2.2 -Minfo.</li>
+<li><a href="https://docs.nvidia.com/nsight-systems/UserGuide/index.html">NVIDIA Nsight Systems User Guide</a>. Focused profiling, NVTX-labelled regions, collection and timeline scope. Checked: Preparing Your Application for Profiling; Marking and Labeling Regions; Profiling from the CLI.</li>
+<li><a href="https://nvidia.github.io/NVTX/">NVTX documentation</a>. Annotations give tools context and normally do nothing without a consuming tool. Checked: What does NVTX do?.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html">CUDA Runtime API: Device Management</a>. Device selection and host-side completion of preceding device tasks. Checked: cudaSetDevice; cudaDeviceSynchronize.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node130.htm">MPI 4.1 §7.9.1 Reduce</a>. Reduction input/output semantics and permitted reassociation affecting floating-point results. Checked: §7.9.1 including advice to users.</li>
+<li><a href="https://docs.open-mpi.org/en/v5.0.x/tuning-apps/networking/cuda.html">Open MPI CUDA documentation</a>. CUDA-aware support is implementation capability; ompi_info query identifies build support. Actual installed version was inspected separately. Checked: §11.2.6.1–3 and §11.2.6.5.</li>
+<li><a href="https://www.openacc.org/sites/default/files/inline-images/Specification/OpenACC-3.3-final.pdf">OpenACC 3.3 specification, November 2022</a>. Data mappings, host_data use_device address exposure, update and wait semantics. Checked: §§2.6–2.8 pp.38–56; §2.14.4 pp.80–82; §2.16 pp.87–90.</li>
+<li><a href="https://gcc.gnu.org/onlinedocs/gcc-13.3.0/gcc/Nvidia-PTX-Options.html">GCC 13.3 NVIDIA PTX target options</a>. sm_80 is a supported GCC13.3 PTX target architecture. Checked: §3.19.35 -march.</li>
+<li><a href="https://www.thesalmons.org/john/random123/papers/random123sc11.pdf">Salmon, Moraes, Dror and Shaw (2011), Parallel Random Numbers: As Easy as 1, 2, 3</a>. Counter/key organization of parallel pseudorandom generation; does not certify the teaching mixer. Checked: Abstract and §2.</li>
+<li><a href="https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node62.htm">MPI 4.1 §4.2.7 Blocking Send-Receive</a>. Combined blocking send/receive semantics, avoidance of cyclic shift dependencies, and disjoint buffers. Checked: §4.2.7.</li>
+</ol>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-25-openacc-loop-optimization-asynchrony-multiple-devices.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-27-serial-profiling-debugging-gprof-valgrind-gdb.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

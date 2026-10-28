@@ -1,12 +1,12 @@
 {
   "course": "High Performance Scientific Computing",
-  "checked_at_utc": "2026-10-28T12:32:30.615348+00:00",
+  "checked_at_utc": "2026-10-28T14:12:21.981616+00:00",
   "scope": "Reader mechanics only; does not certify chapter or course completion",
   "static": {
     "status": "passed",
-    "html_files": 30,
-    "local_links_checked": 390,
-    "timestamps_checked": 245,
+    "html_files": 36,
+    "local_links_checked": 474,
+    "timestamps_checked": 292,
     "chapter_pages_with_dollar_math": 0,
     "failures": [],
     "warnings": []
@@ -462,6 +462,114 @@
         "controls": true,
         "emptyToc": false,
         "file": "chapter-25-openacc-loop-optimization-asynchrony-multiple-devices.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 126,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-26-multi-device-profiling-mpi-cuda-openacc.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 126,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-26-multi-device-profiling-mpi-cuda-openacc.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 85,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-27-serial-profiling-debugging-gprof-valgrind-gdb.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 85,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-27-serial-profiling-debugging-gprof-valgrind-gdb.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 66,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-28-mpi-performance-analysis-and-debugging.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 66,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-28-mpi-performance-analysis-and-debugging.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 312,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-29-numerical-methods-scientific-libraries.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 312,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-29-numerical-methods-scientific-libraries.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 103,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-30-batch-schedulers-scientific-visualization.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 103,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-30-batch-schedulers-scientific-visualization.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 155,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-31-heterogeneous-computing-processor-trends.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 155,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-31-heterogeneous-computing-processor-trends.html",
         "viewport": 390
       },
       {

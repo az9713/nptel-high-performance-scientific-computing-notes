@@ -2781,7 +2781,353 @@
           "output_diff": []
         }
       ]
+    },
+    "chapter-26-multi-device-profiling-mpi-cuda-openacc.html": {
+      "status": "passed",
+      "checked_at_utc": "2026-10-28T12:42:23.357305+00:00",
+      "fingerprint_sha256": "9767d4940c4fab0550073bc5500952e682c1a93495005000d526a2211c283c65",
+      "execution_profile": "Workspace-contained execution; MPI self,tcp transport.",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "profile_acc.c",
+          "needs": [
+            "gpu"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "77792735eafca47f505fa268cca29f33caf64bbdceab7163be5d7b1c7fa7a104",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "quadrature_audit.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "63814a9782320d744ff119a9562fa23d63ec96577dfbc9bdcdd7d665758c3647",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "mpi_cuda_pi.cu",
+          "needs": [
+            "gpu",
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "6a2504f572ecba82857528bc46ad5871ab45cda0f8b1b6bdee4012285597d9a1",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "mpi_acc_pi.c",
+          "needs": [
+            "gpu",
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "bf1bdd67e94974a06e2b640373a3ab0043e6d8fe868477ece2aa02f64b0f0ca4",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "mpi_acc_halo.c",
+          "needs": [
+            "gpu",
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "f0e8a37c66dfb9d4ac4b7e072abd946f0a93c7824f8d48f46143b0489c6d23a7",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-27-serial-profiling-debugging-gprof-valgrind-gdb.html": {
+      "status": "passed",
+      "checked_at_utc": "2026-10-28T12:46:17.097119+00:00",
+      "fingerprint_sha256": "984714a2d6a0054ec98fb527bd641e266f2bfe11034253dfa5a6cccba7bcc410",
+      "execution_profile": "Workspace-contained execution; MPI self,tcp transport.",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "profile_jacobi.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "2274d4bd7e44d4d59f2bb1ea6f6fc8977ce2f2661cded83fe71cc05e745a3e47",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "memory_case.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "850179d543833f455eeb976d7d03cf52908c5d546844e54b79e7d92e358f0792",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "cache_matrix.c",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "23ab1606486f2be63a8f36691bceb19583809ed5ac81284a381a8565ae81dd21",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "thread_case.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "52b41560f492de79b1d84b986506c9236245e7ce4aa1ace342f3c43cac5373b1",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "debug_jacobi.c",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "74256b5c5f064009df06c42b8f98c5d4b954338435e656f49dfb9e29dcc26043",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-28-mpi-performance-analysis-and-debugging.html": {
+      "status": "passed",
+      "checked_at_utc": "2026-10-28T12:54:53.560492+00:00",
+      "fingerprint_sha256": "80db09698c66f9ff1fa167a2e65ffdb3a1d4e755c76ed39f90e7ae8be456aade",
+      "execution_profile": "Workspace-contained execution; MPI self,tcp transport.",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "mpi_profile.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "32160995111f9b029ab453731acc9a15c5e676a0b8b794ce65136bb01ee5b623",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "mpi_metrics.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "e28c61128d931e0f6a5c11c10d3884205a926f680307466cdc95b38ead7fa07d",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "mpi_gdb.py",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "efa2ac5bc569fe0309c93ade45de8ae1cb9757e766175c1131dbf8c9bf2fc7f2",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "mpi_envelope.c",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "d2367a18ab7d5950e8dc6a0d5000460a6a69ec23627a9b11f42a168d15dc133f",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "mpi_memcheck.py",
+          "needs": [
+            "mpi"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "7d02c8dab6a6ba6805f49ae400797574594df3e1f17900d6b7dcb36619a14d28",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-29-numerical-methods-scientific-libraries.html": {
+      "status": "passed",
+      "checked_at_utc": "2026-10-28T13:08:44.151952+00:00",
+      "fingerprint_sha256": "974059b7c2219eb82bb113558b6a510a0c77220060e0db2e21ba42ab984b5c84",
+      "execution_profile": "Workspace-contained execution; MPI self,tcp transport.",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "rounding.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "3b6f3b9c3837f9c4fd25995fa9d43eff09256bbe87b4b613c1edc26600bd9dbd",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "thrust_sort.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "c33668f5644bd58406a99e89e12e1d22c407262e48c589db21b7bb8b4d101637",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "gemm_compare.py",
+          "needs": [],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "826013f3a4851bcb1aeda149aa9a62abbc920a85ee6cc3b1519b3b608ec847bf",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 4,
+          "file": "library_poisson.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "8fbc9dcd52a1d4bbb4c20061aace54153e16e7485c3978256fcaf7c3e34127a8",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 5,
+          "file": "fft_reference.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "5f8a3bb82976f195213434067ce95de22f0fc332bc0eed1c8b6edc95f1405253",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-30-batch-schedulers-scientific-visualization.html": {
+      "status": "passed",
+      "checked_at_utc": "2026-10-28T13:26:02.850091+00:00",
+      "fingerprint_sha256": "c102403711ab6a8eba4672fbb8e90087d2115b4adcc7525028566f8442217810",
+      "execution_profile": "Workspace-contained execution; MPI self,tcp transport.",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "resource_plan.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "e8e474719b44b20c5100110931454d9d25361f5eecaef6fab1ee3bd29aabc51a",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "backfill_model.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "6979b1b3b40c6d0e7a922ec5fb9427cd69fea71946a81ce143eaa22b4cea2cb3",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 3,
+          "file": "heat_vtk.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "61995afa18df56b390820acb26b867a431f8999fb673ee03a73050f5ff787bc7",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
+    },
+    "chapter-31-heterogeneous-computing-processor-trends.html": {
+      "status": "passed",
+      "checked_at_utc": "2026-10-28T13:36:35.767602+00:00",
+      "fingerprint_sha256": "cfb2325d2f19d2a512fe09e8bcf4e069c9e83ae4be4a2be3485fd6beddb818f6",
+      "execution_profile": "Workspace-contained execution; MPI self,tcp transport.",
+      "checks": [
+        {
+          "listing": 1,
+          "file": "heterogeneous_model.py",
+          "needs": [],
+          "check": "exact",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "806cd166e49446ee5a7b15bb7a9e761277126c2f66b02366fe847e00bd4038f5",
+          "stderr_tail": "",
+          "output_diff": []
+        },
+        {
+          "listing": 2,
+          "file": "jacobi_choice.cu",
+          "needs": [
+            "gpu"
+          ],
+          "check": "returncode",
+          "returncode": 0,
+          "passed": true,
+          "listing_sha256": "61058a47d809d9a2cf2ce8642afa9a6cd0e512cd4bdcf3466feb3f90487ec7bf",
+          "stderr_tail": "",
+          "output_diff": []
+        }
+      ]
     }
   },
-  "updated_at_utc": "2026-10-28T12:30:51.342018+00:00"
+  "updated_at_utc": "2026-10-28T14:00:03.067351+00:00"
 }

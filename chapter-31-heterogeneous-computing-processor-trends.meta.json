@@ -1,0 +1,761 @@
+{
+  "chapter": 31,
+  "title": "Heterogeneous computing: choosing resources under communication, power, and numerical constraints",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions; no verified audio review",
+  "recordings": [
+    {
+      "video_id": "e9ffZ3g-PrM",
+      "label": "W12L1",
+      "playlist_index": 70,
+      "duration_seconds": 1320
+    },
+    {
+      "video_id": "cEq5bYr_s0E",
+      "label": "W12L2",
+      "playlist_index": 71,
+      "duration_seconds": 1060
+    },
+    {
+      "video_id": "jvO9OqBYyw4",
+      "label": "W12L3",
+      "playlist_index": 72,
+      "duration_seconds": 830
+    },
+    {
+      "video_id": "vQ9tqILbvhw",
+      "label": "W12L4",
+      "playlist_index": 73,
+      "duration_seconds": 814
+    },
+    {
+      "video_id": "nvcyuGafryY",
+      "label": "W12L5",
+      "playlist_index": 74,
+      "duration_seconds": 714
+    },
+    {
+      "video_id": "yzMssCnXffE",
+      "label": "W12L6",
+      "playlist_index": 75,
+      "duration_seconds": 1090
+    },
+    {
+      "video_id": "NQux0OuWpWg",
+      "label": "W12L7",
+      "playlist_index": 76,
+      "duration_seconds": 1104
+    }
+  ],
+  "frames_viewed": {
+    "e9ffZ3g-PrM": [
+      "f0003",
+      "f0007",
+      "f0012",
+      "f0013",
+      "f0018",
+      "f0022",
+      "f0027",
+      "f0032",
+      "f0037"
+    ],
+    "cEq5bYr_s0E": [
+      "f0003",
+      "f0007",
+      "f0011",
+      "f0016",
+      "f0020",
+      "f0024",
+      "f0028",
+      "f0032"
+    ],
+    "jvO9OqBYyw4": [
+      "f0003",
+      "f0006",
+      "f0010",
+      "f0014",
+      "f0017",
+      "f0020",
+      "f0024",
+      "f0027"
+    ],
+    "vQ9tqILbvhw": [
+      "f0003",
+      "f0007",
+      "f0010",
+      "f0013",
+      "f0016",
+      "f0019",
+      "f0022",
+      "f0025"
+    ],
+    "nvcyuGafryY": [
+      "f0003",
+      "f0006",
+      "f0009",
+      "f0012",
+      "f0015",
+      "f0018",
+      "f0021",
+      "f0023"
+    ],
+    "yzMssCnXffE": [
+      "f0003",
+      "f0007",
+      "f0011",
+      "f0015",
+      "f0019",
+      "f0023",
+      "f0028",
+      "f0034",
+      "f0035",
+      "f0036"
+    ],
+    "NQux0OuWpWg": [
+      "f0003",
+      "f0007",
+      "f0009",
+      "f0010",
+      "f0013",
+      "f0015",
+      "f0017",
+      "f0019",
+      "f0024",
+      "f0028",
+      "f0031",
+      "f0032",
+      "f0033",
+      "f0035"
+    ]
+  },
+  "frame_inspection_methods": {
+    "selected_original_frames_in_contact_sheets": 58,
+    "individual_original_frames": 14,
+    "unique_original_frames": 65,
+    "detail": "Contact sheets use 800 \u00d7 450 selected frames. Quantitative, code and architectural terminology claims were also inspected in original 1280 \u00d7 720 frames where relevant. Frame 75 f0036 contains credits and supplies no material claim."
+  },
+  "source_uncertainties": [
+    "No audio verification was performed. Machine-transcript discrepancies are not attributed as spoken errors.",
+    "PUE/linear-power/exponential-communication wording appears in the machine transcript; the inspected PUE-era frame only has qualitative power/cooling bullets. Public text gives supported definitions and constructed countermodels, without alleging those exact spoken/slide errors.",
+    "Grace Hopper and Dojo frames list examples but do not establish same-die or in-vehicle claims. The chapter uses NVIDIA 2022 chip-to-chip documentation and Tesla April 2026 training/inference distinction.",
+    "Current availability/performance of the lecture-era processor, packaging, cloud and memory examples is not audited or implied. No deadline for the end of Moore-style scaling is established.",
+    "Dennard 1974 and Bekenstein 1981 were relied upon only at their publicly opened abstract scope. The ideal scaling algebra is an original model, not a claimed full-paper reproduction.",
+    "The CUDA guide identifies itself as legacy; used for stable block-barrier semantics. Runtime web documentation13.4 is separate from the installed CUDA 13.3.73 captured locally.",
+    "No quantum, neuromorphic, optical, FPGA, ASIC, simultaneous CPU/GPU partition, multi-GPU, inter-node or physical-energy experiment was performed.",
+    "CPU sweeps include a maximum-change reduction absent from the GPU sweep kernel. Fixed-sweep payloads match, but this is not a comparison of identical convergence-checking work."
+  ],
+  "sections": [
+    {
+      "section": "The calculation, its data, and its completion condition",
+      "id": "model",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Laplace/Jacobi running problem used across the book",
+      "research_extension": "None; formal construction",
+      "teaching_construction": "Finite-sweep data-version graph, full payload/range/boundary checks and algebraic residual/change relation",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Scaling limits combine work, bytes, power, and reliability",
+      "id": "scaling",
+      "video_id": "e9ffZ3g-PrM",
+      "start": 38,
+      "end": 1263,
+      "lecture_material": "Amdahl/Gustafson; memory/power/cooling; communication; post-Moore paradigms; fault tolerance; specialization and physical bounds",
+      "research_extension": "PUE; Landauer; Bekenstein; later dark-silicon distinction",
+      "teaching_construction": "Jacobi intensity, message-count countermodels, conditional power model and synthetic reliability calculation",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Shared-memory revision: ownership precedes scheduling",
+      "id": "revision-openmp",
+      "video_id": "cEq5bYr_s0E",
+      "start": 6,
+      "end": 1012,
+      "lecture_material": "OpenMP fork/join, worksharing, synchronization, storage/scheduling/reduction and examples",
+      "research_extension": "OpenMP 5.2 parallel/reduction clauses",
+      "teaching_construction": "Jacobi ownership/barrier argument; Exercise 2 race and matrix-product reasoning",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Device revision: a block barrier has a bounded scope",
+      "id": "revision-cuda",
+      "video_id": "jvO9OqBYyw4",
+      "start": 6,
+      "end": 794,
+      "lecture_material": "CUDA hierarchy/memory/launch/atomics/occupancy, examples and portability/performance comparison",
+      "research_extension": "CUDA block synchronization and event API",
+      "teaching_construction": "Quotient/remainder index proof, multi-block counterexample, bounded GPU experiment; Exercise 3",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Distributed-memory revision: initiation is not completion",
+      "id": "revision-mpi",
+      "video_id": "vQ9tqILbvhw",
+      "start": 6,
+      "end": 757,
+      "lecture_material": "MPI process/rank/context, sends/receives, collectives, barriers, weather decomposition, debugging/profiling",
+      "research_extension": "MPI 4.1 \u00a7\u00a74.4,4.7 completion/overlap",
+      "teaching_construction": "Strip latency/bandwidth budget and threshold; Exercise 4",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Directive revision: residency is an algorithmic decision",
+      "id": "revision-openacc",
+      "video_id": "nvcyuGafryY",
+      "start": 6,
+      "end": 685,
+      "lecture_material": "OpenACC parallel/kernels/loop, data/update, gang/worker/vector, reductions and numerical examples",
+      "research_extension": "OpenACC 3.3 \u00a7\u00a72.6,2.7,2.14.4,2.16",
+      "teaching_construction": "Persistent-versus-eager algebra; stale-version repair in Exercise 5; ownership table",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Choose a hybrid model by its critical path",
+      "id": "hybrid",
+      "video_id": "yzMssCnXffE",
+      "start": 6,
+      "end": 891,
+      "lecture_material": "Heterogeneous execution, hybrid combinations, model selection, load balance, streams/topology/tasks",
+      "research_extension": "Kokkos memory/execution distinctions",
+      "teaching_construction": "Heterogeneous Amdahl and optimal divisible CPU/GPU split, halo break-even, exact rational model listing",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Measure the same payload, then name each timing boundary",
+      "id": "measurement",
+      "video_id": "yzMssCnXffE",
+      "start": 922,
+      "end": 1051,
+      "lecture_material": "Unified profiling, AI tuning, quantum/classical workflows and unified programming models",
+      "research_extension": "CUDA event scope; Intel CPU topology; Kokkos",
+      "teaching_construction": "Actual one-GPU fixed200-sweep comparison against CPU1/4, five retained repetitions after warm-up, full payload/residual checks",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "More transistors require better organization, not a promised deadline",
+      "id": "trends",
+      "video_id": "NQux0OuWpWg",
+      "start": 16,
+      "end": 1066,
+      "lecture_material": "Power/memory/security constraints; multicore/ISA/speculation; domain specificity; GPU/RISC-V/memory/packaging/cloud/DVFS/security/AI/edge/portable software/optical/unified memory",
+      "research_extension": "Dennard abstract;2011 dark-silicon model; NVIDIA 2022Grace Hopper; RISC-V; Tesla April 2026; Google 2021 placement; NIST 2024",
+      "teaching_construction": "Ideal constant-field scaling, power-limited active-core budget, chiplet yield/thermal argument",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "What these models and runs establish",
+      "id": "limits",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Limits consistent with all seven recordings",
+      "research_extension": "None",
+      "teaching_construction": "Boundary between finite-work correctness, convergence, performance and energy",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Six integrated exercises",
+      "id": "exercises",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "W12L1\u2013W12L7 integrated explicitly; W12L2\u2013L5 mapped to Exercises 2\u20135",
+      "research_extension": "Previously cited semantics",
+      "teaching_construction": "Exactly 6 fully reasoned derive/compute/counterexample/diagnose/design/measurement problems",
+      "evidence_class": "derivation"
+    }
+  ],
+  "recording_coverage": [
+    {
+      "index": 70,
+      "video_id": "e9ffZ3g-PrM",
+      "label": "W12L1",
+      "duration_seconds": 1320,
+      "coverage": [
+        {
+          "start": 6,
+          "end": 165,
+          "topics": "Fixed/scaled workload; Amdahl/Gustafson",
+          "destination": "scaling; exercise1"
+        },
+        {
+          "start": 199,
+          "end": 576,
+          "topics": "Memory bandwidth; power/cooling/PUE; communication latency/bandwidth",
+          "destination": "scaling; exercise4"
+        },
+        {
+          "start": 610,
+          "end": 908,
+          "topics": "Dennard limits; neuromorphic/fault tolerance; optical/alternative devices",
+          "destination": "scaling; trends; limits"
+        },
+        {
+          "start": 908,
+          "end": 1263,
+          "topics": "CPU/GPU/FPGA/ASIC; domain specificity; exascale/zettascale; Landauer/Bekenstein; data movement/unified models",
+          "destination": "scaling; hybrid; trends"
+        }
+      ]
+    },
+    {
+      "index": 71,
+      "video_id": "cEq5bYr_s0E",
+      "label": "W12L2",
+      "duration_seconds": 1060,
+      "coverage": [
+        {
+          "start": 6,
+          "end": 267,
+          "topics": "API, shared memory, legacy incremental porting, fork/join, compilation",
+          "destination": "revision-openmp"
+        },
+        {
+          "start": 301,
+          "end": 588,
+          "topics": "parallel/for/sections/single/master/barrier, thread controls",
+          "destination": "revision-openmp"
+        },
+        {
+          "start": 623,
+          "end": 914,
+          "topics": "Synchronization, data sharing, scheduling, reductions",
+          "destination": "revision-openmp; exercise2"
+        },
+        {
+          "start": 945,
+          "end": 1012,
+          "topics": "Matrix product, image convolution and Laplace/flow examples",
+          "destination": "revision-openmp; exercise2"
+        }
+      ]
+    },
+    {
+      "index": 72,
+      "video_id": "jvO9OqBYyw4",
+      "label": "W12L3",
+      "duration_seconds": 830,
+      "coverage": [
+        {
+          "start": 6,
+          "end": 240,
+          "topics": "CUDA motivation, host/device, hierarchy, compiler split",
+          "destination": "revision-cuda; measurement"
+        },
+        {
+          "start": 272,
+          "end": 564,
+          "topics": "Launch configuration, memory management/hierarchy, synchronization/atomics, occupancy",
+          "destination": "revision-cuda; exercise3"
+        },
+        {
+          "start": 596,
+          "end": 794,
+          "topics": "Matrix/image/CFD/Monte Carlo cases, profiling and comparison with directives",
+          "destination": "revision-cuda; measurement; limits"
+        }
+      ]
+    },
+    {
+      "index": 73,
+      "video_id": "vQ9tqILbvhw",
+      "label": "W12L4",
+      "duration_seconds": 814,
+      "coverage": [
+        {
+          "start": 6,
+          "end": 328,
+          "topics": "MPI distributed-memory execution, wrapper, launch, initialization/rank/size",
+          "destination": "revision-mpi"
+        },
+        {
+          "start": 360,
+          "end": 522,
+          "topics": "Blocking/nonblocking, collectives, synchronization",
+          "destination": "revision-mpi; exercise4"
+        },
+        {
+          "start": 553,
+          "end": 757,
+          "topics": "Image/weather domain decomposition, profiling/debugging, partitioning, optimization/model comparison",
+          "destination": "revision-mpi; hybrid; exercise4"
+        }
+      ]
+    },
+    {
+      "index": 74,
+      "video_id": "nvcyuGafryY",
+      "label": "W12L5",
+      "duration_seconds": 714,
+      "coverage": [
+        {
+          "start": 6,
+          "end": 207,
+          "topics": "OpenACC portability/incremental programming/compiler",
+          "destination": "revision-openacc"
+        },
+        {
+          "start": 237,
+          "end": 432,
+          "topics": "parallel/kernels/loop, gang/worker/vector, data/update, data clauses/reductions",
+          "destination": "revision-openacc; exercise5"
+        },
+        {
+          "start": 463,
+          "end": 685,
+          "topics": "Matrix/image/CFD/Monte Carlo cases, profiling, performance control/portability comparison",
+          "destination": "revision-openacc; hybrid; exercise5"
+        }
+      ]
+    },
+    {
+      "index": 75,
+      "video_id": "yzMssCnXffE",
+      "label": "W12L6",
+      "duration_seconds": 1090,
+      "coverage": [
+        {
+          "start": 6,
+          "end": 233,
+          "topics": "Heterogeneous definition, CPU/GPU/FPGA/ASIC, complexity/transfers/load balance/dependencies",
+          "destination": "model; hybrid"
+        },
+        {
+          "start": 264,
+          "end": 532,
+          "topics": "OpenMP+CUDA, MPI+CUDA, OpenMP+OpenACC, triple hybrid",
+          "destination": "hybrid"
+        },
+        {
+          "start": 568,
+          "end": 891,
+          "topics": "Choosing models; memory dependence/divergence; streams; topology; tasks/OpenACC data",
+          "destination": "hybrid; measurement"
+        },
+        {
+          "start": 922,
+          "end": 1051,
+          "topics": "Unified profiling, AI compiler tuning, quantum/classical, SYCL/Kokkos/oneAPI",
+          "destination": "measurement final paragraphs; trends"
+        }
+      ]
+    },
+    {
+      "index": 76,
+      "video_id": "NQux0OuWpWg",
+      "label": "W12L7",
+      "duration_seconds": 1104,
+      "coverage": [
+        {
+          "start": 16,
+          "end": 245,
+          "topics": "Moore/Dennard motivation; power/memory/complexity/security; multicore/ISA/speculation; heterogeneous integration",
+          "destination": "trends; exercise1"
+        },
+        {
+          "start": 276,
+          "end": 538,
+          "topics": "Domain-specific processors, GPU power, RISC-V, memory taxonomy, stacking/chiplets",
+          "destination": "trends; exercise5"
+        },
+        {
+          "start": 569,
+          "end": 836,
+          "topics": "Cloud provisioning/cloud-native processors, DVFS/power gating, security/postquantum, AI placement",
+          "destination": "trends"
+        },
+        {
+          "start": 869,
+          "end": 1066,
+          "topics": "Edge, portable software, exascale, photonic integration and unified-memory coherence",
+          "destination": "trends; limits; exercise6"
+        }
+      ]
+    }
+  ],
+  "references": [
+    {
+      "title": "OpenMP 5.2 parallel construct",
+      "url": "https://www.openmp.org/spec-html/5.2/openmpse57.html",
+      "supports": "Team and implicit-task semantics; fork/join does not mandate OS-thread destruction",
+      "page_checked": "\u00a710.1",
+      "opened": true
+    },
+    {
+      "title": "OpenMP 5.2 reduction clause",
+      "url": "https://www.openmp.org/spec-html/5.2/openmpsu52.html",
+      "supports": "Private reduction contributions and combination",
+      "page_checked": "\u00a75.5.8",
+      "opened": true
+    },
+    {
+      "title": "MPI 4.1 communication modes",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node67.htm",
+      "supports": "Blocking standard send completion permits buffer reuse and does not require receive completion; buffering is not guaranteed",
+      "page_checked": "\u00a74.4",
+      "opened": true
+    },
+    {
+      "title": "MPI 4.1 nonblocking communication",
+      "url": "https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report/node71.htm",
+      "supports": "Initiation/completion separation; overlap permitted but not required",
+      "page_checked": "\u00a74.7",
+      "opened": true
+    },
+    {
+      "title": "OpenACC 3.3 specification",
+      "url": "https://www.openacc.org/sites/default/files/inline-images/Specification/OpenACC-3.3-final.pdf",
+      "supports": "Data lifetime, copyin/copyout/create/present/update and async completion distinctions",
+      "page_checked": "\u00a7\u00a72.6\u20132.7, pp. 39\u201355; \u00a72.14.4, p. 80; \u00a72.16, pp. 87\u201390",
+      "opened": true
+    },
+    {
+      "title": "CUDA C++ Programming Guide legacy",
+      "url": "https://docs.nvidia.com/cuda/cuda-c-programming-guide/#synchronization-functions",
+      "supports": "__syncthreads has block scope; ordinary block synchronization is not grid synchronization",
+      "page_checked": "\u00a710.6; block hierarchy \u00a75.2",
+      "opened": true,
+      "qualification": "Page identifies itself as legacy as of CUDA 13.0; used for stable documented barrier semantics, not latest product support"
+    },
+    {
+      "title": "CUDA runtime event management",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html",
+      "supports": "Event recording, elapsed timing and synchronization",
+      "page_checked": "cudaEventRecord/cudaEventElapsedTime/cudaEventSynchronize; web docs 13.4, local toolkit captured independently",
+      "opened": true
+    },
+    {
+      "title": "The Green Grid PUE comprehensive examination",
+      "url": "https://datacenters.lbl.gov/sites/default/files/WP49-PUE%20A%20Comprehensive%20Examination%20of%20the%20Metric_v6.pdf",
+      "supports": "PUE total facility energy divided by IT equipment energy; infrastructure beyond cooling",
+      "page_checked": "\u00a73.1 printed p. 11, \u00a74.10 energy or power",
+      "opened": true
+    },
+    {
+      "title": "Dennard et al. Design of Ion-Implanted MOSFETs With Very Small Physical Dimensions",
+      "url": "https://research.ibm.com/publications/design-of-ion-implanted-mosfets-with-very-small-physical-dimensions",
+      "supports": "1974 paper concerns scaling relationships, fabrication and characterization of small MOSFET devices",
+      "page_checked": "Abstract only; ideal constant-field algebra explicitly an original teaching construction",
+      "opened": true
+    },
+    {
+      "title": "Esmaeilzadeh et al. Dark Silicon and the End of Multicore Scaling",
+      "url": "https://www.cs.cmu.edu/~18742/papers/Esmaeilzadeh2011.pdf",
+      "supports": "Historical 2011 combined device/core/workload models under power and area constraints; projections through 2024 are not current measurements",
+      "page_checked": "pp. 365\u2013367 \u00a7\u00a71\u20134, Table 2",
+      "opened": true
+    },
+    {
+      "title": "Landauer Irreversibility and Heat Generation in the Computing Process",
+      "url": "https://worrydream.com/refs/Landauer_1961_-_Irreversibility_and_Heat_Generation_in_the_Computing_Process.pdf",
+      "supports": "Irreversible logical operations and heat generation; ideal bit erasure bound",
+      "page_checked": "Printed pp. 183\u2013187; especially \u00a74, p. 187 (PDF page 5), which gives 0.6931 kT per restored unbiased bit",
+      "opened": true
+    },
+    {
+      "title": "Bekenstein Universal upper bound on entropy-to-energy ratio for bounded systems",
+      "url": "https://journals.aps.org/prd/abstract/10.1103/PhysRevD.23.287",
+      "supports": "1981 abstract presents evidence for entropy/energy bound for bounded systems; no device-capacity prescription",
+      "page_checked": "Abstract only",
+      "opened": true
+    },
+    {
+      "title": "NVIDIA Grace Hopper architecture in depth",
+      "url": "https://developer.nvidia.com/blog/nvidia-grace-hopper-superchip-architecture-in-depth/",
+      "supports": "November 2022 Grace CPU/Hopper GPU coherent NVLink-C2C chip-to-chip composition and physically distinct memory placement",
+      "page_checked": "Architecture overview and hardware coherency sections",
+      "opened": true
+    },
+    {
+      "title": "RISC-V ratified specifications library",
+      "url": "https://docs.riscv.org/reference/home/index.html",
+      "supports": "RISC-V is an open-standard ISA; open specification is not necessarily open-source hardware implementation",
+      "page_checked": "About RISC-V",
+      "opened": true
+    },
+    {
+      "title": "Tesla first-quarter 2026 update",
+      "url": "https://ir.tesla.com/_flysystem/s3/sec/000162828026026551/tsla-20260422-gen.pdf",
+      "supports": "Document dated April 22, 2026 places Dojo 3 under training infrastructure, separate from inference-compute discussion",
+      "page_checked": "Printed pp. 7\u20138, PDFpp. 9\u201310",
+      "opened": true
+    },
+    {
+      "title": "Kokkos programming model",
+      "url": "https://kokkos.org/kokkos-core-wiki/ProgrammingGuide/ProgrammingModel.html",
+      "supports": "Execution spaces, memory spaces, layouts and related abstractions",
+      "page_checked": "Programming Model \u00a73",
+      "opened": true
+    },
+    {
+      "title": "Google Research chip design with deep reinforcement learning",
+      "url": "https://research.google/blog/chip-design-with-deep-reinforcement-learning/",
+      "supports": "Chip placement methodology; 2021 update; not complete autonomous verified chip design",
+      "page_checked": "Updated June 9, 2021; placement formulation",
+      "opened": true
+    },
+    {
+      "title": "NIST first three finalized post-quantum standards",
+      "url": "https://www.nist.gov/news-events/news/2024/08/nist-releases-first-3-finalized-post-quantum-encryption-standards",
+      "supports": "August 13, 2024 finalized post-quantum standards; classical algorithms designed for quantum resistance",
+      "page_checked": "Announcement and standards descriptions",
+      "opened": true
+    },
+    {
+      "title": "Intel Core i5-12450H specifications",
+      "url": "https://www.intel.com/content/www/us/en/products/sku/132222/intel-core-i512450h-processor-12m-cache-up-to-4-40-ghz/specifications.html",
+      "supports": "8 cores: 4 performance + 4 efficient; 12 threads",
+      "page_checked": "CPU Specifications",
+      "opened": true
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "N",
+      "first_section": "model",
+      "definition": "Interior grid points per side"
+    },
+    {
+      "symbol": "h",
+      "first_section": "model",
+      "definition": "Grid spacing 1/(N+1)"
+    },
+    {
+      "symbol": "u,unew,k",
+      "first_section": "model",
+      "definition": "Old/new grid values and sweep index"
+    },
+    {
+      "symbol": "K",
+      "first_section": "model",
+      "definition": "Prescribed finite sweep count"
+    },
+    {
+      "symbol": "r,d",
+      "first_section": "model",
+      "definition": "Dimensionless algebraic residual and next-sweep maximum change"
+    },
+    {
+      "symbol": "tol",
+      "first_section": "model",
+      "definition": "Stopping threshold for a tolerance-driven solver; not used to stop the fixed-work experiment"
+    },
+    {
+      "symbol": "p,T_1,T_p,S_p,E_p",
+      "first_section": "scaling",
+      "definition": "Processing-element count, wall times, speedup and efficiency"
+    },
+    {
+      "symbol": "f,f_s",
+      "first_section": "scaling",
+      "definition": "Serial fraction of one-element baseline; serial fraction of parallel runtime, respectively"
+    },
+    {
+      "symbol": "F,Q,I",
+      "first_section": "scaling",
+      "definition": "Flop count, bytes across a named boundary, arithmetic intensity F/Q"
+    },
+    {
+      "symbol": "P_peak,B_peak",
+      "first_section": "scaling",
+      "definition": "Compute-rate and bandwidth ceilings"
+    },
+    {
+      "symbol": "alpha,beta,m",
+      "first_section": "scaling",
+      "definition": "Message startup latency, inverse bandwidth, payload bytes"
+    },
+    {
+      "symbol": "a,C,V,nu",
+      "first_section": "scaling",
+      "definition": "Activity factor, switched capacitance, supply voltage, clock frequency"
+    },
+    {
+      "symbol": "lambda,t",
+      "first_section": "scaling",
+      "definition": "Per-node failure rate and duration in the synthetic Poisson model"
+    },
+    {
+      "symbol": "Theta,k_B",
+      "first_section": "scaling",
+      "definition": "Temperature and Boltzmann constant in ideal erasure bound"
+    },
+    {
+      "symbol": "b_x,b_y,B_x,B_y,t_x,t_y",
+      "first_section": "revision-cuda",
+      "definition": "Block indices, block dimensions and intra-block thread indices"
+    },
+    {
+      "symbol": "c,g,ell,M,T_s",
+      "first_section": "hybrid",
+      "definition": "CPU sweep/device sweep times, unhidden per-sweep launch cost, one-time transfer cost, unchanged serial time"
+    },
+    {
+      "symbol": "a_g,H",
+      "first_section": "hybrid",
+      "definition": "Effective accelerated-portion speedup and new overhead time"
+    },
+    {
+      "symbol": "x,x*,t*,h_b",
+      "first_section": "hybrid",
+      "definition": "CPU work fraction, balanced optimum, ideal concurrent compute time, additional unhidden halo/sync cost"
+    },
+    {
+      "symbol": "s",
+      "first_section": "trends",
+      "definition": "Ideal linear scaling factor greater than1"
+    },
+    {
+      "symbol": "A,rho_d",
+      "first_section": "trends",
+      "definition": "Die area and independent area-defect density in toy yield model"
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B tools/check_chapter_code.py --file <staged-chapter> --report <private-report>",
+    "listings": 2,
+    "all_passed": true,
+    "checked_at_utc": "2026-10-28T13:36:35.767602+00:00",
+    "fingerprint_sha256": "cfb2325d2f19d2a512fe09e8bcf4e069c9e83ae4be4a2be3485fd6beddb818f6",
+    "semantics": "Exact synthetic model output; GPU timing listing successful exit plus internal full-payload, boundary, range, finiteness and residual/change assertions. All code was freshly extracted and run."
+  },
+  "measurement_scope": {
+    "capture_date_utc": "2026-10-28",
+    "sweeps": 200,
+    "grids": [
+      64,
+      256
+    ],
+    "warmups": 1,
+    "retained_repetitions": 5,
+    "maximum_device_allocation_bytes": 1065024,
+    "cpu": "1 and 4 threads; reset two arrays plus sweeps with a per-sweep change reduction",
+    "gpu_wall": "Two initial uploads, ordered kernels, completion, and final download; excludes allocation, context startup and validation",
+    "gpu_events": "Post-upload sweep interval, including timeline gaps between launches",
+    "energy_measured": false,
+    "multi_gpu_or_inter_node": false
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch31-r1.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch31-r2.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    }
+  ]
+}

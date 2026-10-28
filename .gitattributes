@@ -6,3 +6,8 @@
 *.css text eol=lf
 *.js text eol=lf
 *.png binary
+
+# Preserve reviewed Matplotlib SVG path-data spacing embedded in this chapter.
+chapter-30-batch-schedulers-scientific-visualization.html whitespace=-blank-at-eol
+# Preserve exact padding in reviewed gprof output headers.
+chapter-27-serial-profiling-debugging-gprof-valgrind-gdb.html whitespace=-blank-at-eol
