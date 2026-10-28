@@ -1,24 +1,24 @@
 {
-  "checked_at_utc": "2026-10-27T19:09:07.781730+00:00",
+  "checked_at_utc": "2026-10-28T05:16:10.131972+00:00",
   "status": "passed",
-  "base_commit": "54a2a1ee841b00f8f3184e0cfb573dc6987fdcb9",
+  "base_commit": "9ef5a1e0dc308ab7fbe3456d30304ef6e1e809be",
   "scope": "Actual Git archive rebuilt without private source folders; all HTML hashes preserved; static validation and launcher smoke test",
-  "html_files_rebuilt_byte_for_byte": 16,
+  "html_files_rebuilt_byte_for_byte": 17,
   "html_files_changed": [],
   "static": {
     "status": "passed",
-    "html_files": 16,
-    "local_links_checked": 194,
-    "timestamps_checked": 137,
+    "html_files": 17,
+    "local_links_checked": 208,
+    "timestamps_checked": 145,
     "chapter_pages_with_dollar_math": 0,
     "failures": [],
     "warnings": []
   },
-  "launcher_listed_chapters": 11,
+  "launcher_listed_chapters": 12,
   "launcher_smoke_test": "chapter 5; exit 0; 12 programs passed",
   "limitations": [
-    "Browser checks were performed on the identical local reader files, not repeated in this export.",
-    "The full 125-listing execution record was produced before export (125 of 125 passed); only chapter 5 was executed again here.",
-    "Scientific review status is recorded in editorial-review-summary.json; no chapter has a pending independent sign-off."
+    "Browser checks were performed on identical local reader files, not repeated in this export.",
+    "The full 144-listing execution record was produced before export (144 of 144 passed); only chapter 5 was executed again here.",
+    "Scientific review status is recorded in editorial-review-summary.json; no written chapter has pending independent sign-off."
   ]
 }
