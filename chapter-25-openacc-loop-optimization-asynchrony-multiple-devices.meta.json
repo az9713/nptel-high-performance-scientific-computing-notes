@@ -1,0 +1,341 @@
+{
+  "chapter": 25,
+  "title": "OpenACC II: loop optimization, asynchrony, and multiple devices",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "review_history": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT WITH FIXES",
+      "blocking": 0,
+      "major": 0,
+      "minor": 1,
+      "finding": "Routine specification locator corrected; pending round 2 review.",
+      "review_file": "../reviews/ch25-r1.md"
+    }
+  ],
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions. All three complete transcripts read. Original frames checked; no allegation about unverified spoken wording.",
+  "recordings": [
+    {
+      "video_id": "dw3t1H34E-A",
+      "label": "W9L6",
+      "playlist_index": 55,
+      "duration_seconds": 1472
+    },
+    {
+      "video_id": "sybbWNJunRA",
+      "label": "W9L7",
+      "playlist_index": 56,
+      "duration_seconds": 1157
+    },
+    {
+      "video_id": "yIPHreoMz1s",
+      "label": "W9L8",
+      "playlist_index": 57,
+      "duration_seconds": 928
+    }
+  ],
+  "frames_viewed": {
+    "dw3t1H34E-A": [
+      "f0004",
+      "f0007",
+      "f0011",
+      "f0017",
+      "f0021",
+      "f0032",
+      "f0041",
+      "f0046"
+    ],
+    "sybbWNJunRA": [
+      "f0006",
+      "f0010",
+      "f0017",
+      "f0022",
+      "f0026",
+      "f0029",
+      "f0034",
+      "f0036"
+    ],
+    "yIPHreoMz1s": [
+      "f0004",
+      "f0007",
+      "f0010",
+      "f0013",
+      "f0018",
+      "f0021",
+      "f0024",
+      "f0027"
+    ]
+  },
+  "source_uncertainties": [
+    "Only one physical GPU was available. acc_device_partition.c executed devices=1, selected=1; every p>1 branch remains unexecuted. No multi-GPU speedup, peer-link or network experiment was performed.",
+    "Asynchronous image correctness was checked without a device timeline or overlap timing. No physical compute/transfer overlap or asynchronous speedup is claimed.",
+    "GCC13.3 reports _OPENACC=201711. Successful individual feature checks do not establish full OpenACC3.3/3.4 conformance.",
+    "W9L6 device_type slide f0046 displays collapse(3) for shared C[i][j] accumulation without a displayed reduction/atomic. The chapter diagnoses the displayed snippet using read/write ownership; no claim about unverified speech is made.",
+    "GCC13.3 online Enabling-OpenACC/OpenACC-Implementation-Status URLs could not be opened; they are not cited or relied upon. Actual compiler macro/output and accessible nvptx manual provide local support evidence.",
+    "The same scalar image routine supplies host and device results; elementwise parity tests offload/partition implementation, not an independent proof of Mandelbrot membership."
+  ],
+  "sections": [
+    {
+      "section": "The objects of the chapter: iterations, storage, and completion",
+      "id": "model",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Running Jacobi problem from book thread; constructs organize the assigned lecture topics.",
+      "research_extension": "Formal read/write dependency model.",
+      "teaching_construction": "Two-array Jacobi ownership proof and task graph.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Prove ownership before choosing a loop clause",
+      "id": "ownership",
+      "video_id": "dw3t1H34E-A",
+      "start": 104,
+      "end": 500,
+      "lecture_material": "auto, independent, seq, private and firstprivate; matrix product example.",
+      "research_extension": "OpenACC3.3 \u00a72.9 correctness and private-instance levels.",
+      "teaching_construction": "Small integer matrix product, exactness bound, prefix counterexample.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Collapse exposes work; tiling changes its organization",
+      "id": "transform",
+      "video_id": "dw3t1H34E-A",
+      "start": 500,
+      "end": 632,
+      "lecture_material": "collapse and tile examples.",
+      "research_extension": "OpenACC3.3 tile argument order and consortium loop guide.",
+      "teaching_construction": "Bijection, non-square tile edges and logical stencil reuse count.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Gang, worker, and vector describe a mapping hierarchy",
+      "id": "hierarchy",
+      "video_id": "dw3t1H34E-A",
+      "start": 632,
+      "end": 1472,
+      "lecture_material": "Gang/worker/vector diagrams, warp granularity and device_type tuning.",
+      "research_extension": "GCC13.3 nvptx mapping, publication3.4 versus tested compiler capability.",
+      "teaching_construction": "Resident Jacobi mappings with3 separate timing captures and full-array parity.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "Asynchrony is an ordering graph, not a speed promise",
+      "id": "async",
+      "video_id": "sybbWNJunRA",
+      "start": 6,
+      "end": 680,
+      "lecture_material": "Independent tasks, pipelining, async numbered queues and wait.",
+      "research_extension": "OpenACC3.3 \u00a72.16 and consortium async guide; CUDA overlap prerequisites.",
+      "teaching_construction": "Producer join table, Jacobi counterexample and ideal2-engine pipeline derivation.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Device routines and a bounded image pipeline",
+      "id": "routine",
+      "video_id": "sybbWNJunRA",
+      "start": 680,
+      "end": 1157,
+      "lecture_material": "routine seq and Mandelbrot strip pipeline with block%2 queues.",
+      "research_extension": "OpenACC3.3 \u00a72.15 scope and routine contract.",
+      "teaching_construction": "97-row bounded image, remainder handling and every-pixel CPU/device parity.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Device selection creates separate ownership domains",
+      "id": "devices",
+      "video_id": "yIPHreoMz1s",
+      "start": 6,
+      "end": 302,
+      "lecture_material": "Enumeration, device selection, per-device mappings and waits.",
+      "research_extension": "OpenACC3.3 runtime inventory and device selection.",
+      "teaching_construction": "301-element affine partition, actual one-device branch, explicit untested p>1 boundary.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "OpenMP and MPI change who owns a device",
+      "id": "hybrid",
+      "video_id": "yIPHreoMz1s",
+      "start": 302,
+      "end": 928,
+      "lecture_material": "OpenMP threads, MPI ranks, host_data use_device and multiple nodes.",
+      "research_extension": "Host-data address substitution, staging and independent completion contracts.",
+      "teaching_construction": "Actual-team/local-rank caveats; no claimed hybrid experiment.",
+      "evidence_class": "derivation"
+    }
+  ],
+  "references": [
+    {
+      "title": "OpenACC API3.3",
+      "url": "https://www.openacc.org/sites/default/files/inline-images/Specification/OpenACC-3.3-final.pdf",
+      "supports": "Loop correctness, private level, tile argument order, routines, async queue order/current-device waits, device enumeration/selection, host_data address substitution.",
+      "page_checked": "\u00a72.8 pp55\u201356; \u00a72.9 pp56\u201364; \u00a72.15.1 pp82\u201387; \u00a72.16 pp87\u201390; \u00a73.2.1 and \u00a73.2.4\u20135 pp94\u201397. PDF numbering offset: pages printed in document."
+    },
+    {
+      "title": "OpenACC specification catalogue",
+      "url": "https://www.openacc.org/specification",
+      "supports": "Lists3.4 as latest published specification on2026-10-28.",
+      "page_checked": "Specification landing page and archive links."
+    },
+    {
+      "title": "OpenACC API3.4",
+      "url": "https://www.openacc.org/sites/default/files/inline-files/OpenACC_3.4.pdf",
+      "supports": "Newer published edition exists; not installed-toolchain conformance.",
+      "page_checked": "Cover and version identification; publication state via official catalogue."
+    },
+    {
+      "title": "OpenACC consortium: Optimize Loops",
+      "url": "https://openacc-best-practices-guide.readthedocs.io/en/latest/06-Loops.html",
+      "supports": "Mapping hierarchy, collapse to expose parallelism and performance portability cautions.",
+      "page_checked": "Mapping Parallelism to Hardware; Collapse Loops."
+    },
+    {
+      "title": "OpenACC consortium: Advanced Features",
+      "url": "https://openacc-best-practices-guide.readthedocs.io/en/latest/08-Advanced.html",
+      "supports": "Queue ordering, different queues not guaranteed concurrent, wait(1) async(2) join and per-device queues.",
+      "page_checked": "Asynchronous Operation; source example joining queues1 and2."
+    },
+    {
+      "title": "GCC13.3 libgomp nvptx",
+      "url": "https://gcc.gnu.org/onlinedocs/gcc-13.3.0/libgomp/nvptx.html",
+      "supports": "GCC mapping of OpenACC vector to threads and workers to warps; warp size32; backend-specific evidence.",
+      "page_checked": "\u00a712.2 nvptx, complete page."
+    },
+    {
+      "title": "NVIDIA HPC SDK OpenACC Getting Started Guide26.9",
+      "url": "https://docs.nvidia.com/hpc-sdk/compilers/openacc-gs/index.html",
+      "supports": "NVIDIA compiler targeting flags belong to NVIDIA compiler family, separate from GCC.",
+      "page_checked": "\u00a72 Using OpenACC with NVIDIA HPC Compilers, \u00a7\u00a72.1\u20132.2."
+    },
+    {
+      "title": "NVIDIA CUDA Best Practices Guide13.4",
+      "url": "https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#asynchronous-and-overlapping-transfers-with-computation",
+      "supports": "CUDA transfer/computation overlap depends on pinned host memory, stream choice and suitable engine capability; not proof of OpenACC overlap.",
+      "page_checked": "\u00a710.1.2 Asynchronous and Overlapping Transfers with Computation."
+    },
+    {
+      "title": "GCC13.3 NVIDIA PTX options",
+      "url": "https://gcc.gnu.org/onlinedocs/gcc-13.3.0/gcc/Nvidia-PTX-Options.html",
+      "supports": "Valid compiler architecture targets through sm_80; -misa aliases -march; explicit target passed to offload compiler.",
+      "page_checked": "\u00a73.19.35 Nvidia PTX Options, complete page."
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "N",
+      "first_section": "model",
+      "definition": "Interior grid points per side."
+    },
+    {
+      "symbol": "s",
+      "first_section": "model",
+      "definition": "Padded row extent N+2."
+    },
+    {
+      "symbol": "u, unew",
+      "first_section": "model",
+      "definition": "Distinct old and new Jacobi arrays."
+    },
+    {
+      "symbol": "J",
+      "first_section": "model",
+      "definition": "Interior index set."
+    },
+    {
+      "symbol": "R_a, Z_a",
+      "first_section": "model",
+      "definition": "Read and write location sets for iteration a."
+    },
+    {
+      "symbol": "q,n_i,n_j",
+      "first_section": "transform",
+      "definition": "Flattened index and rectangular row/column extents."
+    },
+    {
+      "symbol": "t_i,t_j,b_i,b_j,e_i,e_j",
+      "first_section": "transform",
+      "definition": "Tile sizes, tile coordinates and within-tile coordinates."
+    },
+    {
+      "symbol": "eta,n,v",
+      "first_section": "hierarchy",
+      "definition": "Logical lane-slot utilization, trip count and logical vector width."
+    },
+    {
+      "symbol": "m,c,d",
+      "first_section": "async",
+      "definition": "Chunk count, per-chunk compute seconds and output-transfer seconds; devices section locally uses d as the explicitly introduced device index."
+    },
+    {
+      "symbol": "z,c_r,c_i",
+      "first_section": "routine",
+      "definition": "Complex iterated value and real/imaginary pixel coordinates."
+    },
+    {
+      "symbol": "p,d,n",
+      "first_section": "devices",
+      "definition": "Number of selected devices, device index and total output elements."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python -B tools/check_chapter_code.py --file <staged chapter25> --report <private code-validation.json>",
+    "listings": 4,
+    "all_passed": true,
+    "status": "passed; final extracted listing contracts freshly executed",
+    "checked_at_utc": "2026-10-28T08:32:27.740889+00:00",
+    "full_listing_fingerprint_sha256": "6fb475ed82ccef8effbecd0170947db681a9aecb68f5ca3d889bd358351770ee",
+    "evidence_file": "code-validation.json",
+    "capture_file": "final-checker-capture.json",
+    "profile": "Workspace-contained actual NVIDIA execution; explicit sm_80 offload target, installed CUDA13.3 assembler visible; no MPI program."
+  },
+  "measurements": {
+    "captures": 3,
+    "workload": "512x512 interior,20 synchronous resident Jacobi sweeps; no per-variant warmup; initial/final transfers excluded.",
+    "ranges_ms": {
+      "row-vector32": [
+        10.18,
+        11.755
+      ],
+      "collapse-vector128": [
+        9.357,
+        9.699
+      ],
+      "tile32x4": [
+        9.503,
+        10.198
+      ]
+    },
+    "interpretation": "Observed minima/maxima only, not confidence intervals or causal attribution.",
+    "build": "gcc -fopenacc -foffload=nvptx-none -foffload-options=nvptx-none=-march=sm_80 -fcf-protection=none -O2 -ffp-contract=off; CUDA13.3 ptxas visible through launcher-matching PATH"
+  },
+  "authoring_checks": {
+    "prose_words_excluding_pre_and_math": 7884,
+    "major_content_sections": 8,
+    "source_transcripts_complete": 3,
+    "original_frames_inspected": 24,
+    "worked_solutions": 6,
+    "runnable_listings": 4,
+    "final_prose_repair_contract_identity": "Full code/file/build/run/needs/check/output fingerprint unchanged after prose-only repair; selective evidence retained."
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT WITH FIXES",
+      "blocking": 0,
+      "major": 0,
+      "minor": 1,
+      "report": "ch25-r1.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch25-r2.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    }
+  ]
+}

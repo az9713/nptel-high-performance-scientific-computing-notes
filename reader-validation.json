@@ -1,12 +1,12 @@
 {
   "course": "High Performance Scientific Computing",
-  "checked_at_utc": "2026-10-28T07:51:58.004663+00:00",
+  "checked_at_utc": "2026-10-28T12:32:30.615348+00:00",
   "scope": "Reader mechanics only; does not certify chapter or course completion",
   "static": {
     "status": "passed",
-    "html_files": 25,
-    "local_links_checked": 320,
-    "timestamps_checked": 205,
+    "html_files": 30,
+    "local_links_checked": 390,
+    "timestamps_checked": 245,
     "chapter_pages_with_dollar_math": 0,
     "failures": [],
     "warnings": []
@@ -372,6 +372,96 @@
         "controls": true,
         "emptyToc": false,
         "file": "chapter-20-cuda-programming-tools-kernels-and-launch-configuration.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 10,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-21-gpu-memory-types-and-memory-management.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 10,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-21-gpu-memory-types-and-memory-management.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 158,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-22-thread-divergence-and-memory-layouts.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 158,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-22-thread-divergence-and-memory-layouts.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 73,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-23-cuda-compilation-and-execution.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 73,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-23-cuda-compilation-and-execution.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 122,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-24-openacc-directives-loops-data-management.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 122,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-24-openacc-directives-loops-data-management.html",
+        "viewport": 390
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 75,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-25-openacc-loop-optimization-asynchrony-multiple-devices.html",
+        "viewport": 1280
+      },
+      {
+        "mathErrors": 0,
+        "mathNodes": 75,
+        "horizontalOverflow": false,
+        "controls": true,
+        "emptyToc": false,
+        "file": "chapter-25-openacc-loop-optimization-asynchrony-multiple-devices.html",
         "viewport": 390
       },
       {

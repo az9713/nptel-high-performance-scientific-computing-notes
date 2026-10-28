@@ -1,0 +1,362 @@
+{
+  "chapter": 21,
+  "title": "GPU memory types and memory management",
+  "status": "reviewed and locally validated; independent round 3 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "eihu-w4-Q8s",
+      "label": "W8L3",
+      "playlist_index": 46,
+      "duration_seconds": 1931.5519375
+    },
+    {
+      "video_id": "cBHs2gEzN7s",
+      "label": "W8L4",
+      "playlist_index": 47,
+      "duration_seconds": 1254.48125
+    }
+  ],
+  "frames_viewed": {
+    "eihu-w4-Q8s": [
+      "f0003",
+      "f0011",
+      "f0014",
+      "f0028",
+      "f0036",
+      "f0040"
+    ],
+    "cBHs2gEzN7s": [
+      "f0001",
+      "f0005",
+      "f0013",
+      "f0019",
+      "f0027",
+      "f0031",
+      "f0035",
+      "f0039"
+    ]
+  },
+  "source_uncertainties": [
+    "Optional managed advice/prefetch path compiled but did not execute because actual concurrentManagedAccess=0; no full-support platform or migration benchmark available.",
+    "Timings describe this bounded WSL laptop protocol and do not identify internal staging, bus, scheduling or generated-code causes.",
+    "Current web runtime documentation is13.4; memory API signatures were verified separately against installed13.3 headers.",
+    "The256float declaration is verified from slide; the public chapter computes1024bytes without alleging an unverified spoken256byte error.",
+    "No OOM/capacity-exhaustion, multi-device, cache-latency, copy/compute-overlap, cuBLAS or Tensor Core benchmark performed."
+  ],
+  "lecture_corrections": [
+    {
+      "recording": "W8L3",
+      "frame": "f0014",
+      "claim": "L1 described as accessible by one thread.",
+      "correction": "Distinguish SM-level cache organization from thread-private local storage scope."
+    },
+    {
+      "recording": "W8L3",
+      "frame": "f0011",
+      "claim": "Universal fastest-to-slowest memory-space ladder.",
+      "correction": "Access pattern,cache hits,bank conflicts and resource pressure prevent a universal total ordering."
+    },
+    {
+      "recording": "W8L3",
+      "timestamp": 1078,
+      "claim": "DeviceToDevice described as a copy from one physical device to another.",
+      "correction": "Same-device copies also use this kind; executable validates one."
+    },
+    {
+      "recording": "W8L4",
+      "timestamp": 396,
+      "claim": "Over-capacity cudaMalloc failure described at compilation time.",
+      "correction": "Ordinary allocation reports status at runtime; static shared-resource compilation checks are separate."
+    },
+    {
+      "recording": "W8L4",
+      "frame": "f0031",
+      "claim": "cudaMemGetInfo described as Unified Memory free/total capacity.",
+      "correction": "API reports device memory, not combined CPU+GPU capacity."
+    }
+  ],
+  "sections": [
+    {
+      "section": "model",
+      "video_id": null,
+      "start": 0,
+      "end": 0,
+      "lecture_material": "Allocation, extent, accessor and lifetime objects.",
+      "research_extension": "Definitions made explicit from CUDA semantics.",
+      "teaching_construction": "Explicit resource/ordering model and persistent vector/matrix notation.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "spaces",
+      "video_id": "eihu-w4-Q8s",
+      "start": 72,
+      "end": 382,
+      "lecture_material": "Global,shared,local,constant,texture and register categories.",
+      "research_extension": "Primary CUDA documentation listed inline and in references.",
+      "teaching_construction": "Scope/lifetime table, compiler-placement boundary, texture resource separate from object.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "caches",
+      "video_id": "eihu-w4-Q8s",
+      "start": 382,
+      "end": 811,
+      "lecture_material": "Cache/shared relationship, memory hierarchy sketch and capacity caveats.",
+      "research_extension": "Primary CUDA documentation listed inline and in references.",
+      "teaching_construction": "Correct L1 scope; conditional speed comparisons and resource-capacity bound.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "ownership",
+      "video_id": "eihu-w4-Q8s",
+      "start": 811,
+      "end": 1141,
+      "lecture_material": "malloc/cudaMalloc/free/cudaFree, byte counts and copy kinds.",
+      "research_extension": "Primary CUDA documentation listed inline and in references.",
+      "teaching_construction": "Allocation tuples, matching deallocators, live-storage accounting and same-device-copy semantics.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "symbols-and-transfers",
+      "video_id": "eihu-w4-Q8s",
+      "start": 1141,
+      "end": 1384,
+      "lecture_material": "cudaMemcpyAsync and symbol-copy APIs.",
+      "research_extension": "Primary CUDA documentation listed inline and in references.",
+      "teaching_construction": "Texture/constant/global-symbol executable; bounded pinned/pageable batch transfer measurement.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "launch-order",
+      "video_id": "eihu-w4-Q8s",
+      "start": 1384,
+      "end": 1931.5519375,
+      "lecture_material": "Hello-world qualifier/launch transition and local thread identities.",
+      "research_extension": "Primary CUDA documentation listed inline and in references.",
+      "teaching_construction": "Submission/completion and indexed deterministic results rather than printf schedule interpretation.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "vector-lifetime",
+      "video_id": "cBHs2gEzN7s",
+      "start": 6,
+      "end": 600,
+      "lecture_material": "CPU/GPU vector addition with explicit memory representations.",
+      "research_extension": "Primary CUDA documentation listed inline and in references.",
+      "teaching_construction": "Nonmultiple input check, same-device snapshot copy, full result verification and longer residency model.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "managed",
+      "video_id": "cBHs2gEzN7s",
+      "start": 600,
+      "end": 974,
+      "lecture_material": "Unified Memory abstraction and allocation/synchronization/advice/attributes APIs.",
+      "research_extension": "Primary CUDA documentation listed inline and in references.",
+      "teaching_construction": "Actual capability gate, type-member check, current API signatures, separated phases and compile-only optional branch boundary.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "shared-tiles",
+      "video_id": "cBHs2gEzN7s",
+      "start": 974,
+      "end": 1254.48125,
+      "lecture_material": "Static/dynamic shared declarations and architecture-dependent limits.",
+      "research_extension": "Primary CUDA documentation listed inline and in references.",
+      "teaching_construction": "2T\u00b2s storage and T request-reuse derivation, padded matrix multiply, barriers, static/dynamic attribute check and actual timings.",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "CUDA Programming Guide: C/C++ Language Extensions",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html",
+      "supports": "Device/constant/shared scopes and lifetimes; dynamic shared syntax; exact non-exited-thread barrier rule.",
+      "page_checked": "\u00a75.4.1.2 and \u00a75.4.4.1 full relevant tables and semantics opened.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA 13.0 Programming Guide",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-programming-guide/index.html#device-memory-accesses",
+      "supports": "Automatic/local storage placement, device-memory backing and memory-space semantics.",
+      "page_checked": "Device Memory Accesses local-memory paragraphs and \u00a710.2 variable-space definitions.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA 13.0 Ampere Tuning Guide",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/ampere-tuning-guide/index.html",
+      "supports": "CC8.6 shared/L1 resource limits and explicit opt-in distinction.",
+      "page_checked": "\u00a71.4.1.1 and \u00a71.4.2.3 including 100/99 KiB and 48 KiB static/default boundary.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA Runtime API: Memory Management",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__MEMORY.html",
+      "supports": "Allocation/free/copy/symbol contracts, cudaMemGetInfo device-only accounting; cudaMemLocation advice/prefetch and concurrent support requirements.",
+      "page_checked": "Current13.4 signatures and descriptions; installed13.3 headers separately checked read-only.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA Runtime API: API Synchronization Behavior",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html",
+      "supports": "Host blocking differs by endpoint type and API; Async does not promise instantaneous return.",
+      "page_checked": "\u00a72 complete copy rules and kernel-launch paragraph.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA Runtime API: Texture Object Management",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__TEXTURE__OBJECT.html",
+      "supports": "Linear texture resource descriptors, integer fetch resource and texture object destruction.",
+      "page_checked": "cudaCreateTextureObject/cudaDestroyTextureObject declarations; linear descriptor and read-mode paragraphs.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA Programming Guide: Unified and System Memory",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-memory.html",
+      "supports": "Capability-dependent managed vs system-allocated accessibility and full-support placement model.",
+      "page_checked": "\u00a72.6 capability discussion and \u00a72.6.2.2 full unified behavior.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA Programming Guide: Unified Memory",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html",
+      "supports": "Limited support and separated CPU/GPU managed phases.",
+      "page_checked": "\u00a74.1.3 Windows/WSL/Tegra; nonconcurrent CPU-access limitations.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA Runtime API: cudaPointerAttributes",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/structcudaPointerAttributes.html",
+      "supports": "type member categories and no validation of allocation for arbitrary unregistered pointers.",
+      "page_checked": "Complete struct field descriptions, including hostPointer warning.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA on WSL User Guide",
+      "url": "https://docs.nvidia.com/cuda/wsl-user-guide/index.html#known-limitations-for-linux-cuda-applications",
+      "supports": "Limited managed support, lack of concurrent CPU/GPU access, query actual support; pinned resource limits.",
+      "page_checked": "\u00a75.1 table opened completely.",
+      "checked_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA 13.0 Best Practices Guide",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-best-practices-guide/index.html#memory-optimizations",
+      "supports": "Pinned buffer costs and reuse; matrix-multiplication shared-memory request reduction.",
+      "page_checked": "\u00a710.1.1\u201310.1.2 and \u00a710.2.3.2; published V100 results explicitly not local measurements.",
+      "checked_utc_date": "2026-10-28"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "n,s",
+      "first_section": "model",
+      "definition": "Vector element count and bytes per element."
+    },
+    {
+      "symbol": "N,T,A,B,C",
+      "first_section": "model",
+      "definition": "Square matrix side,tile width and row-major input/output matrices."
+    },
+    {
+      "symbol": "S_sm,S_block",
+      "first_section": "caches",
+      "definition": "Shared capacity perSM and per-block shared payload in bytes; S_block named in shared-tiles."
+    },
+    {
+      "symbol": "Q_mig,B_mig,T_fault,k",
+      "first_section": "managed",
+      "definition": "Migration payload,effective transfer rate,management overhead and reuse count."
+    },
+    {
+      "symbol": "F,Q,I",
+      "first_section": "shared-tiles",
+      "definition": "Useful floating-point operations,bytes across named memory boundary and arithmetic intensityF/Q."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python3 -B tools/check_chapter_code.py --file ../work/ch21-sol/chapter-21-gpu-memory-types-and-memory-management.html --report ../work/ch21-sol/code-validation.json",
+    "listings": 6,
+    "all_passed": true,
+    "status": "Formal extracted6/6passed:three exact-output andthree successful-return checks.",
+    "fingerprint_sha256": "5b2187952f54b989ca6d9252254b8930da1f977bd51acdc19cfaedc5058211ad",
+    "checked_at_utc": "2026-10-28T07:28:38.652186+00:00",
+    "execution_profile": "Workspace-contained execution; MPI self,tcp transport."
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT WITH FIXES",
+      "blocking": 0,
+      "major": 1,
+      "minor": 1,
+      "report": "work/reviews/ch21-r1.md",
+      "repairs": "M1: defined precision, KiB, banks, DRAM, roofline, cuBLAS, Tensor Cores and GEMM at first use. m1: added exact ranges of three retained transfer per-capture medians, explicitly not uncertainty intervals. All six executable contracts unchanged."
+    },
+    {
+      "round": 2,
+      "verdict": "REVISE",
+      "blocking": 1,
+      "major": 0,
+      "minor": 0,
+      "report": "work/reviews/ch21-r2.md",
+      "repairs": "B1: used the exact reviewed replacement to distinguish independent A/B input-coordinate guards from the C output-coordinate guard. Out-of-output-domain threads still perform needed tile loads; zero applies only to invalid input coordinates. Both barriers, final-store guard, code and Exercise 4 unchanged."
+    },
+    {
+      "round": 3,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch21-r3.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    }
+  ],
+  "measurement_provenance": {
+    "utc_start": "2026-10-28T07:22:06.519906+00:00",
+    "utc_end": "2026-10-28T07:22:26.083134+00:00",
+    "exclusive_agent_slot": true,
+    "maximum_user_device_payload_bytes": 16777216,
+    "programs": 6,
+    "timing_capture_count_per_program": 3,
+    "raw_records": "Private captures contain exact argv,sourceSHA256,stdout/stderr,returncodes,UTC andmonotonic endpoints.",
+    "environment": "CUDA13.3,RTX3050Laptop4GB,WSLUbuntu24.04,workspace-local HOME/TEMP/cache via runtime helper.",
+    "warnings": "FirstWSL startup emitted existing .wslconfig unknown-keywarning; no configuration changed.",
+    "transfer_per_capture_median_ranges_ms": {
+      "pageable_sync": {
+        "per_capture_medians_ms": [
+          30.685,
+          30.898,
+          24.239
+        ],
+        "min_ms": 24.239,
+        "max_ms": 30.898
+      },
+      "pinned_sync": {
+        "per_capture_medians_ms": [
+          12.102,
+          11.191,
+          11.545
+        ],
+        "min_ms": 11.191,
+        "max_ms": 12.102
+      },
+      "pinned_async_batch": {
+        "per_capture_medians_ms": [
+          10.704,
+          10.728,
+          10.66
+        ],
+        "min_ms": 10.66,
+        "max_ms": 10.728
+      }
+    }
+  },
+  "author_passes": [
+    "Full recordings read;14frames viewed.",
+    "Complete model/prose/mathematics/source/code/exercise/prose/parity/static passes completed.",
+    "All runnable listings manually captured and formal extracted check6/6passed.",
+    "No raw private source copied into public repository; private draft only."
+  ]
+}

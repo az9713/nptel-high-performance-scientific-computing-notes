@@ -1,14 +1,9 @@
 {
-  "checked_at_utc": "2026-10-28T07:51:19.909018+00:00",
-  "status": "partial edition: chapters 1-20 written; chapters 21-31 not written; 44 recordings assigned to written chapters; every written chapter has an independent zero-blocking verdict",
+  "checked_at_utc": "2026-10-28T12:32:30.177926+00:00",
+  "status": "partial edition: chapters 1-25 written; chapters 26-31 not written; 56 recordings assigned to written chapters; every written chapter has an independent zero-blocking verdict",
   "chapter_count": 31,
-  "written_chapters": 20,
+  "written_chapters": 25,
   "unwritten_chapters": [
-    21,
-    22,
-    23,
-    24,
-    25,
     26,
     27,
     28,
@@ -37,7 +32,12 @@
     "chapter-17-gpu-stack-and-architectures.html": "38225170f68212c07bc2fbbf05d0541e6d45f3a5a59d84165941e8ac69ead12e",
     "chapter-18-gpu-throughput-arithmetic-flops-bandwidth-simd-simt.html": "cc07635127e4d8e466b7da50f72e101e94fa1acec25e2227bf866446a4b6733b",
     "chapter-19-thread-hierarchy-warp-scheduling.html": "12543f6289c2026f70a73b9082cd0ead2c92eab143c8f5d0675c53bd48c0baef",
-    "chapter-20-cuda-programming-tools-kernels-and-launch-configuration.html": "fd2d6ef8a69902a8fc48e7ca80e682d7dd3eb44812f70f85de99fa4b81bd3731"
+    "chapter-20-cuda-programming-tools-kernels-and-launch-configuration.html": "fd2d6ef8a69902a8fc48e7ca80e682d7dd3eb44812f70f85de99fa4b81bd3731",
+    "chapter-21-gpu-memory-types-and-memory-management.html": "f5928f1d18f25d7e50756bc60f69589fd4d70bb1f50b5be401a41ba3dca375b2",
+    "chapter-22-thread-divergence-and-memory-layouts.html": "72e91651d394640fb033d6ef4fec65c44ced7332297a1c2f486f4c366a65982b",
+    "chapter-23-cuda-compilation-and-execution.html": "1fbfa166e896639c753a1842d0f63e423979de8b319004df394f54c3b576f499",
+    "chapter-24-openacc-directives-loops-data-management.html": "5c1c29d9fbf4dd9f4322b6e2f8eca438ca286e73a0f585e295d0dfce2c749a9e",
+    "chapter-25-openacc-loop-optimization-asynchrony-multiple-devices.html": "879565e5c294c8cfde9769255ed90a7a33d05b0832d45813fa1e18d517a72f49"
   },
   "scope": "Content inventory and exact body preservation; does not certify full scientific acceptance"
 }

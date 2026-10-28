@@ -7,10 +7,10 @@
   "playlist": "PLOzRYVm0a65fSrgx3kroerFJtFjGGIcXm",
   "format": "HTML",
   "publication": "GitHub Pages",
-  "status": "partial edition: chapters 1\u201320 of 31 written; every written chapter has an independent zero-blocking review verdict",
+  "status": "partial edition: chapters 1\u201325 of 31 written; every written chapter has an independent zero-blocking review verdict",
   "scope_note": "75 recordings (playlist items 2-76) are grouped into 31 chapters. Week 12 revision lectures (items 71-74) supply practice material. The 2-minute course trailer (item 1) is out of scope.",
   "final_review_pending_chapters": [],
-  "edition_note": "20 reviewed chapters cover 44 source recordings. Chapters 21\u201331 remain pending.",
+  "edition_note": "25 reviewed chapters cover 56 source recordings. Chapters 26\u201331 remain pending.",
   "chapters": [
     {
       "order": 1,
@@ -203,7 +203,7 @@
         46,
         47
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     },
     {
       "order": 22,
@@ -212,16 +212,16 @@
         48,
         49
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     },
     {
       "order": 23,
-      "title": "CUDA compilation and execution",
+      "title": "CUDA compilation and execution: artifacts, allocations, errors and evidence",
       "recordings": [
         50,
         51
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     },
     {
       "order": 24,
@@ -231,7 +231,7 @@
         53,
         54
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     },
     {
       "order": 25,
@@ -241,7 +241,7 @@
         56,
         57
       ],
-      "chapter_status": "pending"
+      "chapter_status": "reviewed and locally validated"
     },
     {
       "order": 26,

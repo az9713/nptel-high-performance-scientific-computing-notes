@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="f5928f1d18f25d7e50756bc60f69589fd4d70bb1f50b5be401a41ba3dca375b2"><title>GPU memory types and memory management · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>GPU memory types and memory management</h1>
+<p class="lead">A vector of 10,000,000 single-precision floating-point values (32-bit float values, four bytes each on this CUDA implementation) occupies 40,000,000 bytes. Adding two such vectors with an explicit host/device implementation needs three host arrays and three device arrays: 120,000,000 bytes in each memory domain before any runtime overhead. Changing the allocator does not change the arithmetic, but it changes who can dereference each pointer, when the data becomes usable, and which operation releases the storage. A second case, multiplying 259×259 matrices with 16×16 tiles, shows why a 2,048-byte block-private workspace can remove repeated global-memory requests without changing the answer.</p>
+<p class="source-note">Grounded in <a href="https://www.youtube.com/watch?v=eihu-w4-Q8s">W8L3, Understanding NVIDIA GPU Memory Types and Efficient Memory Management, Part 1</a>, and <a href="https://www.youtube.com/watch?v=cBHs2gEzN7s">W8L4, Part 2</a>, in NPTEL's <em>High Performance Scientific Computing</em>. <strong>Lecture material:</strong> the six memory-space categories, L1/L2 caches, allocation/free/copy APIs, symbol copies, asynchronous copies, the hello-world transition, explicit vector addition, Unified Memory, and static/dynamic shared allocations. <strong>Research extensions:</strong> NVIDIA's CUDA programming and runtime documentation specifies scopes, capabilities, copy contracts and current API signatures; the Ampere tuning guide supplies architecture-dependent shared/L1 limits; the CUDA on WSL guide identifies managed-memory restrictions. <strong>Original teaching constructions:</strong> an allocation/lifetime model, byte accounting, constant/texture and same-device-copy checks, a capability-gated managed program, a transfer experiment, static/dynamic tiled matrix multiplication, and six fully worked exercises. CUDA documentation was checked on 28 October 2026; executable examples target the installed CUDA 13.3 toolkit.</p>
+
+<h2 id="model">The model: an allocation has a location, access scope and lifetime</h2>
+<p>Memory management is the problem of arranging valid access to a finite collection of stored objects over time. An allocation is a reserved range of bytes. Its size is a byte count, its base pointer identifies the beginning of the range, and its lifetime is the interval during which that range is available to the program. A pointer value alone does not specify all three. A pointer can survive in a variable after its allocation has been freed; copying that value does not preserve the object's lifetime.</p>
+<p>Our explicit-memory model has a host, the CPU execution environment, and one device, the GPU execution environment. Host and device allocations occupy different memory domains. A copy creates or updates a second representation of the data. It does not move the C++ pointer variable to another processor or automatically destroy the source. We use h_a and d_a to distinguish host and device representations of the same mathematical vector a; the prefixes express the programmer's convention, not a CUDA type-system guarantee.</p>
+<p>Represent an allocation by a tuple consisting of base address, byte extent, allocation family, permitted accessors, and lifetime. For an access at element index i, two conditions are immediately necessary: the object is alive, and the entire element lies inside its extent. A third condition is that the executing processor may access that allocation through the pointer being used. A fourth condition is ordering: a consumer must observe the producer's completed writes. Correct indexing by itself establishes none of the other conditions.</p>
+<p>Let \(n\) be the number of vector elements and \(s\) the size of one element in bytes. The allocation size is \(ns\). For this chapter's CUDA float examples s=4, checked with sizeof rather than assumed by untyped arithmetic in code. Decimal MB means 1,000,000 bytes; binary MiB means 1,048,576 bytes. A KiB is 1,024 bytes. Thus 40,000,000 bytes is 40 MB but about 38.147 MiB. This unit distinction matters when comparing a problem's storage calculation with a device report.</p>
+<p>The vector task is out[i]=a[i]+b[i] for integer indices from zero through n−1. Each output depends on two inputs and has exactly one writer. A one-dimensional launch assigns i=blockIdx.x×blockDim.x+threadIdx.x. A guard i&lt;n excludes padding invocations. The memory proof must additionally establish that all three arrays contain at least n elements, that the inputs were initialized before execution, and that the host waits before checking or releasing results.</p>
+<p>The matrix task uses square, row-major matrices \(A,B,C\) of side \(N\). Entry \((i,j)\) occupies offset \(iN+j\), and the matrix product is \(C_{ij}=\sum_{k=0}^{N-1}A_{ik}B_{kj}\). The symbols A and B here are arrays, not bandwidths. We use T for tile width, so a block has T² threads and computes a T×T patch of C. These definitions persist when the implementation changes from direct global loads to cooperative shared-memory staging.</p>
+<p>A streaming multiprocessor (SM) is a hardware execution unit on which thread blocks reside. A warp is a group of 32 threads in the architectures considered here; a lane is a thread position within that group. These hardware groupings do not change which logical array element a thread owns.</p>
+<p>A memory space is a programming abstraction governing access and visibility; a cache is a mechanism that can satisfy some accesses from a nearer copy. Physical backing describes where the data resides when it is not served by such a mechanism. These distinctions prevent three common mistakes: interpreting thread-private storage as necessarily on-chip, interpreting block-shared storage as visible to the entire grid, and interpreting one virtual pointer as a promise of zero data movement.</p>
+
+<h2 id="spaces">Six memory spaces describe different access patterns <a class="timestamp" href="https://www.youtube.com/watch?v=eihu-w4-Q8s&amp;t=72s">W8L3 1:12</a></h2>
+<p>Global memory holds the large arrays used across blocks. A cudaMalloc allocation remains alive until explicitly released; a __device__ symbol instead belongs to its CUDA context and has a distinct instance on each device. Threads in different blocks can address global storage, but visibility of an address is not synchronization. Two blocks writing one location without a valid coordination protocol can still race. Our examples give each output element one writer and use completed kernel execution as the boundary before host inspection.</p>
+<p>Shared memory is storage associated with a thread block. Each block receives a separate instance, accessible to the cooperating threads in that block, and the instance lasts for the block's execution. It is useful when one thread loads a value and other threads reuse it. The ordinary __shared__ examples here do not expose storage to arbitrary blocks. Newer cluster facilities have additional rules and hardware requirements; they do not change the scope of these conventional block-local arrays.</p>
+<p>Local memory is private to one thread in the CUDA programming model. The adjective describes scope, not physical proximity. Automatic arrays with dynamic indexing, large automatic objects, and register spills can require local storage backed by device memory. A register spill occurs when the compiler cannot keep all needed live values in allocated registers and stores some elsewhere. Local accesses can encounter cache behavior, so they are not assigned one immutable latency merely because their source variable was declared inside a kernel.</p>
+<p>Registers are the usual destination for scalar automatic state such as an index or an accumulator when the compiler can keep it there. Source code does not allocate a named physical register merely by writing float sum. The compiler may eliminate a value, recompute it, or place it in another storage class. More live state can also reduce the number of blocks that fit on an SM. Therefore replacing global loads by a large private array is not automatically an improvement: the change can create local traffic and reduce concurrency.</p>
+<p>Constant memory holds device-readable symbols initialized or updated through host-side operations such as cudaMemcpyToSymbol. Its useful pattern is a group of threads reading the same coefficient at the same instruction. A spatially varying table indexed differently by each lane is a different access pattern. Constant does not mean that a symbol must be initialized once for the entire process and can never change; it means that kernel code reads it through the constant-memory interface. Updates must be ordered with all kernels that use the old or new version.</p>
+<p>A texture object gives device code a specialized read interface to an existing resource. The resource can be a suitable linear allocation or a CUDA array, which is a resource object with its own allocation API. Texture access supports useful addressing and sampling operations for appropriate resources. The check below uses only integer tex1Dfetch from a linear resource, so no filtering or coordinate interpolation changes the values. Texture access does not require every image operation to use textures, and ordinary global loads remain appropriate for many image workloads.</p>
+<p>The <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html">CUDA language-extension reference, §5.4.1</a>, specifies the distinct lifetimes of device, constant and shared variables. The <a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-programming-guide/index.html#device-memory-accesses">CUDA 13.0 guide, Device Memory Accesses</a>, explains local-memory placement and device-memory backing. Those are semantic and compiler rules. A performance conclusion still needs the particular access pattern, generated code and hardware.</p>
+<table><thead><tr><th>Space or object</th><th>Who uses it in these examples?</th><th>Who controls its lifetime?</th><th>Typical purpose</th></tr></thead><tbody>
+<tr><td>Global allocation</td><td>Device threads; host through copy APIs</td><td>Host allocation/free pair</td><td>Whole vectors and matrices</td></tr>
+<tr><td>Register/private automatic state</td><td>One thread</td><td>Compiler and invocation</td><td>Index and running sum</td></tr>
+<tr><td>Local automatic storage</td><td>One thread</td><td>Invocation/compiler placement</td><td>Private arrays or spills</td></tr>
+<tr><td>Shared array</td><td>One block</td><td>Block execution</td><td>Cooperative tiles</td></tr>
+<tr><td>Constant symbol</td><td>Device readers; host API updates</td><td>CUDA context</td><td>Common coefficients</td></tr>
+<tr><td>Texture object</td><td>Device reads through its handle</td><td>Explicit object destruction; backing allocation separately</td><td>Specialized resource access</td></tr>
+</tbody></table>
+<p>Read the final row as two lifetimes. Destroying a texture object does not free the cudaMalloc allocation to which it refers. Conversely, freeing that allocation while a kernel still uses its texture handle invalidates the resource. We synchronize, destroy the object, and then free its backing allocation. This separation is a small example of a general rule: a view of storage and the storage itself are different resources.</p>
+
+<h2 id="caches">Caches and shared storage invalidate a universal speed ladder <a class="timestamp" href="https://www.youtube.com/watch?v=eihu-w4-Q8s&amp;t=382s">W8L3 6:22</a></h2>
+<p>An SM executes resident blocks and contains on-chip structures used by their threads. L1 is a cache near that execution machinery; L2 is shared at the device level across SMs. A hit means the requested data can be served by a cached copy. A miss requires another level to supply it. The public interfaces of global, local and texture accesses do not imply that every request reaches external device memory.</p>
+<p>The W8L3 cache table describes L1 as accessible by a single thread. That wording is too restrictive: L1 is not a private per-thread cache. Thread-private local storage and SM-level cache organization are different concepts. A local value can be private in address semantics while its accesses use a cache structure serving work from multiple threads. Likewise, L1 is not simply a separately programmed overflow array appended to each thread's register allocation.</p>
+<p>The memory-order slide places register, shared, constant, texture, local and global memory in one fastest-to-slowest sequence. Use that picture as motivation to examine locality, rather than a total ordering valid for every request. A constant access with many distinct lane addresses can behave differently from a uniform broadcast. Shared storage is divided into banks, memory subdivisions that can service accesses in parallel. Distinct-word accesses competing for one bank can create bank conflicts that serialize requests. Global or local accesses can hit caches. A register value is not a substitute for data that must be communicated to another thread.</p>
+<p>A useful comparison fixes the operation first. Ask how many useful bytes the computation needs, how many requests it issues, which requests can be combined or reused, and which resource limits simultaneous progress. The question “which memory is fastest?” leaves all those variables unspecified. Even a genuine reduction in load latency need not reduce elapsed kernel time when other instructions, insufficient parallelism, or a different bandwidth bottleneck dominate.</p>
+<p>On the Ampere architectures discussed by <a href="https://docs.nvidia.com/cuda/archive/13.0.0/ampere-tuning-guide/index.html">NVIDIA's tuning guide, §1.4.1 and §1.4.2.3</a>, shared memory and L1/texture cache draw on a unified on-chip resource, with architecture-specific capacities and carveout choices. Compute capability is NVIDIA's hardware feature-version identifier, distinct from the installed CUDA toolkit version. For compute capability 8.6, the guide lists 100 KiB shared capacity per SM and a 99 KiB maximum per block with the required opt-in conditions. These are not universal CUDA constants and are not the ordinary default per-block allowance.</p>
+<p>A carveout preference influences the partition between shared capacity and cache capacity; it does not transform a C++ pointer into a cache line controlled by the programmer. Shared allocation is explicit: the program names bytes that cooperating threads read and write. Cache admission and replacement are hardware mechanisms, subject to available policy controls. The same physical resource can support two interfaces without making those interfaces interchangeable.</p>
+<p>Suppose a tile requires 2T²s shared bytes. Increasing T can increase reuse, but it also increases shared consumption and thread count quadratically. If an SM has a shared-memory budget S_sm bytes and this is the limiting resource, an ideal capacity bound is floor(S_sm/(2T²s)) resident blocks. Occupancy is the fraction of the SM's maximum resident-warp capacity occupied by resident warps. Real occupancy also depends on registers, thread/warp limits, allocation granularity and kernel attributes. This inequality is a capacity test, not a predicted speedup.</p>
+<p>Jacobi illustrates why reuse must be counted for the actual algorithm. The four-neighbor update has only a small fixed neighborhood per output, whereas dense matrix multiplication reuses each tile element across many output products. Both can use shared storage, but the potential reduction in requests differs. A matrix result cannot establish that the same tile shape accelerates Jacobi. The correct transferable method is to count consumers, identify their overlap, and include staging and synchronization costs.</p>
+
+<h2 id="ownership">Allocation and copy APIs implement an ownership protocol <a class="timestamp" href="https://www.youtube.com/watch?v=eihu-w4-Q8s&amp;t=811s">W8L3 13:31</a></h2>
+<p>The usual explicit lifecycle is allocate, initialize, transfer inputs, execute, transfer outputs, verify, release. Each step answers a different question. Allocation reserves an extent but does not establish all desired input values. A copy initializes a destination range but does not prove the kernel's index formula. Successful kernel launch submission does not prove that execution finished. Release invalidates storage but does not erase every stale pointer value that the application retained.</p>
+<p>The matching deallocator depends on the allocation family. C malloc storage is released with free; a C++ vector manages its own allocation; cudaMalloc and cudaMallocManaged allocations are released with cudaFree; cudaMallocHost storage is released with cudaFreeHost. Registered existing host storage uses cudaHostUnregister before its original owner releases it. Mixing these families breaks the resource contract even when their returned values all have pointer types.</p>
+<p>cudaMalloc receives a destination for the pointer and a size in bytes. In the C++ runtime overload used here, cudaMalloc(&amp;d_a,bytes) accepts a typed pointer variable. The returned status must be checked before that pointer is used. A request exceeding available resources fails at runtime, commonly with cudaErrorMemoryAllocation. Compilation cannot generally know how much device memory will remain when the executable runs, because other allocations and runtime state are not compile-time constants.</p>
+<p>cudaMemcpy names destination, source, count in bytes, and a copy kind. HostToDevice and DeviceToHost describe the endpoint memory domains. DeviceToDevice can copy between two allocations on the same GPU. The W8L3 explanation that describes it as copying from one device to another is therefore incomplete: the enum alone does not establish two different physical GPUs, peer access or a particular interconnect. The vector check later deliberately copies between two allocations on the same selected device.</p>
+<p>For a contiguous vector of n floats the full-copy count is n×sizeof(float). A count of n copies only n bytes, one quarter of the intended data on this implementation. A count of sizeof(pointer) copies the size of a pointer representation, not the allocation behind it. The base pointer and extent are separate facts, so the program keeps bytes alongside the pointer and uses it consistently for allocation and transfer.</p>
+<p>The <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__MEMORY.html">runtime memory reference</a> specifies allocation/copy functions and their error returns. Its cudaMemGetInfo description reports free and total device memory. It does not report combined host-plus-device Unified Memory capacity, despite the W8L4 API slide's wording. Treat a free-byte result as an observation at query time; it is not a reservation that guarantees the next allocation will succeed.</p>
+<p>Peak live storage follows from overlapping lifetimes. With three host vectors and three device vectors, the explicit addition case has 3ns live payload bytes in each domain. If a second device output snapshot remains live, device payload rises to 4ns. Releasing d_a immediately after launch without first establishing completion would shorten its lifetime across a possible reader. Reducing memory safely means removing a representation or proving its last use, not merely moving a free call earlier in the file.</p>
+<p>For Jacobi using double-precision floating-point values (the eight-byte double type on this implementation), the two boundary-inclusive grids require 2(N+2)²×8=16(N+2)² payload bytes on the device. Under a hypothetical 500 MiB payload ceiling, N must satisfy 16(N+2)²≤500×2²⁰. Integer square root gives N≤5722. This is an accounting ceiling only; runtime context, reduction buffers and allocator overhead require additional headroom. Our executable cases use far smaller allocations and do not probe out-of-memory behavior.</p>
+
+<h2 id="symbols-and-transfers">Symbols and asynchronous copies add ordering obligations <a class="timestamp" href="https://www.youtube.com/watch?v=eihu-w4-Q8s&amp;t=1141s">W8L3 19:01</a></h2>
+<p>A symbol is a named device-side object rather than an allocation returned through an application pointer. cudaMemcpyToSymbol supplies a symbol, source range and byte count; cudaMemcpyFromSymbol reads it back. Our constant coefficients are a two-element array, and a separate __device__ integer records a completed kernel write. The host initializes both symbols before launching, waits for completion, and then retrieves their values. That sequence makes the expected version of each symbol unambiguous.</p>
+<p>The following program takes no external input. It initializes 257 integers, makes one linear texture view of their device copy, and evaluates out[i]=2(i−128)+3+(i+7)=3i−246. A volatile private array keeps the example's per-thread storage explicit to the compiler, but the program does not infer physical latency from that declaration. It verifies every output, retrieves both constant coefficients and the completion symbol, and destroys all objects before returning. The largest allocation is 1,028 bytes.</p>
+<pre><code class="language-cuda" data-file="memory_spaces.cu" data-build="nvcc -arch=native -O2 memory_spaces.cu -o memory_spaces" data-run="timeout 20 ./memory_spaces" data-needs="gpu" data-check="exact">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+#define CK(x) do { cudaError_t e=(x); if(e!=cudaSuccess){std::fprintf(stderr,"%s: %s\n",#x,cudaGetErrorString(e));std::exit(1);} } while(0)
+__constant__ int coefficients[2];
+__device__ int completed;
+__global__ void apply(cudaTextureObject_t texture, int *out, int n) {
+    int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i&lt;n) {
+        volatile int private_values[8];
+        for(int j=0;j&lt;8;++j) private_values[j]=i+j;
+        int value=tex1Dfetch&lt;int&gt;(texture,i);
+        out[i]=coefficients[0]*value+coefficients[1]+private_values[7];
+        if(i==0) completed=1;
+    }
+}
+int main() {
+    constexpr int n=257; const size_t bytes=n*sizeof(int);
+    std::vector&lt;int&gt; input(n),output(n);
+    for(int i=0;i&lt;n;++i) input[i]=i-128;
+    int *d_input=nullptr,*d_output=nullptr;
+    CK(cudaMalloc(&amp;d_input,bytes)); CK(cudaMalloc(&amp;d_output,bytes));
+    CK(cudaMemcpy(d_input,input.data(),bytes,cudaMemcpyHostToDevice));
+    int host_coefficients[2]={2,3}; int zero=0;
+    CK(cudaMemcpyToSymbol(coefficients,host_coefficients,sizeof(host_coefficients)));
+    CK(cudaMemcpyToSymbol(completed,&amp;zero,sizeof(zero)));
+    cudaResourceDesc resource{}; resource.resType=cudaResourceTypeLinear;
+    resource.res.linear.devPtr=d_input;
+    resource.res.linear.desc=cudaCreateChannelDesc&lt;int&gt;();
+    resource.res.linear.sizeInBytes=bytes;
+    cudaTextureDesc description{}; description.readMode=cudaReadModeElementType;
+    cudaTextureObject_t texture=0;
+    CK(cudaCreateTextureObject(&amp;texture,&amp;resource,&amp;description,nullptr));
+    apply&lt;&lt;&lt;(n+127)/128,128&gt;&gt;&gt;(texture,d_output,n);
+    CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
+    CK(cudaMemcpy(output.data(),d_output,bytes,cudaMemcpyDeviceToHost));
+    int done=0,readback[2]={};
+    CK(cudaMemcpyFromSymbol(&amp;done,completed,sizeof(done)));
+    CK(cudaMemcpyFromSymbol(readback,coefficients,sizeof(readback)));
+    long long checksum=0;
+    for(int i=0;i&lt;n;++i){ if(output[i]!=3*i-246) return 2; checksum+=output[i]; }
+    if(done!=1 || readback[0]!=2 || readback[1]!=3) return 3;
+    std::printf("elements=%d checksum=%lld symbols=verified\n",n,checksum);
+    CK(cudaDestroyTextureObject(texture)); CK(cudaFree(d_output)); CK(cudaFree(d_input));
+}
+</code></pre>
+<pre><code class="output" data-output-for="memory_spaces.cu">elements=257 checksum=35466 symbols=verified</code></pre>
+
+<p>The checksum is the sum of 3i−246 for i=0,…,256, namely 3×256×257/2−246×257=35,466. Checking all 257 elements is stronger than checking this sum alone, since two wrong entries can cancel. The symbol check exercises two allocation-independent names; it is not a device-wide barrier implemented with a flag. Only one thread writes completed, and the host reads it after synchronization.</p>
+<p>A stream is an ordered sequence of CUDA work. A cudaMemcpyAsync operation is submitted to a specified stream, and later work in that stream respects its ordering. The Async suffix does not promise that every invocation returns immediately under every memory/driver condition. In particular, pageable host buffers may require staging or synchronization. <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html">The runtime's API synchronization rules</a> distinguish host blocking from stream ordering and describe memory-type-dependent copy behavior.</p>
+<p>Pageable host memory can be moved by the operating system's virtual-memory mechanisms. Pinned, or page-locked, host memory is reserved so that it remains suitable for GPU transfers. CUDA can allocate it with cudaMallocHost, or register an existing eligible range. Pinning is a resource decision: it consumes a constrained system resource and allocation/registration has a cost. A program should keep a reusable bounded pool rather than pinning an entire simulation's host address space without measuring the effect.</p>
+<p>The important lifetime rule is visible in a three-operation chain: enqueue a host-to-device copy, enqueue the consuming kernel in the same stream, and wait for that stream before reusing the source buffer. Host submission can finish while the transfer is still reading the pinned buffer. Changing its contents immediately afterward can change which bytes reach the device. A nonblocking API therefore increases the interval during which the application must preserve the buffer, even though the host function call itself is shorter.</p>
+<p>Ordering within one stream is also different from overlap between streams. Placing a copy and its dependent kernel in the same stream preserves correctness but makes them execute in dependency order. Useful overlap requires independent work, hardware support and an arrangement that avoids unintended synchronization. The transfer experiment below intentionally has no independent kernel. It measures transfer paths and batching overhead; it provides no evidence for copy/compute overlap.</p>
+<p>The experiment transfers 16 MiB eight times per trial, with three trials per mode. It compares pageable synchronous copies, pinned synchronous copies, and a batch of pinned asynchronous copies in a nonblocking stream. The host clock includes API submission and the final completion wait. Allocation, initial buffer touching and warm-up occur outside the measured interval. After each mode, a device-to-host copy checks all returned bytes. Total device payload is 16 MiB; the experiment does not approach the memory capacity.</p>
+<pre><code class="language-cuda" data-file="transfer_paths.cu" data-build="nvcc -arch=native -O2 transfer_paths.cu -o transfer_paths" data-run="timeout 20 ./transfer_paths" data-needs="gpu" data-check="returncode">#include &lt;cuda_runtime.h&gt;
+#include &lt;algorithm&gt;
+#include &lt;chrono&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+#define CK(x) do { cudaError_t e=(x); if(e!=cudaSuccess){std::fprintf(stderr,"%s: %s\n",#x,cudaGetErrorString(e));std::exit(1);} } while(0)
+int main(){
+    constexpr size_t bytes=16*1024*1024; constexpr int repeats=8,trials=3;
+    std::vector&lt;unsigned char&gt;pageable(bytes,37),result(bytes);
+    unsigned char *pinned=nullptr,*device=nullptr;
+    CK(cudaMallocHost(&amp;pinned,bytes)); CK(cudaMalloc(&amp;device,bytes));
+    std::fill(pinned,pinned+bytes,37);
+    cudaStream_t stream; CK(cudaStreamCreateWithFlags(&amp;stream,cudaStreamNonBlocking));
+    for(int mode=0;mode&lt;3;++mode){
+        unsigned char *source=mode==0?pageable.data():pinned;
+        CK(cudaMemcpy(device,source,bytes,cudaMemcpyHostToDevice));
+        double seconds[trials];
+        for(int t=0;t&lt;trials;++t){
+            CK(cudaDeviceSynchronize()); auto start=std::chrono::steady_clock::now();
+            for(int r=0;r&lt;repeats;++r){
+                if(mode==2) CK(cudaMemcpyAsync(device,source,bytes,cudaMemcpyHostToDevice,stream));
+                else CK(cudaMemcpy(device,source,bytes,cudaMemcpyHostToDevice));
+            }
+            if(mode==2) CK(cudaStreamSynchronize(stream));
+            else CK(cudaDeviceSynchronize());
+            auto stop=std::chrono::steady_clock::now();
+            seconds[t]=std::chrono::duration&lt;double&gt;(stop-start).count();
+        }
+        CK(cudaMemcpy(result.data(),device,bytes,cudaMemcpyDeviceToHost));
+        if(!std::all_of(result.begin(),result.end(),[](unsigned char x){return x==37;})) return 2;
+        std::sort(seconds,seconds+trials);
+        const char *name=mode==0?"pageable_sync":mode==1?"pinned_sync":"pinned_async_batch";
+        std::printf("%s median_ms=%.3f logical_GBps=%.3f verified=yes\n",name,1000*seconds[1],double(bytes)*repeats/seconds[1]/1e9);
+    }
+    std::printf("bytes_per_copy=%zu repeats=%d trials=%d\n",bytes,repeats,trials);
+    CK(cudaStreamDestroy(stream)); CK(cudaFree(device)); CK(cudaFreeHost(pinned));
+}
+</code></pre>
+<pre><code class="output" data-output-for="transfer_paths.cu">pageable_sync median_ms=30.685 logical_GBps=4.374 verified=yes
+pinned_sync median_ms=12.102 logical_GBps=11.091 verified=yes
+pinned_async_batch median_ms=10.704 logical_GBps=12.540 verified=yes
+bytes_per_copy=16777216 repeats=8 trials=3</code></pre>
+
+<p>These outputs are one sample from the RTX 3050 Laptop GPU under WSL, captured on 28 October 2026. Each logical_GBps value is eight times the payload size divided by the median trial duration and by 10⁹. It counts requested host-to-device payload bytes, not physical bus traffic. Repeatedly writing the same destination is deliberate; it isolates a simple transfer path and does not reproduce a full solver's allocation, packing, numerical work or host-output cost.</p>
+<p>Across three captures, median trial durations were 24.239–30.898 ms for pageable synchronous copies, 11.191–12.102 ms for pinned synchronous copies, and 10.660–10.728 ms for the pinned asynchronous batch. These are ranges of the per-capture medians, not uncertainty intervals.</p>
+<p>Any difference between the three reported rates is an observation of this bounded protocol. It cannot identify staging cost, PCIe negotiation, WSL implementation behavior or driver scheduling as the cause without additional evidence. The pinned asynchronous batch can reduce repeated host waits, but the comparison alone does not prove that mechanism dominated. No assertion requires pinned memory to win; correctness and successful completion are the executable contract, while timings are variable observations.</p>
+
+<h2 id="launch-order">A hello-world launch already has a lifetime problem <a class="timestamp" href="https://www.youtube.com/watch?v=eihu-w4-Q8s&amp;t=1384s">W8L3 23:04</a></h2>
+<p>The simplest CUDA program declares a __global__ function and launches it with a grid/block execution configuration. The first two launch arguments give block count and threads per block. Two blocks of sixteen threads create 32 logical invocations, and threadIdx.x repeats from zero through fifteen in each block. That local identity is useful for shared-array indexing, but it does not identify one element of a whole 32-element vector unless blockIdx.x contributes too.</p>
+<p>A device printf call is an observable effect, not an ordering primitive. Output order among independent threads is unspecified, so a hello-world program's printed sequence cannot be used as a schedule trace or a proof that blocks execute consecutively. The deterministic programs in this chapter write indexed arrays instead. The host checks the completed array in a fixed order, separating the mathematical result from execution interleaving.</p>
+<p>Even a kernel with no user-allocated data must complete before the process exits if its effects are to be reliably observed. A successful launch submission establishes that the host reached the launch operation; it does not establish completed device execution. The examples check cudaGetLastError after submission and a synchronization result at the completion boundary. These checks answer different questions, and a later API can also report an earlier asynchronous error.</p>
+<p>The distinction becomes consequential as soon as a pointer is passed to the kernel. Now process lifetime, allocation lifetime and producer/consumer ordering must all contain the execution interval. The vector program implements that protocol directly rather than relying on an incidental output call or process teardown. No separate hello-world listing is needed to test the numerical memory behavior.</p>
+
+<h2 id="vector-lifetime">Explicit vector addition keeps two representations consistent <a class="timestamp" href="https://www.youtube.com/watch?v=cBHs2gEzN7s&amp;t=6s">W8L4 0:06</a></h2>
+<p>The CPU vector-addition example allocates three arrays, initializes two, computes the third, and frees the allocations. On the W8L4 slide, N=10,000,000. The 40 MB calculation is the payload size of an entire vector, not one scalar element. For three host vectors the payload is 120 MB. The GPU version adds three corresponding device arrays and two input transfers plus one output transfer. Those are additional representations and operations, not a change to the addition formula.</p>
+<p>Our runnable version uses n=100,003 to force a final partial block. With 256 threads per block, ceiling division gives 391 blocks and 100,096 invocations. Exactly 93 padding invocations fail the guard. Every valid invocation reads one a and one b value and writes one out value. The initialized inputs are small integer-valued floats, so the expected sums are exactly representable; checking equality here does not rely on a general claim that unrelated floating-point algorithms always agree bit for bit.</p>
+<p>The program has four device arrays: two inputs, one kernel output and one snapshot. It copies d_out to snapshot with cudaMemcpyDeviceToDevice on the same current GPU, then returns the snapshot to the host. The fourth array is a teaching construction for endpoint semantics. A production addition would normally omit it. The host stores three vectors, and each vector contains exactly n floats. Allocation and transfer extents use a size_t product before multiplication can overflow a narrow integer.</p>
+<pre><code class="language-cuda" data-file="vector_lifetime.cu" data-build="nvcc -arch=native -O2 vector_lifetime.cu -o vector_lifetime" data-run="timeout 20 ./vector_lifetime" data-needs="gpu" data-check="exact">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+#define CK(x) do { cudaError_t e=(x); if(e!=cudaSuccess){std::fprintf(stderr,"%s: %s\n",#x,cudaGetErrorString(e));std::exit(1);} } while(0)
+__global__ void vector_add(float *out,const float *a,const float *b,int n) {
+    int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i&lt;n) out[i]=a[i]+b[i];
+}
+int main() {
+    constexpr int n=100003; const size_t bytes=size_t(n)*sizeof(float);
+    std::vector&lt;float&gt;a(n),b(n),out(n);
+    for(int i=0;i&lt;n;++i){a[i]=float(i%101);b[i]=2.0f;}
+    float *d_a=nullptr,*d_b=nullptr,*d_out=nullptr,*snapshot=nullptr;
+    CK(cudaMalloc(&amp;d_a,bytes)); CK(cudaMalloc(&amp;d_b,bytes));
+    CK(cudaMalloc(&amp;d_out,bytes)); CK(cudaMalloc(&amp;snapshot,bytes));
+    CK(cudaMemcpy(d_a,a.data(),bytes,cudaMemcpyHostToDevice));
+    CK(cudaMemcpy(d_b,b.data(),bytes,cudaMemcpyHostToDevice));
+    vector_add&lt;&lt;&lt;(n+255)/256,256&gt;&gt;&gt;(d_out,d_a,d_b,n);
+    CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
+    CK(cudaMemcpy(snapshot,d_out,bytes,cudaMemcpyDeviceToDevice));
+    CK(cudaMemcpy(out.data(),snapshot,bytes,cudaMemcpyDeviceToHost));
+    for(int i=0;i&lt;n;++i) if(out[i]!=a[i]+b[i]) return 2;
+    std::printf("elements=%d bytes_per_array=%zu all_values=verified same_device_copy=verified\n",n,bytes);
+    CK(cudaFree(snapshot)); CK(cudaFree(d_out)); CK(cudaFree(d_b)); CK(cudaFree(d_a));
+}
+</code></pre>
+<pre><code class="output" data-output-for="vector_lifetime.cu">elements=100003 bytes_per_array=400012 all_values=verified same_device_copy=verified</code></pre>
+
+<p>The output reports 400,012 bytes per array. The device payload is therefore 1,600,048 bytes, while the host vectors contain 1,200,036 bytes. Runtime allocations are additional to these payload counts. Each API result is checked, all 100,003 outputs are compared with the CPU expression, and the same-device snapshot is released before its inputs. The chosen release order follows completion; reversing independent frees after the completion boundary would also be valid.</p>
+<p>The W8L4 explanation places an over-capacity cudaMalloc failure at compilation time. That must be separated from static kernel resource limits. An ordinary cudaMalloc call runs after the executable starts and reports an allocation status then. A compiler can reject excessive statically declared shared storage for a target, while an excessive dynamic shared request can instead make a launch invalid. The stage of failure depends on which resource is requested through which interface.</p>
+<p>For k repeated vector operations with unchanged inputs, keeping arrays resident avoids k repeated input transfers. A simple time model is T_total=T_alloc+T_in+kT_kernel+T_out+T_free, where each term is elapsed time for the named phase. Reallocating and transferring around every operation would repeat several of those terms. This algebra motivates longer device-resident lifetimes, but it does not imply that memory should never be freed: finite capacity can force reuse or streaming.</p>
+<p>The same distinction is central to Jacobi. Swapping the host variables u and unew after a completed sweep changes which device allocation is regarded as the current field; it need not copy the whole grid. Returning every intermediate iterate to the CPU changes the transfer problem and can overwhelm the benefit of a fast sweep. A scalar convergence reduction and a final field transfer can be enough, provided the stopping rule and result-consumption order remain correct.</p>
+
+<h2 id="managed">Unified Memory simplifies naming, not synchronization <a class="timestamp" href="https://www.youtube.com/watch?v=cBHs2gEzN7s&amp;t=600s">W8L4 10:00</a></h2>
+<p>Unified Memory provides a shared virtual addressing and management abstraction for supported allocations. cudaMallocManaged returns a pointer usable by the host and device under the platform's rules. The application can initialize through that pointer on the CPU, launch a kernel with the same pointer, wait for completion, and inspect the result. It can eliminate the explicit second allocation and cudaMemcpy calls from the source program. It does not eliminate the underlying requirement that the accessing processor obtain the data.</p>
+<p>Unified virtual addressing and managed memory should not be conflated. A system can recognize a pointer's address-space category without making every ordinary host allocation freely accessible from device kernels. The <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-memory.html">CUDA memory introduction, §2.6</a>, distinguishes device capabilities for managed allocations and system-allocated memory. The program queries managedMemory, concurrentManagedAccess and pageableMemoryAccess instead of inferring capabilities from a GPU product name.</p>
+<p>A page is a unit of virtual-memory management. On a platform with the corresponding support, an access to a page can trigger mapping or migration work before the requesting processor continues. If a whole contiguous array moves to the GPU and is reused for many kernels, that cost can be amortized. If CPU and GPU repeatedly exchange ownership of many pages, movement and synchronization can dominate. The existence of one pointer makes either pattern expressible; it does not make their costs equal.</p>
+<p>A simple reuse model makes the tradeoff explicit. Let Q_mig be the bytes migrated to satisfy a phase, B_mig its effective transfer rate in bytes per second, and T_fault the remaining fault/management overhead for that phase. If k kernels reuse the resulting resident data, the amortized migration cost per kernel is approximately (Q_mig/B_mig+T_fault)/k. The approximation assumes those costs are not hidden by other work and residency persists. It is a planning model, not a measurement of this machine's page-fault mechanism.</p>
+<p>The restriction is particularly concrete here. <a href="https://docs.nvidia.com/cuda/wsl-user-guide/index.html#known-limitations-for-linux-cuda-applications">NVIDIA's CUDA on WSL guide, §5.1</a>, documents limited managed-memory support and lack of concurrent CPU/GPU access, and asks applications to query support. The captured query below returns managed=1, concurrent=0, pageable=0. The program therefore follows strictly separated CPU and GPU phases and skips advice/prefetch operations whose required full managed support has not been established.</p>
+<p>cudaMemAdvise supplies a usage hint; it is not a synchronization operation or an allocation. cudaMemPrefetchAsync requests placement work in a stream; submission alone does not authorize immediate CPU consumption. The installed CUDA 13.3 headers use a cudaMemLocation structure for both APIs, and prefetch also has an explicit flags argument. Older examples that pass only a device integer use a different signature. The listing was checked against the actual installed declarations and the current runtime reference.</p>
+<p>The following input-free program allocates 4,099 managed integers, initializes a[i]=i on the host, increments every value by five on the device, synchronizes, and checks every value on the host. cudaPointerGetAttributes confirms the allocation category through the type member. A second device-memory query checks that free bytes do not exceed reported total bytes. It deliberately prints no volatile free-capacity number and performs no capacity-exhaustion experiment.</p>
+<pre><code class="language-cuda" data-file="managed_state.cu" data-build="nvcc -arch=native -O2 managed_state.cu -o managed_state" data-run="timeout 20 ./managed_state" data-needs="gpu" data-check="returncode">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#define CK(x) do { cudaError_t e=(x); if(e!=cudaSuccess){std::fprintf(stderr,"%s: %s\n",#x,cudaGetErrorString(e));std::exit(1);} } while(0)
+__global__ void increment(int *a,int n){int i=blockIdx.x*blockDim.x+threadIdx.x;if(i&lt;n)a[i]+=5;}
+int main(){
+    int device=0,managed=0,concurrent=0,pageable=0;
+    CK(cudaGetDevice(&amp;device));
+    CK(cudaDeviceGetAttribute(&amp;managed,cudaDevAttrManagedMemory,device));
+    CK(cudaDeviceGetAttribute(&amp;concurrent,cudaDevAttrConcurrentManagedAccess,device));
+    CK(cudaDeviceGetAttribute(&amp;pageable,cudaDevAttrPageableMemoryAccess,device));
+    std::printf("managed=%d concurrent=%d pageable=%d\n",managed,concurrent,pageable);
+    if(!managed){std::puts("managed allocation skipped: unsupported");return 0;}
+    constexpr int n=4099; const size_t bytes=size_t(n)*sizeof(int);
+    int *a=nullptr; CK(cudaMallocManaged(&amp;a,bytes));
+    cudaPointerAttributes attributes{}; CK(cudaPointerGetAttributes(&amp;attributes,a));
+    if(attributes.type!=cudaMemoryTypeManaged) return 2;
+    for(int i=0;i&lt;n;++i)a[i]=i;
+    if(concurrent){
+        cudaMemLocation gpu{};gpu.type=cudaMemLocationTypeDevice;gpu.id=device;
+        CK(cudaMemAdvise(a,bytes,cudaMemAdviseSetPreferredLocation,gpu));
+        CK(cudaMemPrefetchAsync(a,bytes,gpu,0,0));
+        std::puts("advice and GPU prefetch submitted");
+    }else std::puts("advice and prefetch skipped: limited managed support");
+    increment&lt;&lt;&lt;(n+127)/128,128&gt;&gt;&gt;(a,n); CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
+    if(concurrent){
+        cudaMemLocation cpu{};cpu.type=cudaMemLocationTypeHost;cpu.id=0;
+        CK(cudaMemPrefetchAsync(a,bytes,cpu,0,0)); CK(cudaDeviceSynchronize());
+    }
+    for(int i=0;i&lt;n;++i)if(a[i]!=i+5)return 3;
+    std::printf("elements=%d pointer_type=managed all_values=verified\n",n);
+    size_t free_bytes=0,total_bytes=0; CK(cudaMemGetInfo(&amp;free_bytes,&amp;total_bytes));
+    if(total_bytes==0 || free_bytes&gt;total_bytes)return 4;
+    std::puts("device_memory_query=valid (not combined CPU+GPU capacity)");
+    CK(cudaFree(a));
+}
+</code></pre>
+<pre><code class="output" data-output-for="managed_state.cu">managed=1 concurrent=0 pageable=0
+advice and prefetch skipped: limited managed support
+elements=4099 pointer_type=managed all_values=verified
+device_memory_query=valid (not combined CPU+GPU capacity)</code></pre>
+
+<p>The managed allocation contains only 16,396 bytes. The run verifies allocation, shared-pointer use in separated phases, the pointer category and completed numerical results on this WSL configuration. The advice/prefetch branch compiled but did not execute because concurrentManagedAccess was zero. Thus these results are not a migration benchmark and do not validate that branch on a platform with full support. A portable application must recheck its actual platform rather than replacing the observed zero by an assumed one.</p>
+<p>A memory-category query does not prove that an arbitrary pointer is live or sufficiently large. The <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/structcudaPointerAttributes.html">cudaPointerAttributes reference</a> defines type and host/device pointer fields but explicitly notes that CUDA does not validate allocation of unregistered memory. Our program already knows the allocation's successful creation and byte extent. The attribute query supplies one additional fact; it does not replace ownership tracking.</p>
+<p>For a solver, managed memory is most useful when it clarifies data ownership rather than concealing it. Name CPU initialization, GPU iteration and CPU inspection as phases even when each phase uses the same pointer. Keep convergence checks and visualization reads at explicit boundaries. If later profiling finds repeated migration, the existing phase structure gives a concrete place to change placement policy or introduce explicit device-resident storage without altering the numerical model.</p>
+
+<h2 id="shared-tiles">Static and dynamic shared allocations stage the same tile <a class="timestamp" href="https://www.youtube.com/watch?v=cBHs2gEzN7s&amp;t=974s">W8L4 16:14</a></h2>
+<p>Static shared allocation fixes an array extent in compiled kernel code, as in __shared__ float values[256]. With four-byte floats, that declaration occupies 1,024 bytes per block, not 256 bytes. The declaration's 256 is an element count; the byte extent follows only after multiplying by sizeof(float). The array has a distinct instance for every block; “static” describes how its size is specified, not persistence across launches or sharing among blocks.</p>
+<p>Dynamic shared allocation uses extern __shared__ storage whose byte extent is supplied in the third kernel-launch configuration argument. The declaration alone does not choose a sufficient extent automatically. The host must calculate bytes from the intended layout, ensure the request is legal, and pass that count at launch. All dynamic shared declarations refer into the dynamic allocation; independent arrays must be laid out deliberately rather than assumed to receive unrelated allocations.</p>
+<p>Our two float tiles each contain T² elements, so they require 2T²s bytes per block. The dynamic kernel places its A tile first and its B tile after T² floats. Both have the same element type, so that boundary preserves the required alignment. Mixing types would require an explicit alignment calculation. With T=16 and s=4 the byte count is 2×256×4=2,048. The static kernel declares two 16×16 arrays and receives the same payload size through a different interface.</p>
+<p>The shared-memory limits are architecture and function dependent. A 48 KiB ordinary per-block allowance is a common default boundary, not the largest allocation CUDA can ever support. Some devices permit larger dynamic allocations after an explicit function opt-in, while total static plus dynamic usage and other resource constraints still apply. Our example requests only 2 KiB and checks device/function attributes. It neither exercises opt-in nor assumes that every future GPU has the same limit.</p>
+<p>To derive reuse, consider an interior T×T output tile and one T-wide segment of its dot products. Each of T² output threads needs T values from A and T from B. A direct implementation issues 2T³ scalar input-load requests for that stage before considering caching. Cooperative staging instead loads T² A values and T² B values once, then lets the block reuse them. The ratio of requested global input loads is therefore T under this ideal full-tile count:</p>
+\[
+\frac{2T^3}{2T^2}=T,\qquad S_{\mathrm{block}}=2T^2s. \tag{21.1}
+\]
+<p>S_block is the shared payload per block in bytes. Equation (21.1) counts source-level requests to global storage, not measured external-memory transactions. A cache can already satisfy repeated direct loads, and the tiled implementation adds shared loads, barriers and indexing. The request-count reduction supplies an optimization hypothesis. It does not establish a factor-T reduction in elapsed time.</p>
+<p>Let F be the useful floating-point operation count, Q the bytes transferred across a specified memory boundary, and I=F/Q the arithmetic intensity in flop per byte. A fused multiply-add (FMA) computes a product plus an addend with one final rounding, and conventionally counts as two floating-point operations. Counting a multiplication and addition as two flops gives F≈2N³. For N divisible by T, ignoring caching and edge effects, direct and tiled source-request models give</p>
+\[
+Q_{\mathrm{direct}}=2N^3s+N^2s,\qquad
+Q_{\mathrm{tile}}=\frac{2N^3s}{T}+N^2s,
+\qquad I_{\mathrm{tile}}\longrightarrow\frac{T}{s}\quad(N\gg T). \tag{21.2}
+\]
+<p>The final term counts one output store per element. For four-byte floats, the large-N tiled model approaches T/4 flop per requested byte, compared with 1/4 for the direct model. These are intensities for the chosen counting boundary. They are not hardware-counter measurements of traffic to external device memory (dynamic random-access memory, DRAM). The distinction is essential before inserting an intensity into a roofline bound: an upper bound on performance set jointly by arithmetic throughput and memory bandwidth. The byte-counting boundary must match the bandwidth used in that bound.</p>
+<p>The arithmetic program below checks the lecture vector accounting, the hypothetical two-grid payload ceiling, and the shared storage/thread counts for three tile sizes. It has no external inputs or file effects and allocates no GPU memory. It separates integer arithmetic from device support: T=32 implies 1,024 threads, but the printed line alone does not establish that a particular compiled kernel can launch that block legally or efficiently.</p>
+<pre><code class="language-python" data-file="allocation_model.py" data-run="python3 allocation_model.py" data-check="exact">import math
+n = 10_000_000
+s = 4
+print(f"lecture_vector_bytes={n*s} three_host_bytes={3*n*s} three_device_bytes={3*n*s}")
+print(f"vector_MiB={n*s/2**20:.6f} two_grid_limit_500MiB={math.isqrt((500*2**20)//16)-2}")
+for tile in (8, 16, 32):
+    shared = 2*tile*tile*s
+    print(f"tile={tile} threads={tile*tile} shared_bytes={shared} ideal_load_reduction={tile}")
+assert 256*s == 1024
+</code></pre>
+<pre><code class="output" data-output-for="allocation_model.py">lecture_vector_bytes=40000000 three_host_bytes=120000000 three_device_bytes=120000000
+vector_MiB=38.146973 two_grid_limit_500MiB=5722
+tile=8 threads=64 shared_bytes=512 ideal_load_reduction=8
+tile=16 threads=256 shared_bytes=2048 ideal_load_reduction=16
+tile=32 threads=1024 shared_bytes=8192 ideal_load_reduction=32</code></pre>
+
+<p>Correct staging needs two ordering boundaries per stage. First, all threads load their assigned entries, then __syncthreads makes the tile ready for consumers. Second, after accumulation, another __syncthreads prevents fast threads from overwriting storage for the next stage while other threads are still reading the current one. Omitting the second barrier can produce a race even if the first barrier correctly publishes every load.</p>
+<p>Boundary threads must participate in those barriers. With N=259 and T=16, the grid has 17×17 blocks and covers a 272×272 launch rectangle. Threads outside C's logical domain still perform their assigned tile loads, writing zero only when the corresponding input coordinate is outside A or B, and execute both barriers. They skip only the final global output store. An early return before the stage loop would remove loaders of values needed by valid output threads. This is a data-dependence error even when returned threads count as exited for barrier completion.</p>
+<p>Zero padding preserves the matrix product. For a final partial stage, a term with k≥N is set to zero in at least one factor and contributes zero to the sum. For an output with i≥N or j≥N, no C entry is stored. Every valid output still sums all and only its N original products. The same reasoning covers a matrix smaller than one tile, although the fixed executable uses a nonmultiple larger than several tiles.</p>
+<p>The next program implements direct, statically tiled and dynamically tiled kernels. It computes a CPU reference for all 67,081 output entries and checks all three device results. Inputs are small integer-valued floats; each product has magnitude at most six and each exact sum has magnitude at most 1,554, so exact comparison is appropriate for this particular check. Arbitrary real-valued inputs would require an error analysis and a suitable tolerance.</p>
+<pre><code class="language-cuda" data-file="shared_matmul.cu" data-build="nvcc -arch=native -O2 shared_matmul.cu -o shared_matmul" data-run="timeout 20 ./shared_matmul" data-needs="gpu" data-check="returncode">#include &lt;cuda_runtime.h&gt;
+#include &lt;algorithm&gt;
+#include &lt;cmath&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+#define CK(x) do { cudaError_t e=(x); if(e!=cudaSuccess){std::fprintf(stderr,"%s: %s\n",#x,cudaGetErrorString(e));std::exit(1);} } while(0)
+constexpr int tile_width=16;
+__global__ void naive(const float *a,const float *b,float *c,int n){
+    int row=blockIdx.y*blockDim.y+threadIdx.y,col=blockIdx.x*blockDim.x+threadIdx.x;
+    if(row&lt;n &amp;&amp; col&lt;n){float sum=0;for(int k=0;k&lt;n;++k)sum+=a[row*n+k]*b[k*n+col];c[row*n+col]=sum;}
+}
+__global__ void static_tiles(const float *a,const float *b,float *c,int n){
+    __shared__ float at[tile_width][tile_width],bt[tile_width][tile_width];
+    int x=threadIdx.x,y=threadIdx.y,row=blockIdx.y*tile_width+y,col=blockIdx.x*tile_width+x;
+    float sum=0;
+    for(int base=0;base&lt;n;base+=tile_width){
+        at[y][x]=(row&lt;n &amp;&amp; base+x&lt;n)?a[row*n+base+x]:0.0f;
+        bt[y][x]=(base+y&lt;n &amp;&amp; col&lt;n)?b[(base+y)*n+col]:0.0f;
+        __syncthreads();
+        for(int k=0;k&lt;tile_width;++k)sum+=at[y][k]*bt[k][x];
+        __syncthreads();
+    }
+    if(row&lt;n &amp;&amp; col&lt;n)c[row*n+col]=sum;
+}
+__global__ void dynamic_tiles(const float *a,const float *b,float *c,int n){
+    extern __shared__ float storage[];
+    int width=blockDim.x,x=threadIdx.x,y=threadIdx.y;
+    float *at=storage,*bt=storage+width*width;
+    int row=blockIdx.y*width+y,col=blockIdx.x*width+x;float sum=0;
+    for(int base=0;base&lt;n;base+=width){
+        at[y*width+x]=(row&lt;n &amp;&amp; base+x&lt;n)?a[row*n+base+x]:0.0f;
+        bt[y*width+x]=(base+y&lt;n &amp;&amp; col&lt;n)?b[(base+y)*n+col]:0.0f;
+        __syncthreads();
+        for(int k=0;k&lt;width;++k)sum+=at[y*width+k]*bt[k*width+x];
+        __syncthreads();
+    }
+    if(row&lt;n &amp;&amp; col&lt;n)c[row*n+col]=sum;
+}
+int main(){
+    constexpr int n=259,repeats=5,trials=3;
+    const size_t elements=size_t(n)*n,bytes=elements*sizeof(float);
+    std::vector&lt;float&gt;a(elements),b(elements),reference(elements,0),out(elements);
+    for(size_t i=0;i&lt;elements;++i){a[i]=float(int(i%7)-3);b[i]=float(int(i%5)-2);}
+    for(int i=0;i&lt;n;++i)for(int j=0;j&lt;n;++j)for(int k=0;k&lt;n;++k)reference[i*n+j]+=a[i*n+k]*b[k*n+j];
+    float *da=nullptr,*db=nullptr,*dc=nullptr;
+    CK(cudaMalloc(&amp;da,bytes));CK(cudaMalloc(&amp;db,bytes));CK(cudaMalloc(&amp;dc,bytes));
+    CK(cudaMemcpy(da,a.data(),bytes,cudaMemcpyHostToDevice));CK(cudaMemcpy(db,b.data(),bytes,cudaMemcpyHostToDevice));
+    dim3 block(tile_width,tile_width),grid((n+tile_width-1)/tile_width,(n+tile_width-1)/tile_width);
+    const size_t dynamic_bytes=2*tile_width*tile_width*sizeof(float);
+    cudaFuncAttributes fixed{},dynamic{};
+    CK(cudaFuncGetAttributes(&amp;fixed,static_tiles));CK(cudaFuncGetAttributes(&amp;dynamic,dynamic_tiles));
+    if(fixed.sharedSizeBytes!=dynamic_bytes || dynamic.sharedSizeBytes!=0)return 2;
+    cudaDeviceProp property{};int device=0;CK(cudaGetDevice(&amp;device));CK(cudaGetDeviceProperties(&amp;property,device));
+    if(dynamic_bytes&gt;property.sharedMemPerBlock)return 3;
+    cudaEvent_t start,stop;CK(cudaEventCreate(&amp;start));CK(cudaEventCreate(&amp;stop));
+    for(int mode=0;mode&lt;3;++mode){
+        auto launch=[&amp;](){
+            if(mode==0)naive&lt;&lt;&lt;grid,block&gt;&gt;&gt;(da,db,dc,n);
+            else if(mode==1)static_tiles&lt;&lt;&lt;grid,block&gt;&gt;&gt;(da,db,dc,n);
+            else dynamic_tiles&lt;&lt;&lt;grid,block,dynamic_bytes&gt;&gt;&gt;(da,db,dc,n);
+            CK(cudaGetLastError());
+        };
+        launch();CK(cudaDeviceSynchronize());
+        CK(cudaMemcpy(out.data(),dc,bytes,cudaMemcpyDeviceToHost));
+        for(size_t i=0;i&lt;elements;++i)if(out[i]!=reference[i]){std::fprintf(stderr,"mismatch at %zu\n",i);return 4;}
+        float milliseconds[trials];
+        for(int t=0;t&lt;trials;++t){
+            CK(cudaEventRecord(start));for(int r=0;r&lt;repeats;++r)launch();
+            CK(cudaEventRecord(stop));CK(cudaEventSynchronize(stop));CK(cudaEventElapsedTime(&amp;milliseconds[t],start,stop));
+        }
+        std::sort(milliseconds,milliseconds+trials);
+        double per_ms=milliseconds[1]/repeats;
+        std::printf("%s median_ms=%.6f useful_GFLOPS=%.3f all_values=verified\n",mode==0?"naive":mode==1?"static":"dynamic",per_ms,2.0*n*n*n/(per_ms*1e6));
+    }
+    std::printf("N=%d tile=%d shared_bytes=%zu static_attribute=%zu dynamic_static_attribute=%zu\n",n,tile_width,dynamic_bytes,fixed.sharedSizeBytes,dynamic.sharedSizeBytes);
+    CK(cudaEventDestroy(stop));CK(cudaEventDestroy(start));CK(cudaFree(dc));CK(cudaFree(db));CK(cudaFree(da));
+}
+</code></pre>
+<pre><code class="output" data-output-for="shared_matmul.cu">naive median_ms=0.112230 useful_GFLOPS=309.613 all_values=verified
+static median_ms=0.091341 useful_GFLOPS=380.421 all_values=verified
+dynamic median_ms=0.134394 useful_GFLOPS=258.554 all_values=verified
+N=259 tile=16 shared_bytes=2048 static_attribute=2048 dynamic_static_attribute=0</code></pre>
+
+<p>CUDA events bracket five launches per timing trial, and the reported per-launch time is the median of three trial totals divided by five. Transfers, allocation and the CPU reference are outside that interval. useful_GFLOPS uses 2N³ useful flops divided by elapsed seconds; zero-padded extra arithmetic is not counted as useful work. The output is one dated sample, not a deterministic performance contract.</p>
+<p>Across three independent captures, direct-kernel medians ranged from 0.102810 to 0.112230 ms, static tiles from 0.090317 to 0.096358 ms, and dynamic tiles from 0.132915 to 0.134394 ms. Static tiles were faster than direct loads in each paired capture; dynamic tiles were slower in each. The dynamically indexed implementation is a different compiled kernel even though its mathematical tile is the same. These observations do not establish why its generated code took longer, and a resource-allocation API's flexibility is not a speed guarantee.</p>
+<p>The function-attribute check reports 2,048 static shared bytes for static_tiles and zero static shared bytes for dynamic_tiles. The latter still receives 2,048 dynamic bytes at launch. Adding the two contributions is necessary when calculating total per-block usage. This check validates the distinction between compiled storage and launch-supplied storage on the tested build; it does not imply that a kernel reporting zero static shared bytes consumes no shared resource.</p>
+<p>For production dense matrix multiplication, library algorithms exploit additional techniques and hardware features beyond this scalar-FMA teaching kernel. This example isolates storage scope, reuse and barriers. It is not a comparison with cuBLAS (NVIDIA's GPU basic linear algebra library), arithmetic on Tensor Cores (specialized matrix-arithmetic hardware), asynchronous global-to-shared pipelines or a fully tuned general matrix multiplication (GEMM) implementation. <a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-best-practices-guide/index.html#shared-memory-in-matrix-multiplication-c-ab">NVIDIA's Best Practices Guide, §10.2.3.2</a>, supplies the related shared-memory reuse pattern; its published V100 timings are not reused as measurements of this laptop.</p>
+
+<h2 id="limits">Limits: access correctness precedes performance interpretation</h2>
+<p>These programs verify bounded single-device behavior on an RTX 3050 Laptop GPU through WSL with CUDA 13.3. They do not exhaust device memory, quantify every cache level, establish a universal memory-speed hierarchy, or reproduce full Unified Memory migration support. The managed program's supported path is explicitly identified by its capability output. A larger device, another driver or a native Linux configuration can change both capabilities and performance.</p>
+<p>The examples exit on the first detected API failure. A long-lived application should additionally use structured ownership so that partial initialization releases already-acquired resources along each failure path. Exiting a short test program lets process teardown reclaim resources, but that pattern would leak resources if converted into an error-returning library routine without corresponding cleanup. The ownership model remains useful on both the successful and failing paths.</p>
+<p>The scientific conclusion is conditional: shared staging reduces redundant requests under the stated reuse pattern, while measurements decide whether that change helps the tested implementation. Pinned buffers enable transfer protocols with different costs and lifetime obligations. Managed pointers simplify naming while preserving ordering requirements. None of these choices excuses unchecked byte extents, use-after-free, data races or a mismatch between the measured interval and the claimed result.</p>
+<table><thead><tr><th>Lecture claim or example</th><th>Status used here</th></tr></thead><tbody>
+<tr><td>10,000,000 floats require about 40 MB per array</td><td>40,000,000 bytes, or 38.146973 MiB; the number describes an array.</td></tr>
+<tr><td>L1 is accessible by a single thread</td><td>Corrected: cache organization is not thread-private storage scope.</td></tr>
+<tr><td>A single fastest-to-slowest ladder ranks all memory spaces</td><td>Qualified by access pattern, cache behavior, bank conflicts and resource limits.</td></tr>
+<tr><td>DeviceToDevice means different physical GPUs</td><td>Corrected: a same-device copy uses that kind too; the executable checks it.</td></tr>
+<tr><td>Excessive cudaMalloc capacity fails at compilation</td><td>Corrected: ordinary allocation reports failure at runtime; static kernel resources are a separate case.</td></tr>
+<tr><td>cudaMemGetInfo reports Unified Memory capacity</td><td>Corrected to free/total device memory.</td></tr>
+<tr><td>The shared-array declaration contains 256 floats</td><td>Its byte extent is 1,024 bytes on this implementation; 256 counts elements.</td></tr>
+<tr><td>Dynamic shared extent comes from launch parameters</td><td>Retained and made explicit: host calculation and third launch argument supply bytes.</td></tr>
+</tbody></table>
+
+<h2 id="exercises">Six exercises with worked solutions</h2>
+<h3>1. Derive the live-storage ceiling</h3>
+<p>Two boundary-inclusive Jacobi grids contain double-precision values. Let N be the number of interior points per side. Derive the payload bytes and the largest N below a 500 MiB payload ceiling. Explain why this is not an allocation guarantee.</p>
+<details><summary>Solution</summary><p>Each grid has (N+2)² values and each double occupies eight bytes on this implementation, so the pair contains 16(N+2)² bytes. The inequality 16(N+2)²≤500×2²⁰ gives (N+2)²≤32,768,000. The integer square root is 5,724, so N≤5,722. At N=5,723 the extent N+2 is 5,725 and its square exceeds the bound. The calculation includes only payload. Runtime context, other buffers, allocator state and concurrent users can reduce available capacity. An actual cudaMalloc must still be checked, and practical sizing reserves headroom rather than attempting the accounting ceiling.</p></details>
+<h3>2. Compute block and tile costs</h3>
+<p>For N=259, compare T=8 and T=16. Compute launched threads, valid outputs, dynamic shared bytes per block and the ideal full-tile reduction in global input-load requests.</p>
+<details><summary>Solution</summary><p>For T=8, ceiling division gives 33 blocks per axis, so the launch has (33×8)²=69,696 threads. The valid count is 259²=67,081, leaving 2,615 padding threads. Shared payload is 2×8²×4=512 bytes per block, and the ideal full-tile request reduction is eight. For T=16, there are 17 blocks per axis and (17×16)²=73,984 threads, leaving 6,903 padding threads. Shared payload is 2×16²×4=2,048 bytes, and the ideal full-tile request reduction is sixteen. The larger tile increases ideal reuse and per-block resource usage, while this nonmultiple size also increases padding. Neither set of counts predicts the faster launch without considering execution and measurement.</p></details>
+<h3>3. Give a counterexample to “Async means the host may reuse the buffer”</h3>
+<p>A pinned buffer is filled with ones, a cudaMemcpyAsync host-to-device copy is submitted, and the host immediately fills the buffer with twos. Is stream ordering enough to define the copied values?</p>
+<details><summary>Solution</summary><p>No. Stream ordering orders CUDA operations in that stream; the ordinary host stores are not a later operation waiting for the transfer's completion. The copy can still be reading the pinned range while the host writes it, so the intended source version is not protected. A correct version waits for an event recorded after the copy or synchronizes the stream before modifying the buffer. Alternatively it fills a distinct buffer whose previous transfer has completed. This is a lifetime-of-content obligation even though the allocation itself remains alive. The counterexample does not depend on proving a particular mixture of ones and twos on one run.</p></details>
+<h3>4. Diagnose an invalid tiling repair</h3>
+<p>A developer sees out-of-domain threads in a partial tile and adds if(row≥N || col≥N) return before the loop containing __syncthreads. Why can the repair break an otherwise valid kernel? Give a correct pattern.</p>
+<details><summary>Solution</summary><p>The early return removes loaders that supply values needed by valid output threads. In the last column block, threads with local x from 3 through 15 own no output column, yet they load A tile entries used by the valid columns. Those shared entries become uninitialized if the threads return. The barrier rule is more precise than “every original thread must arrive”: the current CUDA reference waits for non-exited threads to reach the same barrier or exit. Thus this repair is wrong because of missing data even if the return itself does not deadlock the barrier. Keep all block threads in the stage loop. Guard each global load and write zero into the associated shared entry when its input coordinate is outside the matrix. Execute both barriers uniformly, and guard only the final global output store. The zero-padding proof then establishes the same matrix product for every valid output.</p></details>
+<h3>5. Make a managed-memory design judgment</h3>
+<p>A simulation runs 100 GPU sweeps between two CPU visualization steps. Another version reads the full field on the CPU after every sweep. Both use cudaMallocManaged. Which phase structure is more promising, and what must be checked before claiming migration benefits?</p>
+<details><summary>Solution</summary><p>The first structure offers 100 uses of a device-resident field per CPU inspection, so a placement/movement cost can potentially be amortized across many sweeps. The second repeatedly alternates whole-field access and can require more ownership or migration work. This is a hypothesis rather than a measured result: query managed/concurrent/system-memory support, establish legal synchronization, record field size and actual access pattern, and measure the relevant full interval. A coherent platform might service accesses differently from a migration-based platform. On the tested WSL setup, concurrentManagedAccess is zero, so CPU reads must be placed after an appropriate GPU completion boundary; full-support migration conclusions cannot be imported from another system.</p></details>
+<h3>6. Extend the measurement without changing its meaning</h3>
+<p>Design a bounded follow-up to the transfer experiment that includes pinning cost. State what would be timed, how correctness is checked and what comparison it supports. Do not invent a result.</p>
+<details><summary>Solution</summary><p>Use a fixed 16 MiB payload and a small fixed number k of transfers. One interval starts before cudaMallocHost, initializes the pinned buffer, performs k copies, waits for completion and ends after cudaFreeHost. A matched pageable interval starts before host allocation, initializes its buffer, performs k copies with completion, and ends after host release. Keep device allocation and verification consistently inside both intervals or consistently outside both; if verification is outside, retain the device result until it is checked. Repeat in a stated order with warm-up and several trials, verify every returned byte, and report both intervals and k. The comparison estimates the cost of the specified complete host-buffer lifecycle. Varying k can test amortization, but it does not by itself identify an internal driver mechanism or establish overlap with computation.</p></details>
+
+<h2 id="primary-sources">Recordings and primary sources</h2>
+<ul>
+<li><a href="https://www.youtube.com/watch?v=eihu-w4-Q8s">NPTEL W8L3, GPU memory types and memory management, Part 1</a>: six spaces, cache/shared distinctions, allocation/copy/symbol APIs and launch examples.</li>
+<li><a href="https://www.youtube.com/watch?v=cBHs2gEzN7s">NPTEL W8L4, Part 2</a>: CPU/GPU vector lifecycles, managed-memory concepts and static/dynamic shared arrays.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html">CUDA Programming Guide, §5.4 C/C++ Language Extensions</a>: device, constant and shared variable scopes and lifetimes; dynamic shared syntax.</li>
+<li><a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-programming-guide/index.html#device-memory-accesses">CUDA 13.0 C++ Programming Guide, Device Memory Accesses and §10.2</a>: local-memory backing and compiler placement; memory-space distinctions.</li>
+<li><a href="https://docs.nvidia.com/cuda/archive/13.0.0/ampere-tuning-guide/index.html">CUDA 13.0 Ampere Tuning Guide, §1.4.1 and §1.4.2.3</a>: architecture-dependent shared capacity and unified shared/L1/texture organization.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__MEMORY.html">CUDA Runtime API, Memory Management</a>: allocation/free/copy/symbol APIs, device-memory query, advice and prefetch declarations. Current web reference is CUDA 13.4; installed 13.3 declarations were checked separately for executable compatibility.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html">CUDA Runtime API, §2 API Synchronization Behavior</a>: host blocking depends on operation and buffer kind; asynchronous submission does not imply completed work.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__TEXTURE__OBJECT.html">CUDA Runtime API, Texture Object Management</a>: linear resources, channel/read descriptors and explicit texture-object lifetime.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-memory.html">CUDA Programming Guide, §2.6 Unified and System Memory</a>, and <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html">§4.1 Unified Memory</a>: capability-dependent access, allocation and placement models.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/structcudaPointerAttributes.html">CUDA Runtime API, cudaPointerAttributes</a>: type categories and the limits of unregistered-pointer validation.</li>
+<li><a href="https://docs.nvidia.com/cuda/wsl-user-guide/index.html#known-limitations-for-linux-cuda-applications">CUDA on WSL User Guide, §5.1</a>: limited managed support, lack of concurrent CPU/GPU access and limited pinned resources.</li>
+<li><a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-best-practices-guide/index.html#memory-optimizations">CUDA 13.0 Best Practices Guide, §10.1 and §10.2.3.2</a>: bounded pinned-buffer use and shared-memory matrix reuse; its hardware timings remain separate from these measurements.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-20-cuda-programming-tools-kernels-and-launch-configuration.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-22-thread-divergence-and-memory-layouts.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

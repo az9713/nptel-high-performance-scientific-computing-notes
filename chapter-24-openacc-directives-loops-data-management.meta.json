@@ -1,0 +1,620 @@
+{
+  "chapter": 24,
+  "title": "OpenACC I: directives, parallel loops, and data management",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "FLVS59RKXa4",
+      "label": "W9L3",
+      "playlist_index": 52,
+      "duration_seconds": 1060
+    },
+    {
+      "video_id": "6oYc7s5BI2I",
+      "label": "W9L4",
+      "playlist_index": 53,
+      "duration_seconds": 1347
+    },
+    {
+      "video_id": "6HE4SYGG7K4",
+      "label": "W9L5",
+      "playlist_index": 54,
+      "duration_seconds": 1255
+    }
+  ],
+  "frames_viewed": {
+    "FLVS59RKXa4": [
+      "f0009",
+      "f0013",
+      "f0018",
+      "f0022",
+      "f0025",
+      "f0028",
+      "f0031",
+      "f0034"
+    ],
+    "6oYc7s5BI2I": [
+      "f0005",
+      "f0009",
+      "f0015",
+      "f0018",
+      "f0023",
+      "f0028",
+      "f0033",
+      "f0036",
+      "f0040",
+      "f0042"
+    ],
+    "6HE4SYGG7K4": [
+      "f0007",
+      "f0011",
+      "f0013",
+      "f0017",
+      "f0020",
+      "f0023",
+      "f0027",
+      "f0029",
+      "f0032",
+      "f0035",
+      "f0038",
+      "f0040"
+    ]
+  },
+  "source_uncertainties": [
+    "No source audio was independently audited. Corrections refer to inspected slide content and documented semantics, not claims that particular words were spoken. Machine transcription spellings are not quoted in the reader chapter.",
+    "The course-era platform list and PGI compiler examples are historical lecture material; no current support-matrix or locally installed NVIDIA compiler claim is inferred. No nvc was found on the inspected Linux PATH.",
+    "OpenACC3.3 is the semantics reference; GCC13.3 preprocessing reports _OPENACC201711. Only the printed feature subset was executed. Array/subarray reductions and arbitrary object-graph copying were not tested.",
+    "Version-specific GCC13.3 libgomp web paths returned inaccessible; the opened current GNU manual is used only for activation/backend statements independently corroborated by installed inspection and finite execution.",
+    "No GPU timings or speedup measurements were performed. Transfer bandwidth10GB/s and0.5s unchanged work are explicitly hypothetical model inputs.",
+    "Framef0028 of source52 is black and f0032 of source54 is a title transition; they are recorded as viewed but supply no code claim.",
+    "Section timestamps are automatic-transcript topic anchors within recording durations.",
+    "Default-target final-check attempt failed at compilation, not runtime, because assembler selected through checker PATH rejected sm_50. The repaired explicit sm_80 contracts were freshly checked; no timing from the old build is used."
+  ],
+  "lecture_corrections": [
+    {
+      "video_id": "6oYc7s5BI2I",
+      "frame": "f0009",
+      "issue": "C illustrative for loop declares/increments i but condition uses j<N.",
+      "resolution": "Explain visible typo and use i<N; no spoken-error claim."
+    },
+    {
+      "video_id": "6oYc7s5BI2I",
+      "frame": "f0028",
+      "issue": "Slide disallows array-element reduction.",
+      "resolution": "OpenACC3.3 \u00a72.5.15 allows element/subarray; composite-member restriction remains. Use checked scalar temporaries and label compiler subset."
+    },
+    {
+      "video_id": "6oYc7s5BI2I",
+      "frame": "f0036",
+      "issue": "Compiler guarantees correctness wording can be read too broadly.",
+      "resolution": "Interpret as semantics preservation for valid kernels region, not algorithm/data correctness or compiler infallibility."
+    },
+    {
+      "video_id": "6HE4SYGG7K4",
+      "frame": "f0013",
+      "issue": "Fortran inclusive bounds differ byN/4 while described asN/4 entries.",
+      "resolution": "Give corrected one-based quarter bounds iN/4+1 to(i+1)N/4."
+    },
+    {
+      "video_id": "6HE4SYGG7K4",
+      "frame": "f0035",
+      "issue": "Changed deviceB arrow points to hostB but self-update line labelsA.",
+      "resolution": "Identify operandB for drawn arrow; explain destination direction."
+    },
+    {
+      "video_id": "FLVS59RKXa4",
+      "frame": null,
+      "issue": "Single-source development described with an exact one-third error-probability intuition.",
+      "resolution": "Explain maintenance advantage without assigning a measured error probability."
+    }
+  ],
+  "sections": [
+    {
+      "section": "Objects, versions, and the running problem",
+      "section_id": "model",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Objects host/device and Jacobi construction",
+      "research_extension": "Original construction; sources credited where used.",
+      "teaching_construction": "Formal version/lifetime model; Jacobi invariants and byte sizes",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Incremental acceleration and the limits of single source W9L3 2:48",
+      "section_id": "portability",
+      "video_id": "FLVS59RKXa4",
+      "start": 168,
+      "end": 726,
+      "lecture_material": "Incremental single-source acceleration, generic machine, compiler support",
+      "research_extension": "Edition-specific semantics from listed primary documents, placed beside relevant claims.",
+      "teaching_construction": "Three portability meanings and compile/runtime selection boundaries",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "A parallel loop requires a dependence argument W9L3 12:06",
+      "section_id": "dependence",
+      "video_id": "FLVS59RKXa4",
+      "start": 726,
+      "end": 1060,
+      "lecture_material": "Pairing and dependent prefix example",
+      "research_extension": "Edition-specific semantics from listed primary documents, placed beside relevant claims.",
+      "teaching_construction": "Read/write-set proof, nonaliasing counterexample and actual GPU witness",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Parallel creates gangs; loop distributes iterations W9L4 2:15",
+      "section_id": "constructs",
+      "video_id": "6oYc7s5BI2I",
+      "start": 40,
+      "end": 730,
+      "lecture_material": "Syntax, gangs, loops, multi-loop caution, nested loops",
+      "research_extension": "Edition-specific semantics from listed primary documents, placed beside relevant claims.",
+      "teaching_construction": "Global-order interpretation and index typo repair",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Reduction and kernels assign different responsibilities W9L4 12:10",
+      "section_id": "reduction-kernels",
+      "video_id": "6oYc7s5BI2I",
+      "start": 730,
+      "end": 1121,
+      "lecture_material": "Reduction, kernels, responsibility distinction; Fortran array assignment versus explicit loop syntax",
+      "research_extension": "Edition-specific semantics from listed primary documents, placed beside relevant claims.",
+      "teaching_construction": "Version3.3 reduction restriction correction, integer exactness, finite prefix check",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Compiler targeting and evidence of device execution W9L4 18:41",
+      "section_id": "compiler",
+      "video_id": "6oYc7s5BI2I",
+      "start": 1121,
+      "end": 1347,
+      "lecture_material": "Historical PGI commands and compiler feedback",
+      "research_extension": "Edition-specific semantics from listed primary documents, placed beside relevant claims.",
+      "teaching_construction": "Actual installed GCC/device evidence and witness; vendor commands separated; actual assembler PATH mismatch and explicit sm_80 repair",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Data regions describe storage lifetimes W9L5 2:47",
+      "section_id": "data-regions",
+      "video_id": "6HE4SYGG7K4",
+      "start": 6,
+      "end": 300,
+      "lecture_material": "Memory-transfer need and data clauses",
+      "research_extension": "Edition-specific semantics from listed primary documents, placed beside relevant claims.",
+      "teaching_construction": "Version versus presence; nested references; Jacobi boundary initialization",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Array sections must describe the actual storage W9L5 5:00",
+      "section_id": "array-sections",
+      "video_id": "6HE4SYGG7K4",
+      "start": 300,
+      "end": 648,
+      "lecture_material": "C/Fortran sections and structured/implicit regions",
+      "research_extension": "Edition-specific semantics from listed primary documents, placed beside relevant claims.",
+      "teaching_construction": "Fortran off-by-one repair, contiguity and flat storage",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Unstructured lifetimes require explicit ownership W9L5 10:48",
+      "section_id": "unstructured",
+      "video_id": "6HE4SYGG7K4",
+      "start": 648,
+      "end": 947,
+      "lecture_material": "Enter/exit, poor deallocation and ownership across functions",
+      "research_extension": "Edition-specific semantics from listed primary documents, placed beside relevant claims.",
+      "teaching_construction": "Reference/ownership interpretation and synchronous-release condition",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Synchronize values during an existing lifetime W9L5 15:47",
+      "section_id": "update",
+      "video_id": "6HE4SYGG7K4",
+      "start": 947,
+      "end": 1116,
+      "lecture_material": "Self/device updates and stale values",
+      "research_extension": "Edition-specific semantics from listed primary documents, placed beside relevant claims.",
+      "teaching_construction": "Diagram operand repair and nested-present experiment",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Structures contain pointers as well as values W9L5 18:36",
+      "section_id": "pointer-members",
+      "video_id": "6HE4SYGG7K4",
+      "start": 1116,
+      "end": 1255,
+      "lecture_material": "Inline structs, dynamic members, implicit this",
+      "research_extension": "Edition-specific semantics from listed primary documents, placed beside relevant claims.",
+      "teaching_construction": "Descriptor/pointee graph and actual attachment program",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "A resident Jacobi solver preserves a numerical invariant",
+      "section_id": "resident-jacobi",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Applies preceding lecture mechanisms",
+      "research_extension": "Original construction; sources credited where used.",
+      "teaching_construction": "Independence/index proof, maximum principle, residual identity, CPU comparison and pointer parity",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Separate array traffic, launch cost, and device work",
+      "section_id": "traffic",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Extends data movement motivation",
+      "research_extension": "Original construction; sources credited where used.",
+      "teaching_construction": "Explicit byte/time model, hypothetical10GB/s arithmetic, no timing claims",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "What has been established and what remains target-dependent",
+      "section_id": "limits",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Boundaries of scope",
+      "research_extension": "Original construction; sources credited where used.",
+      "teaching_construction": "Finite evidence limits and diagnostic disclosure",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "Six exercises with reasoned solutions",
+      "section_id": "exercises",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "All preceding topics",
+      "research_extension": "Original construction; sources credited where used.",
+      "teaching_construction": "Exactly6 reasoned original exercises",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "Primary sources and the claims they support",
+      "section_id": "primary-sources",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Recordings first",
+      "research_extension": "Original construction; sources credited where used.",
+      "teaching_construction": "Verified primary reference claims",
+      "evidence_class": "engineering check"
+    }
+  ],
+  "references": [
+    {
+      "title": "OpenACC API 3.3, November 2022",
+      "url": "https://www.openacc.org/sites/default/files/inline-images/Specification/OpenACC-3.3-final.pdf",
+      "supports": "Execution, memory, compute, reductions, lifetimes and references, array sections, pointer attachment, update and execution-location witness; distinguishes edition-specific rules from local implementation.",
+      "page_checked": "\u00a7\u00a71.2\u20131.3; \u00a71.13 revision history; \u00a7\u00a72.5.1\u20132.5.3,2.5.15; \u00a7\u00a72.6\u20132.7; \u00a72.9; \u00a72.14.4; \u00a73.2.15. Printed pp9\u201312,31\u201354,55\u201364,79\u201381,103\u2013104.",
+      "opened": true
+    },
+    {
+      "title": "GNU libgomp: Enabling OpenACC",
+      "url": "https://gcc.gnu.org/onlinedocs/libgomp/Enabling-OpenACC.html",
+      "supports": "-fopenacc activates directives and arranges linking of OpenACC runtime.",
+      "page_checked": "Enabling OpenACC, complete short page; opened2026-10-28.",
+      "opened": true
+    },
+    {
+      "title": "GNU libgomp: nvptx",
+      "url": "https://gcc.gnu.org/onlinedocs/libgomp/nvptx.html",
+      "supports": "GNU NVIDIA backend generates PTX and CUDA driver just-in-time compiles it; target implementation-specific details.",
+      "page_checked": "\u00a712.2, generated generic PTX paragraph; opened2026-10-28.",
+      "opened": true
+    },
+    {
+      "title": "NVIDIA OpenACC Getting Started Guide26.9",
+      "url": "https://docs.nvidia.com/hpc-sdk/compilers/openacc-gs/index.html",
+      "supports": "NVIDIA vendor -acc target options, including multicore and host; not a local compiler execution claim.",
+      "page_checked": "\u00a72 Using OpenACC with NVIDIA HPC Compilers; opened2026-10-28.",
+      "opened": true
+    },
+    {
+      "title": "OpenACC Programming and Best Practices Guide: Optimize Data Locality",
+      "url": "https://openacc-best-practices-guide.readthedocs.io/en/latest/05-Data-Locality.html",
+      "supports": "Reuse data across compute regions and specify data intent; implicit compute data region; locality workflow.",
+      "page_checked": "Optimize Data Locality, Data Regions and Data Clauses; opened2026-10-28.",
+      "opened": true
+    },
+    {
+      "title": "GCC13.3 NVIDIA PTX Options",
+      "url": "https://gcc.gnu.org/onlinedocs/gcc-13.3.0/gcc/Nvidia-PTX-Options.html",
+      "supports": "Valid architecture targets including sm_80; -misa alias and distinction from unsupported literal sm_86 in this manual. Supports explicit final build-target repair.",
+      "page_checked": "\u00a73.19.35, -march and -misa paragraphs; opened2026-10-28.",
+      "opened": true
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "A_H,A_D",
+      "first_section": "model",
+      "definition": "Host and corresponding device allocations"
+    },
+    {
+      "symbol": "v_H(A),v_D(A)",
+      "first_section": "model",
+      "definition": "Logical last-written versions used only for reasoning"
+    },
+    {
+      "symbol": "N,h,u,r_k,k",
+      "first_section": "model",
+      "definition": "Interior grid size, spacing1/(N+1), dimensionless temperature, update norm and sweep index"
+    },
+    {
+      "symbol": "R_i,W_i",
+      "first_section": "dependence",
+      "definition": "Read and write memory-location sets of iterationi"
+    },
+    {
+      "symbol": "n",
+      "first_section": "dependence",
+      "definition": "Number of pairing outputs; inputs have2n elements"
+    },
+    {
+      "symbol": "q,n_s",
+      "first_section": "array-sections",
+      "definition": "Start index and element count of a generic section"
+    },
+    {
+      "symbol": "m,K",
+      "first_section": "traffic",
+      "definition": "Bytes per grid array; number of completed sweeps"
+    },
+    {
+      "symbol": "Q_naive,Q_resident",
+      "first_section": "traffic",
+      "definition": "Explicit host-device array payload in bytes"
+    },
+    {
+      "symbol": "B_t,alpha_t,ell,t_c",
+      "first_section": "traffic",
+      "definition": "Transfer bandwidthbytes/s, per-transfer fixed costseconds, launch/completion overheadseconds, useful computationseconds"
+    },
+    {
+      "symbol": "T_naive,T_resident",
+      "first_section": "traffic",
+      "definition": "Estimated total execution times in seconds under the respective transfer policies"
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python3 -B tools/check_chapter_code.py --file <private chapter HTML> --report <private report>; no --merge-report",
+    "listings": 5,
+    "all_passed": true,
+    "checked_at_utc": "2026-10-28T08:30:22.985470+00:00",
+    "fingerprint_sha256": "47b61ae648a1124dd32b717a5e261c02bfdee0e3e0f0620b5c271382bbcf52aa",
+    "report": "chapter-code-validation.json",
+    "manual_all_passed": true,
+    "standard_report": "code-validation.json",
+    "standard_report_sha256": "6adf38fe41011358cf7050a42b192179da97d29ed2c8a5a48df9fb52b135c684",
+    "retained_original_report": "chapter-code-validation.json",
+    "reuse_basis": "Complete five-listing fingerprint unchanged after R1 prose-only repair; original actual execution timestamp retained; no rerun."
+  },
+  "execution_evidence": {
+    "manual_capture": "manual-captures.json",
+    "toolchain_inspection": "toolchain-inspection.json",
+    "device_provenance": "device-toolchain-provenance.json",
+    "measured_gpu_performance": false,
+    "device_execution_witness": "acc_pair.c printed nvidia_execution=1; all programs request NVIDIA and require availability.",
+    "compiler": "GCC13.3.0; _OPENACC201711",
+    "device": "NVIDIA GeForce RTX3050 Laptop GPU,4096MiB, driver592.82",
+    "boundary": "Workspace-local temp/home/cache; core dumps disabled; timeout20s per execution; no installs.",
+    "final_checker_capture": "final-checker-capture.json",
+    "raw_checker_logs": "checker-raw-captures.json",
+    "failed_default_target_report": "chapter-code-validation.failed-default-target.json",
+    "final_build_target": "-foffload-options=nvptx-none=-march=sm_80",
+    "failure_and_repair": "Manual default-PATH builds passed. Final checker appended /usr/local/cuda/bin to PATH; its assembler rejected defaultsm_50. Retained full failure; explicit GCC-supported sm_80 target passed all5 unchanged source payloads and exact outputs under final checker environment."
+  },
+  "source_fingerprints": [
+    {
+      "playlist_index": 52,
+      "video_id": "FLVS59RKXa4",
+      "transcript_sha256": "eb45bf809b36efa90b2f493b843edf3c4505242ddaea85490a8983cbd5b2b890",
+      "frames": [
+        {
+          "frame": "f0009",
+          "sha256": "1ca9cccd156f1477857dccb1b6d42da4b6e6ce9bb99607fd685d3eae11700fee"
+        },
+        {
+          "frame": "f0013",
+          "sha256": "d5cc68a1a8d9317802f9f7aee276ab0be29dc99417b8090f0dda9d54c44e4492"
+        },
+        {
+          "frame": "f0018",
+          "sha256": "1d73c19b00d7a03bb53b1ec3cf1450fcaf9dc1b396c62b82aea65413738097cc"
+        },
+        {
+          "frame": "f0022",
+          "sha256": "ecedfa1350ccd320055bb31d1ceadc0bae1885de4aa9f2ae10df80abd01094e1"
+        },
+        {
+          "frame": "f0025",
+          "sha256": "fa461ad195d72c520f17df618f987de7836680b85d53a493bd939d362d628e52"
+        },
+        {
+          "frame": "f0028",
+          "sha256": "fd98e342f4fec93a3799c93738dd5403bb450cd0b5c380fde13234c67ef0ae55"
+        },
+        {
+          "frame": "f0031",
+          "sha256": "19c480dbb277bc0f275de59204795c7302a922db13598ae7ff5fee8825bd0d0f"
+        },
+        {
+          "frame": "f0034",
+          "sha256": "63dcac28a99b997480f3c378a5cff47bb1ed1845e552a8ca182d472164768213"
+        }
+      ]
+    },
+    {
+      "playlist_index": 53,
+      "video_id": "6oYc7s5BI2I",
+      "transcript_sha256": "b831207b47821e65ac27ffd0cd0ffce3cbbfcab8669f09eb12c8081bb5723404",
+      "frames": [
+        {
+          "frame": "f0005",
+          "sha256": "c94b31a4c06eda805bb1b64af8ad6b391a15495422b36688e7c62dd37ebafba1"
+        },
+        {
+          "frame": "f0009",
+          "sha256": "8f7400dd4dd7fcab19293be3a067fce99d106f0b2c077ee7bee323bd909d14b5"
+        },
+        {
+          "frame": "f0015",
+          "sha256": "594eb65613c56fdced613cec83e944ba75164534151ad6377ea648b0d561af61"
+        },
+        {
+          "frame": "f0018",
+          "sha256": "f24cb3814bd1b6d4162e286b663b13285eee1141940b1063065e092ba7323fa1"
+        },
+        {
+          "frame": "f0023",
+          "sha256": "cd7d8f94a59fb11d6d2c634747de7ae9c8f1a2ef61c34e1f5a134896b9095f7c"
+        },
+        {
+          "frame": "f0028",
+          "sha256": "337b530509a158678ac3bba16a1043c739544ef727f9f280422a491141bf6890"
+        },
+        {
+          "frame": "f0033",
+          "sha256": "62c8e80bff5b352d128e265b19453b1ab0c5d7e741a4e9ff557d2d8369cb166d"
+        },
+        {
+          "frame": "f0036",
+          "sha256": "63a81da5f4afc2d5852c9bc1328697a6196735b2151570eff20b43e9753bbcae"
+        },
+        {
+          "frame": "f0040",
+          "sha256": "477e245c8a1203eae1a2e4158f2c8ff3f26b1f9f7c9d297f23a2239eb763b81c"
+        },
+        {
+          "frame": "f0042",
+          "sha256": "d5650248f2cddb0193d919a5c1ff592ea49648f0954b524a05f0c017430d0503"
+        }
+      ]
+    },
+    {
+      "playlist_index": 54,
+      "video_id": "6HE4SYGG7K4",
+      "transcript_sha256": "506b3f768d99c912095fa73e09e0e85b974e99bc462f1431bc6401c7529d991c",
+      "frames": [
+        {
+          "frame": "f0007",
+          "sha256": "3522d7615e4fcf5d235928e34eebab6b2e87aa9181bc92a7645e0f35cbdc48be"
+        },
+        {
+          "frame": "f0011",
+          "sha256": "4c71952bdd47f68179fdf249c28cf204fa8977a03aabd0ff91b286794048e6de"
+        },
+        {
+          "frame": "f0013",
+          "sha256": "ee5702a5f478207ec8e097db02d8e05de73821363eca13811ba3f1447186fef2"
+        },
+        {
+          "frame": "f0017",
+          "sha256": "241bc8b767b0a0f5a597aa24f3b1d2f5cacce5613cd3aa4d0a88514feef00d1d"
+        },
+        {
+          "frame": "f0020",
+          "sha256": "5bb508c7a99c736ce09fb3cff16d413a21fa3b6ade7c2517fcc6cff8f67dac50"
+        },
+        {
+          "frame": "f0023",
+          "sha256": "169dd1fe433b7fb3a5b948495e9017a7aa2b61a37d7d7c1bdaf05f5612debb80"
+        },
+        {
+          "frame": "f0027",
+          "sha256": "6b24dbf9539db4745a361a90cc27a01603b9365f714fa2e56d1985f9c9a6b92a"
+        },
+        {
+          "frame": "f0029",
+          "sha256": "0932b97d3df5ed7c7d7f746aa7c1dc56135ae3a3b87cfbb2793ebd0b81c64a3c"
+        },
+        {
+          "frame": "f0032",
+          "sha256": "6d856b9786cc1cae3c18eb1f7d0682c2670de215e9839500d9bf6877a676d307"
+        },
+        {
+          "frame": "f0035",
+          "sha256": "a02598a2e6400f90a588563455aa2c5800ee7d0df7eb0fec9f096035eef3cab1"
+        },
+        {
+          "frame": "f0038",
+          "sha256": "551038c613232747006a8587deaa83e5a2bba3ebec6e4feb2a7a449b033fc0aa"
+        },
+        {
+          "frame": "f0040",
+          "sha256": "065eb47e54bc4ea0d91bc4808d64d16c9b95cca8d3fd40830392181df2b150e8"
+        }
+      ]
+    }
+  ],
+  "author_validation": {
+    "prose_words_excluding_code_and_math": 8131,
+    "h2_count": 13,
+    "core_major_sections": 10,
+    "timestamped_subsections": 3,
+    "solutions": 6,
+    "listings": 5,
+    "tabs": false,
+    "private_path": false,
+    "math_inline_open": 120,
+    "math_inline_close": 120,
+    "math_display_open": 2,
+    "math_display_close": 2,
+    "issues": []
+  },
+  "review_history": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT WITH FIXES",
+      "blocking": 1,
+      "major": 0,
+      "minor": 0,
+      "report": "work/reviews/ch24-r1.md",
+      "findings": [
+        {
+          "id": "B1",
+          "severity": "blocking",
+          "status": "author repair applied; awaiting independent R2 verification",
+          "scope": "Narrow execution-witness evidence statement in #portability; no finding of host fallback in the other four programs."
+        }
+      ]
+    }
+  ],
+  "repair_after_round_1": {
+    "finding": "B1",
+    "repair": "Applied reviewer exact replacement in #portability: all five request NVIDIA and check availability; only first has explicit in-region execution witness.",
+    "compiled_or_gpu_rerun": false,
+    "verification": "Fresh static comparison of all five complete contracts against the reviewed candidate and retained formal execution fingerprint.",
+    "listing_fingerprint_sha256": "47b61ae648a1124dd32b717a5e261c02bfdee0e3e0f0620b5c271382bbcf52aa",
+    "before_snapshot": "r1-before",
+    "next_review": "fresh round2 pending"
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT WITH FIXES",
+      "blocking": 1,
+      "major": 0,
+      "minor": 0,
+      "report": "ch24-r1.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch24-r2.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    }
+  ]
+}

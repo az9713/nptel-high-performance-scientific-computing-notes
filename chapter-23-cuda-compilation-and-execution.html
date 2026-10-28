@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="1fbfa166e896639c753a1842d0f63e423979de8b319004df394f54c3b576f499"><title>CUDA compilation and execution: artifacts, allocations, errors and evidence · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>CUDA compilation and execution: artifacts, allocations, errors and evidence</h1>
+<p class="lead">A program can compile successfully, allocate four bytes on a graphics processing unit (GPU), and still fail before its first kernel writes the integer 42. A second program can finish without a runtime error while updating only 128 of its intended 1024 elements. A third can print 40 multiprocessor counters without having restricted execution to 40 multiprocessors. These failures demand different evidence. The running case is a small CUDA application moved from a build machine to an execution environment: first establish which code was built, then which GPU is visible, then which operations completed, and finally whether every intended answer is correct.</p>
+<p class="source-note">Grounded in <a href="https://www.youtube.com/watch?v=Xi-yMwssHPc">W9L1, CUDA Program Compilation and Execution, Part 1</a> and <a href="https://www.youtube.com/watch?v=jM3Q6tftc6A">W9L2, Part 2</a>. <strong>Lecture material:</strong> compiler discovery, interactive and batch cluster allocation, device properties, a ten-thread greeting, a comparison of 64-bit and 32-bit floating-point operations, and a block-to-multiprocessor counting example. <strong>Research extensions:</strong> NVIDIA's compiler and binary-utility manuals explain generated artifacts; its compatibility guide qualifies driver support; its runtime and programming guides define error, event and stream behavior; the PTX specification defines diagnostic multiprocessor identifiers; SchedMD's manuals separate allocation, submission and GPU visibility. <strong>Original teaching constructions:</strong> the execution contract, the checked 42 probe, the coverage proof, corrected precision experiment, bounded multiprocessor sampling, stream experiment, artifact inspection, all local measurements, and six exercises. The compiler pipeline and stream experiment extend the recordings; the cluster demonstrations remain attributed observations rather than local cluster experiments.</p>
+
+<h2 id="model">Objects, contracts and the running case</h2>
+<p>The <em>host</em> is the central processing unit (CPU) process that starts the application and submits GPU work. A <em>device</em> is a GPU accessible to that process. A <em>kernel</em> is a function marked <code>__global__</code> and invoked through a CUDA launch to execute as a grid of device threads. A thread is one logical execution of the kernel; a block is a group of threads scheduled together with block-local synchronization and storage. A grid is the collection of blocks in one launch. A streaming multiprocessor, abbreviated SM, is a hardware execution unit that can maintain and execute device threads from resident blocks. A block count is a software launch parameter; an SM count describes hardware visible through the device interface.</p>
+<p>Compilation transforms source into code artifacts. A <em>host executable</em> contains CPU instructions and the machinery needed to start a process on a particular operating system. A CUDA binary, or <em>cubin</em>, contains native device code for a GPU architecture; it is not a CPU executable. Parallel Thread Execution, abbreviated PTX, is a virtual instruction representation translated into native device instructions before execution. Translating retained PTX when the application runs is just-in-time (JIT) compilation. The native device instruction text displayed by NVIDIA tools is commonly called SASS. A <em>fatbinary</em> packages device images, potentially several cubins and PTX representations, that can be embedded in a host executable. These distinctions follow the <a href="https://docs.nvidia.com/cuda/cuda-binary-utilities/index.html">CUDA Binary Utilities manual, §§1.1–1.2</a>. An executable filename without an extension does not reveal which device images it carries.</p>
+<p>The CUDA <em>toolkit</em> supplies development tools and libraries, including the compiler driver <code>nvcc</code>. A compiler driver coordinates several translation and linking tools; it is not the installed GPU driver. The GPU driver supplies the operating-system and user-level services through which GPU work is loaded and submitted. The CUDA runtime is the application library exposing calls such as <code>cudaMalloc</code>. An application programming interface, or API, defines callable operations and their arguments; an application binary interface, or ABI, fixes binary conventions such as argument layout and calling conventions. Source-level similarity does not establish binary compatibility across operating systems or architectures.</p>
+<p>A GPU's <em>compute capability</em> is a major.minor hardware feature designation. Here the local GPU reports 8.6, written <code>sm_86</code> for a real compilation target. That number is independent of toolkit 13.3 and driver software version 592.82. Neither decimal comparison nor matching the first digit gives a compatibility test. The device specification, generated images and driver capabilities play different roles. A compiler can generate code on a machine without a usable GPU, provided a target is explicitly selected; executing that code adds requirements absent from translation.</p>
+<p>Represent one test by a tuple \(\mathcal C=(s,\mathcal B,\mathcal A,e,v)\). Here \(s\) is the exact source text; \(\mathcal B\) is its build command; \(\mathcal A\) is the set of resulting artifacts; \(e\) is the execution environment, including visible GPU and driver; and \(v\) is the validation rule applied after execution. The successful-build proposition concerns \((s,\mathcal B)\). The successful-load proposition concerns \((\mathcal A,e)\). The correct-answer proposition concerns the actual execution and \(v\). They are separate propositions. A source edit changes the first; an updated driver changes the second; replacing a full-array comparison by one printed value weakens the third.</p>
+<p>Our smallest validation rule requires one device integer to become 42 and to be copied back successfully. Its value is initialized independently before the launch. This is deliberately more informative than a timer around an unchecked kernel: it requires loading the kernel, writing device memory, completing the launch, transferring the result, and comparing it against a known answer. It still proves only this bounded case. A successful four-byte probe does not establish that a large solver has sufficient memory, correct boundary conditions or a stable discretization.</p>
+<p>The book's Jacobi solver makes the distinction consequential. Its array <code>u</code> holds an old temperature field, and <code>unew</code> receives the next iteration; one update averages four neighboring values. If a failed kernel leaves <code>unew</code> at an initialized value, a later convergence check can be meaningless. If an incomplete launch leaves part of the interior unchanged, a small reported update norm can conceal missing work. The probes below isolate loading, coverage and completion before those failures become entangled with numerical convergence.</p>
+
+<h2 id="environment">Discover the environment, then inspect the generated code <a class="timestamp" href="https://www.youtube.com/watch?v=Xi-yMwssHPc&amp;t=212s">W9L1 3:32</a></h2>
+<p>The lecture begins by locating <code>nvcc</code>, asking for its version, and attempting <code>nvidia-smi</code>, NVIDIA's device-management utility. These answer different questions. Command discovery establishes what the shell would run. The compiler version identifies a development tool. A device-management query establishes what that utility can see and report in the current environment. None replaces a checked CUDA API call. A missing utility can mean a missing installation or an unsuitable search path; it is insufficient evidence, by itself, that no GPU physically exists.</p>
+<p>In the recorded login-node session the compiler is present, while <code>nvidia-smi</code> is unavailable and the device-information program reports no CUDA device. The same executable later produces device properties on an allocated GPU node. This is a useful controlled change of execution environment. It does not mean every cluster has this exact login-node policy. Compilation on login nodes and execution on compute nodes are operational rules to obtain from the site's documentation; CUDA itself does not require those machine roles.</p>
+<p>The following input-free shell listing locates three tools and reports compiler and GPU information, then checks for the three Slurm commands used in the chapter. Its only effects are process creation and queries; it submits no job and allocates no application GPU buffer. A missing required CUDA tool fails the listing. Missing scheduler tools are reported, because that is an expected feature of the local workstation. Its output is a dated sample rather than a portable expected inventory.</p>
+<pre><code class="language-bash" data-file="environment.sh" data-run="bash environment.sh" data-check="returncode">#!/usr/bin/env bash
+set -eu
+for tool in nvcc nvidia-smi cuobjdump; do
+  command -v &quot;$tool&quot; &gt;/dev/null
+  printf '%s available\n' &quot;$tool&quot;
+done
+nvcc --version | sed -n '/release /p'
+nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+for tool in sbatch salloc srun; do
+  if command -v &quot;$tool&quot; &gt;/dev/null; then printf '%s available\n' &quot;$tool&quot;; else printf '%s unavailable\n' &quot;$tool&quot;; fi
+done
+</code></pre>
+<pre><code class="output">nvcc available
+nvidia-smi available
+cuobjdump available
+Cuda compilation tools, release 13.3, V13.3.73
+NVIDIA GeForce RTX 3050 Laptop GPU, 592.82, 4096 MiB
+sbatch unavailable
+salloc unavailable
+srun unavailable</code></pre>
+<p>The local checks were captured on 28 October 2026 UTC in Windows Subsystem for Linux version 2 (WSL 2), running Ubuntu 24.04. The toolchain is CUDA 13.3.73; the driver package reports 592.82; the GPU is an NVIDIA GeForce RTX 3050 Laptop with 4096 MiB of memory. The scheduler tools are absent. A separate Python module-discovery check found none of CuPy, Numba, CUDA Python's <code>cuda</code> module, or PyCUDA in that interpreter. An installed C++ toolchain therefore does not establish that an arbitrary Python CUDA example will import successfully. This chapter uses the installed native compiler and installs no bindings.</p>
+<p><strong>The compilation path.</strong> A CUDA source file can contain host functions and device functions. The supported abstraction is a collection of compilation phases: preprocessing, device translation, device assembly, host compilation and linking. The <a href="https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html">NVCC manual, §§1.1.2–2.2</a> states that host and device code are separated, native device images are embedded, and host compilation is delegated to a supported C++ compiler. Internal tools such as <code>cudafe++</code>, <code>cicc</code>, <code>ptxas</code> and <code>fatbinary</code> may appear in diagnostic output; their exact sequence is an implementation detail, not a stable build interface.</p>
+<p>Think of the path as two branches joined at the executable. The device branch supplies images implementing <code>answer</code>; the host branch supplies <code>main</code>, argument preparation and runtime calls. The host linker combines the host objects and runtime support. A valid host executable can consequently exist even if its packaged device choices are unsuitable for the later GPU. The operating system successfully starting <code>main</code> settles a CPU-side loading question, not the GPU-side loading question.</p>
+<p>The <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/nvcc.html">Programming Guide, §2.7</a> distinguishes the virtual target selected for device compilation from the real target selected for assembly. In explicit form, <code>-arch=compute_86 -code=sm_86</code> selects the 8.6 feature model and a native 8.6 image. With <code>-code=compute_86</code>, it retains PTX instead. The repeated <code>-gencode</code> option permits multiple virtual/real pairs. These are artifact choices; they do not increase a kernel's launch size or assign it to particular SMs.</p>
+<p>Two practical recipes express different deployment intentions. <code>-arch=native</code> uses GPUs visible on the build machine and emits native images without PTX. An explicit <code>-gencode arch=compute_86,code=sm_86</code> names a known target without needing that GPU on the build machine. Adding another generation's image can broaden a binary's intended device set; adding PTX offers a translation path only when the executing driver understands the PTX version and the hardware supports its requirements. The <a href="https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html">CUDA Compatibility guide, “Application Considerations”</a> explicitly warns about PTX on older drivers and features that require newer drivers. Toolkit installation does not update that capability by logical implication.</p>
+<p>The next program takes no input, allocates one device integer, clears it, launches one writer, copies its answer, and frees the allocation. <code>CK</code> checks every runtime operation and terminates with status 2 on a CUDA error; status 3 signals a wrong answer after successful calls. A status of zero requires the exact answer. The build uses the visible GPU's native image, which makes this a local correctness recipe rather than a universal redistribution binary.</p>
+<pre><code class="language-cuda" data-file="load_probe.cu" data-build="nvcc -arch=native -O2 load_probe.cu -o load_probe" data-run="timeout 20 ./load_probe" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#define CK(x) do { cudaError_t e=(x); if(e!=cudaSuccess) { std::fprintf(stderr,&quot;%s: %s\n&quot;,#x,cudaGetErrorName(e)); return 2; } } while(0)
+__global__ void answer(int *x) { *x=42; }
+int main() {
+  int *d=nullptr, h=-1;
+  CK(cudaMalloc(&amp;d,sizeof(int)));
+  CK(cudaMemset(d,0,sizeof(int)));
+  answer&lt;&lt;&lt;1,1&gt;&gt;&gt;(d);
+  CK(cudaGetLastError());
+  CK(cudaDeviceSynchronize());
+  CK(cudaMemcpy(&amp;h,d,sizeof(int),cudaMemcpyDeviceToHost));
+  CK(cudaFree(d));
+  if(h!=42) return 3;
+  std::printf(&quot;answer=%d verified\n&quot;,h);
+  return 0;
+}
+</code></pre>
+<pre><code class="output">answer=42 verified</code></pre>
+<p>The four-byte transfer is too small to benchmark the GPU. Its purpose is to make the chain of claims explicit: the runtime accepted the allocation, the launch completed, and the host observed the expected write. This is the execution contract we will keep when the computation grows. Using a known nonzero answer also prevents a cleared buffer from masquerading as a successful zero-valued computation.</p>
+<p><strong>Observed artifact comparison.</strong> Four builds of the same checked source completed successfully. Inspection with <code>cuobjdump --list-elf</code> and <code>--list-ptx</code> gave the following targets. A cubin entry is reported as an ELF file, an executable-and-linkable-format container; that identifies a packaged image, not an additional GPU. The driver utility reported a CUDA compatibility level of 13.1, distinct from the installed toolkit 13.3. The PTX emitted in the separate text artifact declares language version 9.3.</p>
+<table><thead><tr><th>Build selection</th><th>Observed packaged targets</th><th>Checked execution</th></tr></thead><tbody>
+<tr><td>Compiler default</td><td>Two sm_75 cubin entries; one compute_75 PTX entry</td><td>Launch check reports unsupported PTX; exit 2</td></tr>
+<tr><td>PTX only, compute_86</td><td>No cubin; one PTX entry for the 8.6 target</td><td>Launch check reports unsupported PTX; exit 2</td></tr>
+<tr><td>Explicit native sm_86</td><td>Two sm_86 cubin entries; no PTX entry</td><td>42 verified; exit 0</td></tr>
+<tr><td>Native discovery</td><td>Two sm_86 cubin entries; no PTX entry</td><td>42 verified; exit 0</td></tr>
+</tbody></table>
+<p>These commands were actually run on the same probe source. The selected lines of output below omit long disassembly, tool metadata and diagnostics about absent image kinds. Exit codes in the table were recorded by the surrounding capture script. The cubin and PTX commands create separate device artifacts; neither output is a standalone host program.</p>
+<pre><code class="language-bash">nvcc -O2 load_probe.cu -o probe_default
+nvcc -O2 -arch=compute_86 -code=compute_86 load_probe.cu -o probe_ptx
+nvcc -O2 -gencode arch=compute_86,code=sm_86 load_probe.cu -o probe_explicit
+nvcc -arch=sm_86 -cubin load_probe.cu -o probe.cubin
+nvcc -arch=compute_86 -ptx load_probe.cu -o probe.ptx
+cuobjdump --list-elf probe_default
+ELF file    1: probe_default.1.sm_75.cubin
+ELF file    2: probe_default.2.sm_75.cubin
+cuobjdump --list-ptx probe_default
+PTX file    1: probe_default.1.sm_75.ptx
+timeout 20 ./probe_default
+cudaGetLastError(): cudaErrorUnsupportedPtxVersion
+timeout 20 ./probe_explicit
+answer=42 verified</code></pre>
+<p>The default compiler choice therefore failed at GPU code loading on this machine, despite a successful host build. The explicit native image removed the need for translating that newer PTX for this test. A deliberately unchecked variant, with the same allocation, clearing, launch and copy but ignored runtime return values and no answer assertion, printed <code>unchecked_answer=0</code> and exited zero. That zero was the cleared buffer's value, not the kernel's answer. The variant is retained only as a captured diagnostic; the runnable code above checks the failure instead of accepting it.</p>
+<p>The native disassembly of the separate cubin contains the immediate value <code>0x2a</code>, hexadecimal for 42, followed by a global store instruction. The local compiler's dry-run output also lists device translation, <code>ptxas</code>, fatbinary packaging, host compilation and linking. The dry run is a report of planned steps rather than proof they executed; the actual compiled artifacts and successful run supply that proof for the completed native builds. No claim here requires copying the internal command sequence into a build system.</p>
+<p><strong>Diagnose at the first failing boundary.</strong> The <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__ERROR.html">runtime error-handling reference, §6.13</a> defines <code>cudaGetLastError</code> as retrieving and clearing the host thread's recorded runtime error. Calling it immediately after a launch detects errors available at submission. A later checked synchronization establishes completion and can report execution failures that were not available earlier. Allocation, launch, completion and copy must each be checked. A failure reported by synchronization need not have originated in that function; asynchronous work can fail earlier and be reported later.</p>
+<p>An empty error file means only that the application wrote nothing to that file. A program that ignores return values can fail without printing a diagnostic. Likewise a returned shell status of zero can be an author's unconditional <code>return 0</code>. A reliable application deliberately propagates failures and validates its result. More verbose logs help only if they expose the relevant boundary; printing hundreds of device properties does not replace one checked kernel completion.</p>
+
+<h2 id="allocation">Allocate resources and start work in the allocated environment <a class="timestamp" href="https://www.youtube.com/watch?v=Xi-yMwssHPc&amp;t=510s">W9L1 8:30</a></h2>
+<p>A cluster scheduler assigns resources to jobs under site policy. A <em>job allocation</em> is a reservation of resources, such as one node and one GPU, for a bounded interval. A <em>job step</em> starts one or more tasks within an allocation. Slurm's <a href="https://slurm.schedmd.com/salloc.html">salloc manual, Description</a> defines allocation and the lifetime of its command or shell. Obtaining an allocation and moving the current shell to a GPU node are different actions. A shell prompt on a login node does not become evidence of GPU execution merely because an allocation number was printed.</p>
+<p>The recording requests one node for one hour with <code>--gres=gpu:1</code>, where a generic resource, abbreviated GRES, is a scheduler-managed resource type. The reservation name <code>nptel</code> refers to a reservation configured at that site. It is not a standard reservation that readers can assume exists. The session checks its job in the queue, identifies the assigned node, then uses Secure Shell (SSH), a remote-login protocol, to reach it. Direct SSH into allocated nodes is also a site-dependent practice. A commonly documented alternative is a job step launched with <code>srun</code>; local guidance decides the permitted route.</p>
+<p>The distinction matters when a cluster shares a filesystem. A newly built executable can appear at the same path from both the login and compute nodes. That is shared storage, not proof that the two hosts have identical processors, libraries or device visibility. Before execution, the host binary must be appropriate for the compute-node CPU and operating system, its dynamic dependencies must resolve, and its device images must suit the allocated GPU. Building with <code>-arch=native</code> on a GPU-free login node defeats the intended target-discovery mechanism; use an explicit target agreed for that cluster.</p>
+<p>The recorded interactive run lists two A100 devices; its batch run lists one. Those are observations of that demonstration. They do not establish that interactive allocations inherently reserve all GPUs while batch jobs inherently share them. SchedMD's <a href="https://slurm.schedmd.com/gres.html">GRES guide, “Running Jobs” and “GPU Management”</a> specifies resource requests for <code>salloc</code>, <code>sbatch</code> and <code>srun</code>, with GPU visibility controlled in the job environment. Configuration and the route used to start the program affect what it sees. The CUDA device index is local to that environment: visible device zero need not be physical GPU zero on the node.</p>
+<p><strong>Batch submission.</strong> The next lecture segment turns the same work into a script. A line beginning <code>#SBATCH</code> is a directive read by Slurm; an ordinary shell treats it as a comment. According to the <a href="https://slurm.schedmd.com/sbatch.html">sbatch manual, Description and “Filename Pattern”</a>, submission returns after the controller accepts the script, before the job necessarily runs. In output paths, <code>%j</code> expands to the job identifier and <code>%x</code> to the job name. The displayed lecture script uses <code>%j.out</code> and <code>%j.err</code>; those filenames identify the job rather than its chosen name.</p>
+<p>The following is a template, not a locally submitted shell session. Replace the partition, account and reservation directives only if the site requires them. It requests one task and one GPU for five minutes, uses the submission directory, and runs an already built executable through a job step. <code>set -e</code> makes a failing foreground command terminate this simple script; the application's own error checks remain necessary. No scheduler is installed in the verification environment, so this template has no claimed allocation or execution output.</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --gres=gpu:1
+#SBATCH --time=00:05:00
+#SBATCH --job-name=cuda-probe
+#SBATCH --output=%j.out
+#SBATCH --error=%j.err
+set -eu
+cd "$SLURM_SUBMIT_DIR"
+srun ./load_probe</code></pre>
+<p>The meaningful completion test combines scheduler state, the application's exit status, diagnostics, and a validated result. A submission identifier alone proves acceptance into the scheduling system. A started task proves execution began. A completed task with nonzero status proves termination but not success. A zero status with an unchecked answer proves only that the application reported success. These distinctions support diagnosis: a pending job is a scheduling question; an unresolved shared library is a host-loader question; unsupported PTX is a device-code question; an incorrect final temperature field is a numerical or programming question.</p>
+<p>When automating a parameter sweep, record the job identifier together with source and executable identities. A filename such as <code>solver</code> can be overwritten between submission and execution; the same displayed name can then denote a different program. An immutable per-run executable or a recorded content hash avoids that ambiguity. A content hash identifies bytes, not scientific correctness, but it makes the evidence refer to one definite build. For a remote cluster, record the compute-node environment from within the actual job rather than copying the login-node inventory.</p>
+
+<h2 id="properties">Read device properties as the current process sees them <a class="timestamp" href="https://www.youtube.com/watch?v=Xi-yMwssHPc&amp;t=1313s">W9L1 21:53</a></h2>
+<p>The device-information example reports the compute capability, global memory, constant memory, shared memory per block, registers, warp size, SM count and launch-dimension limits. A <em>warp</em> is the hardware grouping of threads used for instruction execution; its reported width is 32 on the lecture's A100 and this chapter's local GPU. Registers are thread execution storage; shared memory is storage accessible within a block; global memory is device-addressable storage used for arrays. Property fields describe different scopes, so their units and names matter. Shared bytes per block cannot be multiplied by the number of blocks without checking residency and per-SM constraints.</p>
+<p>The recorded A100 80GB PCIe (Peripheral Component Interconnect Express) query reports compute capability 8.0 and 108 multiprocessors. Those two values already refute treating a later constant <code>numSMs=40</code> as a discovery of that device's complete hardware. They also caution against importing the lecture's device numbers into local examples. Our GPU is a different architecture variant with a different memory capacity and SM count. The programs ask the runtime where needed rather than hard-coding the lecture's inventory.</p>
+<p>The <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__DEVICE.html">runtime Device Management reference, §6.3</a> describes queries and synchronization. Query success and a nonzero visible device count are operational preconditions for the examples; unsuccessful initialization must be reported separately from an ordinary count of zero. A property structure is meaningful after its query succeeds. Printing an uninitialized structure after ignoring an error creates plausible-looking numbers with no evidential value.</p>
+<p>A reported clock rate is also not a measured application throughput. Even a precise device identity and nominal clock leave work count, memory traffic, instruction selection, occupancy and launch overhead unresolved. Device properties help construct a hypothesis about a kernel. The kernel's correct answer and appropriately scoped measurement test that hypothesis. The precision and block-placement examples below show why this order matters: first identify the objects being counted, then perform the count, then decide what inference the observation actually supports.</p>
+<h2 id="hello">A launch creates logical work; completion makes its effects usable <a class="timestamp" href="https://www.youtube.com/watch?v=jM3Q6tftc6A&amp;t=6s">W9L2 0:06</a></h2>
+<p>The greeting example introduces a device function marked <code>__global__</code>, then calls it from <code>main</code> with the launch configuration <code>&lt;&lt;&lt;1,10&gt;&gt;&gt;</code>. The first number is the number of blocks and the second is the number of threads in each block. All ten logical threads execute the function body. The arguments between the following parentheses belong to the kernel function itself; an empty argument list does not mean no threads were requested. The launch configuration and the function's data arguments answer different questions.</p>
+<p>The CPU prints one greeting before submitting the kernel, while every GPU thread prints the same device greeting. Device output is diagnostic output, with runtime buffering and no general order among different threads. Because these ten lines are identical, their permutation is invisible. Adding a thread identifier would expose an order that the program has not specified. An algorithm should not communicate between threads through print order, and a performance measurement should not include diagnostic printing unless printing is deliberately part of the workload.</p>
+<p>The launch can return to the host before the device work completes. The checked <code>cudaDeviceSynchronize</code> call waits for earlier device work and reports failure through its return value. In this example it also provides a completion point before the host inspects the result. Synchronization does not make a bad kernel correct, nor does it dictate which thread runs first. It establishes the ordering needed for a later observer to use completed effects. The distinction is particularly important before freeing buffers or returning from <code>main</code>.</p>
+<p>This reconstruction preserves the lecture's one-block, ten-thread greeting and adds an independent validation array. Thread \(t\), with \(0\le t\lt10\), writes entry \(t\). The host initializes all ten entries to zero, checks launch and completion, copies them back and requires every entry to equal one. Its input is empty, it allocates 40 device bytes on this platform, and successful output contains ten device greetings followed by a verified-write message. The array check prevents the display itself from being the only witness of device execution.</p>
+<pre><code class="language-cuda" data-file="hello_checked.cu" data-build="nvcc -arch=native -O2 hello_checked.cu -o hello_checked" data-run="timeout 20 ./hello_checked" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#define CK(x) do { cudaError_t e=(x); if(e!=cudaSuccess) { std::fprintf(stderr,&quot;%s: %s\n&quot;,#x,cudaGetErrorName(e)); return 2; } } while(0)
+__global__ void hello(int *seen) {
+  seen[threadIdx.x]=1;
+  printf(&quot;Hello, World from GPU!\n&quot;);
+}
+int main() {
+  int *d=nullptr, h[10]={0};
+  CK(cudaMalloc(&amp;d,sizeof(h)));
+  CK(cudaMemset(d,0,sizeof(h)));
+  std::puts(&quot;Hello, World from CPU!&quot;);
+  std::fflush(stdout);
+  hello&lt;&lt;&lt;1,10&gt;&gt;&gt;(d);
+  CK(cudaGetLastError());
+  CK(cudaDeviceSynchronize());
+  CK(cudaMemcpy(h,d,sizeof(h),cudaMemcpyDeviceToHost));
+  CK(cudaFree(d));
+  for(int x:h) if(x!=1) return 3;
+  std::puts(&quot;ten thread writes verified&quot;);
+  return 0;
+}
+</code></pre>
+<pre><code class="output">Hello, World from CPU!
+Hello, World from GPU!
+Hello, World from GPU!
+Hello, World from GPU!
+Hello, World from GPU!
+Hello, World from GPU!
+Hello, World from GPU!
+Hello, World from GPU!
+Hello, World from GPU!
+Hello, World from GPU!
+Hello, World from GPU!
+ten thread writes verified</code></pre>
+<p>The write locations are distinct, so this array needs no atomic update. An atomic operation makes a supported operation on one shared location indivisible with respect to matching atomic operations. It would become relevant if every thread incremented one common counter. Here the indexing gives a simpler proof: two distinct thread indices denote distinct array entries. The copy and the final loop inspect all ten effects after completion. A greeting alone cannot establish that property, especially when output is buffered, truncated or redirected.</p>
+<p>The same reasoning scales to a one-dimensional solver launch. With \(b\) threads per block and \(g\) blocks, thread \(t\) of block \(k\) computes \(i=kb+t\). Its index lies in \(0\le i\lt gb\). To cover \(n\) elements with one element per thread, choose \(g=\lceil n/b\rceil\), and guard the body with \(i\lt n\). For any intended index \(i\), integer division gives unique \(k=\lfloor i/b\rfloor\) and remainder \(t=i-kb\), proving coverage and uniqueness. The guard discards extra indices; it cannot manufacture missing threads.</p>
+
+<h2 id="precision">Repair coverage before interpreting precision timings <a class="timestamp" href="https://www.youtube.com/watch?v=jM3Q6tftc6A&amp;t=371s">W9L2 6:11</a></h2>
+<p>FP32 means the 32-bit binary floating-point format used by CUDA <code>float</code>; FP64 means the 64-bit binary format used by <code>double</code>. On this platform their storage is four and eight bytes per element. Precision refers to representable information and rounding behavior, not a guarantee of a fixed throughput ratio. A fused multiply-add, abbreviated FMA, evaluates a product plus an addend with one final rounding. The usual floating-point operation count assigns two operations to that instruction, one multiplication and one addition. The <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/mathematical-functions.html">Programming Guide, §5.5.1.5</a> explains this difference from separately rounded operations.</p>
+<p>The recorded program uses four arrays for each precision and computes \(d_i=a_i b_i+c_i\). It allocates and initializes host inputs, allocates matching device arrays, copies the three inputs to the device, records events around each kernel, and finally copies output back and releases memory. This ordering gives a useful first execution experiment. However, inspection of the displayed code reveals an independent correctness problem before any hardware interpretation: <code>N=1024</code>, <code>ThreadsPerBlock=128</code> and <code>BlockPerGrid=1</code>, with one guarded element per thread.</p>
+<p>Applying the index model, the executed indices are exactly 0 through 127. The remaining 896 intended outputs receive no assignment from that launch. Thus the covered fraction is \(128/1024=1/8\), and the missing fraction is \(7/8\). The condition <code>if (globalThreadId &lt; n)</code> only prevents out-of-range execution; every launched index already passes it. Increasing allocation size has no effect on this work-coverage issue. The corrected grid has \(\lceil1024/128\rceil=8\) blocks.</p>
+<p>The recorded output reports <code>sizeof(double)=8</code>, <code>sizeof(float)=4</code> and <code>sizeof(int)=4</code>. The figure eight for the integer in the surrounding explanation should not be used: the displayed output and the local check both give four. More fundamentally, using <code>sizeof</code> in allocation arithmetic expresses the actual implementation's storage requirement. A variable name containing “64” cannot make a four-byte object eight bytes wide, and an informal assumption about integer width is unnecessary when the language supplies the query.</p>
+<p>The two recorded event intervals are 39.54 ms for FP64 and 0.05 ms for FP32, a ratio of 790.8. These are observations of the demonstrated program, not a validated arithmetic throughput ratio. The demonstration has a tiny launch, incomplete intended coverage, one timing per variant, no displayed output comparison and FP64 first. Its explanation invokes differing FP64 and FP32 execution resources. That mechanism can matter on a specified device, but it does not account quantitatively for these observations without excluding startup, loading, submission and measurement effects. The shown evidence does not identify which of those effects caused the large ratio.</p>
+<p>A <em>CUDA event</em> is an object that records a position in a stream's work and can supply timing information. A stream is an ordered sequence of operations submitted to a device. The <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__EVENT.html">Event Management reference, §6.15, cudaEventElapsedTime</a> reports milliseconds between completed event records and notes resolution around 0.5 microseconds. The measured interval is an elapsed interval in the device work timeline, not a direct count of active arithmetic cycles. The host must establish event completion before interpreting it.</p>
+<p>For a batch of \(r\) launches, let \(t_{\rm batch}\) be the elapsed seconds between event records, \(t_{\rm fixed}\) fixed measurement overhead within that interval, \(t_{\rm kernel}\) useful time per launch, and \(t_{\rm gap}\) average intervening time when submission does not keep the device continuously busy. The simple accounting model is</p>
+\[
+\frac{t_{\rm batch}}r=\frac{t_{\rm fixed}}r+t_{\rm kernel}+t_{\rm gap}. \tag{23.1}
+\]
+<p>Batching reduces the first term but does not remove the last. This is why averaging hundreds of tiny launches is useful for observing a repeated launch workload while remaining insufficient to estimate peak floating-point throughput. The terms are explanatory categories, not separately fitted measurements here. A host-side error check inside the loop is intentionally retained; its submission cost can contribute to a gap rather than disappearing from the experiment.</p>
+<p>The corrected listing uses eight blocks of 128 threads for both types. Its inputs are exactly representable values \(a_i=2\), \(b_i=3\), \(c_i=1\), so every output must be exactly seven in either precision, with or without contraction to FMA. Each variant performs one warm-up launch and synchronization, then times 500 launches in a batch. It checks every returned element and fails on any runtime or value error. Device allocation peaks at 32 KiB, where one KiB is 1024 bytes, because the four FP64 arrays are freed before the FP32 trial begins. The timing excludes allocation, host initialization and transfers, which are outside the event interval.</p>
+<pre><code class="language-cuda" data-file="precision_events.cu" data-build="nvcc -arch=native -O2 precision_events.cu -o precision_events" data-run="timeout 20 ./precision_events" data-check="returncode" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#define CK(x) do { cudaError_t e=(x); if(e!=cudaSuccess) { std::fprintf(stderr,&quot;%s: %s\n&quot;,#x,cudaGetErrorName(e)); std::exit(2); } } while(0)
+template&lt;class T&gt; __global__ void muladd(const T *a,const T *b,const T *c,T *d,int n) {
+  int i=blockIdx.x*blockDim.x+threadIdx.x;
+  if(i&lt;n) d[i]=a[i]*b[i]+c[i];
+}
+template&lt;class T&gt; void trial(const char *name) {
+  const int n=1024, repeats=500, threads=128, blocks=(n+threads-1)/threads;
+  const size_t bytes=n*sizeof(T);
+  T *a=(T*)std::malloc(bytes), *b=(T*)std::malloc(bytes);
+  T *c=(T*)std::malloc(bytes), *h=(T*)std::malloc(bytes);
+  if(!a||!b||!c||!h) std::exit(3);
+  for(int i=0;i&lt;n;++i) { a[i]=T(2); b[i]=T(3); c[i]=T(1); }
+  T *da,*db,*dc,*dd;
+  CK(cudaMalloc(&amp;da,bytes)); CK(cudaMalloc(&amp;db,bytes));
+  CK(cudaMalloc(&amp;dc,bytes)); CK(cudaMalloc(&amp;dd,bytes));
+  CK(cudaMemcpy(da,a,bytes,cudaMemcpyHostToDevice));
+  CK(cudaMemcpy(db,b,bytes,cudaMemcpyHostToDevice));
+  CK(cudaMemcpy(dc,c,bytes,cudaMemcpyHostToDevice));
+  CK(cudaMemset(dd,0,bytes));
+  muladd&lt;&lt;&lt;blocks,threads&gt;&gt;&gt;(da,db,dc,dd,n);
+  CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
+  cudaEvent_t start,stop;
+  CK(cudaEventCreate(&amp;start)); CK(cudaEventCreate(&amp;stop));
+  CK(cudaEventRecord(start));
+  for(int r=0;r&lt;repeats;++r) { muladd&lt;&lt;&lt;blocks,threads&gt;&gt;&gt;(da,db,dc,dd,n); CK(cudaGetLastError()); }
+  CK(cudaEventRecord(stop)); CK(cudaEventSynchronize(stop));
+  float ms=0; CK(cudaEventElapsedTime(&amp;ms,start,stop));
+  CK(cudaMemcpy(h,dd,bytes,cudaMemcpyDeviceToHost));
+  for(int i=0;i&lt;n;++i) if(h[i]!=T(7)) std::exit(4);
+  std::printf(&quot;%s bytes=%zu elements=%d verified mean_us=%.3f\n&quot;,name,sizeof(T),n,1000.0*ms/repeats);
+  CK(cudaEventDestroy(start)); CK(cudaEventDestroy(stop));
+  CK(cudaFree(da)); CK(cudaFree(db)); CK(cudaFree(dc)); CK(cudaFree(dd));
+  std::free(a); std::free(b); std::free(c); std::free(h);
+}
+int main() { std::printf(&quot;sizeof(int)=%zu\n&quot;,sizeof(int)); trial&lt;double&gt;(&quot;FP64&quot;); trial&lt;float&gt;(&quot;FP32&quot;); }
+</code></pre>
+<pre><code class="output">sizeof(int)=4
+FP64 bytes=8 elements=1024 verified mean_us=6.072
+FP32 bytes=4 elements=1024 verified mean_us=12.857</code></pre>
+<p>The displayed output is the first sample capture, checked by return code because event times vary. Across three complete retained captures, the mean interval per FP64 launch ranged from 6.072 to 35.139 microseconds, while FP32 ranged from 9.662 to 18.295 microseconds. FP64 was shorter in two captures and longer in one. This variability, despite correct answers in every capture, rules out assigning a stable precision-throughput ratio to this experiment. The measurements were exclusive of other agents’ benchmark programs, but did not control laptop frequency, operating-system scheduling or background activity.</p>
+<p>The useful arithmetic count per fully covered launch is \(F=2n=2048\) floating-point operations, with \(n=1024\). Ignoring caches and transaction overhead, three loads and one store move \(Q=4nw\) bytes, where \(w\) is the element width in bytes. Arithmetic intensity \(I=F/Q\), measured in operations per byte, is therefore \(1/(2w)\): 0.125 for FP32 and 0.0625 for FP64. This count describes the source operation and requested array traffic. It does not establish external-memory traffic when repeated launches reuse a small cached working set.</p>
+<p>There are two independent reasons that a ratio between these runs cannot be identified with the ratio of hardware arithmetic peaks. First, the intensity and the tiny problem size can leave memory, launch or submission costs dominant. Second, changing precision also changes bytes per element and resource use. An experiment seeking arithmetic throughput would require enough independent repeated arithmetic to dominate those costs, inspection of the generated instructions and a stated operation-count convention. An experiment seeking application speed would instead include the data transfers and allocations actually paid by the application. Neither question is answered by relabeling this correctness experiment.</p>
+<p>Precision selection in a scientific solver adds an accuracy requirement. Even if a lower-precision update is faster, rounding can prevent a convergence criterion from being met, and a small update is distinct from a small discretization error. The exact integer-valued inputs here deliberately avoid those questions so that coverage and completion have a transparent oracle. They are a strong test of launch plumbing and a weak test of floating-point sensitivity. A later accuracy study must use numerical cases that exercise rounding and compare against an appropriate reference, rather than extrapolating from seven.</p>
+
+<h2 id="placement">Sample block placement without pretending to control it <a class="timestamp" href="https://www.youtube.com/watch?v=jM3Q6tftc6A&amp;t=1072s">W9L2 17:52</a></h2>
+<p>The last demonstrated program launches 680 blocks with one thread per block. It reads the current SM identifier with inline assembly and atomically increments a counter at that identifier. Inline assembly embeds a low-level instruction expression inside the source language. The number 680 is chosen as \(40\times17\), and a host constant <code>numSMs=40</code> sizes the counter array. No ordinary CUDA launch field in the displayed source requests a set of 40 SMs. The counter length is memory bookkeeping, not a scheduler restriction.</p>
+<p>This distinction is a memory-safety issue as well as an interpretation issue. The displayed allocation holds counters for indices 0 through 39. If a sampled SM identifier is 40 or larger, the unguarded atomic update accesses beyond that array. The earlier device query showed 108 SMs on the demonstrated A100, making the assumption especially suspect. The recordings do not establish the exact later job environment or reveal all possible memory consequences; we therefore identify a potential out-of-bounds access rather than claim to have reproduced the lecture's runtime state.</p>
+<p>The returned identifier is not required to be a dense ordinal in an array of length <code>multiProcessorCount</code>. The <a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#special-registers-smid">PTX ISA specification, §§10.8–10.9</a> defines <code>%smid</code> as the current SM identifier and <code>%nsmid</code> as its identifier-range bound. The identifiers can be noncontiguous, so that bound can exceed the physical count. It also warns that an SM identifier can change after preemption and rescheduling. Sampling it reports a location at one instant, not a permanent affinity or an ownership certificate for an SM.</p>
+<p>The safe diagnostic changes the data structure. Each block writes its sampled identifier to its own array slot, indexed by the block number, which is known to lie between zero and 679. Block zero also records the identifier bound. The host copies the bounded log back, rejects identifiers outside the reported range, and forms a map keyed by the observed integers. No identifier is used as an index into a fixed-size device counter array. Empty gaps in the identifier set cause no difficulty.</p>
+<p>The input-free listing allocates 680 unsigned samples and one bound, 2724 device bytes on this implementation. There is one thread per block, so each sample has one writer. The host requires the histogram counts to sum to 680 and every sample to lie below the bound. It prints the physical SM count, identifier bound, number of observed distinct identifiers and total samples. Counts and distribution can change; checking the exit status verifies the invariants rather than a particular scheduler outcome.</p>
+<pre><code class="language-cuda" data-file="sm_samples.cu" data-build="nvcc -arch=native -O2 sm_samples.cu -o sm_samples" data-run="timeout 20 ./sm_samples" data-check="returncode" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#include &lt;vector&gt;
+#include &lt;map&gt;
+#define CK(x) do { cudaError_t e=(x); if(e!=cudaSuccess) { std::fprintf(stderr,&quot;%s: %s\n&quot;,#x,cudaGetErrorName(e)); return 2; } } while(0)
+__global__ void sample(unsigned *ids,unsigned *bound) {
+  unsigned here,range;
+  asm volatile(&quot;mov.u32 %0, %%smid;&quot; : &quot;=r&quot;(here));
+  asm volatile(&quot;mov.u32 %0, %%nsmid;&quot; : &quot;=r&quot;(range));
+  ids[blockIdx.x]=here;
+  if(blockIdx.x==0) *bound=range;
+}
+int main() {
+  const int blocks=680;
+  unsigned *d,*range; unsigned bound=0;
+  std::vector&lt;unsigned&gt; ids(blocks);
+  CK(cudaMalloc(&amp;d,blocks*sizeof(unsigned)));
+  CK(cudaMalloc(&amp;range,sizeof(unsigned)));
+  sample&lt;&lt;&lt;blocks,1&gt;&gt;&gt;(d,range);
+  CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
+  CK(cudaMemcpy(ids.data(),d,blocks*sizeof(unsigned),cudaMemcpyDeviceToHost));
+  CK(cudaMemcpy(&amp;bound,range,sizeof(unsigned),cudaMemcpyDeviceToHost));
+  std::map&lt;unsigned,unsigned&gt; histogram;
+  for(unsigned id:ids) { if(id&gt;=bound) return 3; ++histogram[id]; }
+  unsigned total=0; for(auto item:histogram) total+=item.second;
+  cudaDeviceProp prop; CK(cudaGetDeviceProperties(&amp;prop,0));
+  std::printf(&quot;SM_count=%d nsmid=%u sampled_IDs=%zu blocks=%u\n&quot;,prop.multiProcessorCount,bound,histogram.size(),total);
+  if(total!=blocks) return 4;
+  std::puts(&quot;all per-block samples are in range; total verified&quot;);
+  CK(cudaFree(d)); CK(cudaFree(range));
+  return 0;
+}
+</code></pre>
+<pre><code class="output">SM_count=16 nsmid=16 sampled_IDs=16 blocks=680
+all per-block samples are in range; total verified</code></pre>
+<p>This displayed sample reports 16 physical SMs, an identifier bound of 16, and 16 observed identifiers on the laptop. The total is 680. These values happen to agree in this run; the program does not assume they agree. They are observations of one launch and do not validate a fixed placement rule. The one-thread blocks also leave most lanes in their execution groups unused, so this is an intentionally small diagnostic rather than a throughput workload.</p>
+<p>For histogram counts \(c_j\), where \(j\) denotes one observed identifier, the invariant is \(\sum_jc_j=680\). If there were exactly 40 observed identifiers, the arithmetic mean would be 17 samples per identifier; that equation would not require every count to equal 17. The recorded output shows counts around six and seven in its displayed subset of 40 identifiers, which alone cannot account for all 680 blocks. Treating a partial counter display as the full distribution would discard the very work conservation that can detect a broken measurement.</p>
+<p>Even a complete, safe histogram cannot measure simultaneous occupancy. A count of 30 samples on one SM could arise from 30 successive blocks or from a mixture of concurrent and successive residency. Occupancy concerns resident warps relative to the supported maximum at an instant, while this log accumulates one observation per block across the whole launch. The log also perturbs the kernel by adding a diagnostic store. It establishes that blocks can be observed on hardware units and that the sampled count is conserved; it does not reveal the scheduler's policy, guarantee balance, or show how much useful work ran concurrently.</p>
+
+<h2 id="streams">Research extension: separate ordering from possible overlap</h2>
+<p>The greeting needs a completion edge; a larger application needs a dependency graph. Let \(H_k\) denote a host-to-device copy for chunk \(k\), \(K_k\) its kernel, and \(R_k\) its device-to-host result copy. Correctness requires \(H_k\prec K_k\prec R_k\prec V_k\), where \(\prec\) means “must complete before” and \(V_k\) is the host validation of that chunk. If chunks touch disjoint storage, no numerical dependency requires \(R_0\prec H_1\). A single stream can impose that extra order; two streams can omit it.</p>
+<p>The <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/asynchronous-execution.html">Programming Guide, §2.5</a> defines stream ordering, completion queries and events. It recommends page-locked host buffers for asynchronous host-device transfers. Page-locked, or pinned, memory remains resident for these transfers rather than being ordinary pageable storage. Separate streams permit operations to overlap when the hardware and runtime support it; they do not promise overlap or speedup. Here nonblocking streams avoid implicit interactions with the legacy default stream, and each chunk's three operations remain in its own stream.</p>
+<p>The program allocates two disjoint chunks of \(2^{20}\) integers each. Total device storage is 8 MiB, where one MiB is \(2^{20}\) bytes, and the pinned host allocation is another 8 MiB. Host entry \(i\) starts at integer \(i\); the device adds one; the host requires entry \(i\) to be \(i+1\). All these integers fit in the local 32-bit signed type. Before reinitializing host memory or freeing either allocation, the host waits for every participating stream, including the stream that might finish last.</p>
+<p>The first mode sends both chunks through one stream. The second sends chunk zero through stream zero and chunk one through stream one. Both use identical arrays, kernels and transfer sizes. Each mode is warmed once; the displayed measurement then times submission through completion with the C++ steady clock, a monotonic host clock. Initialization and validation occur outside this interval. The interval includes host submission, transfers, kernels and final stream waits, but excludes allocation. This scope differs deliberately from the precision example's event interval.</p>
+<pre><code class="language-cuda" data-file="two_streams.cu" data-build="nvcc -arch=native -O2 two_streams.cu -o two_streams" data-run="timeout 20 ./two_streams" data-check="returncode" data-needs="gpu">#include &lt;cuda_runtime.h&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;chrono&gt;
+#define CK(x) do { cudaError_t e=(x); if(e!=cudaSuccess) { std::fprintf(stderr,&quot;%s: %s\n&quot;,#x,cudaGetErrorName(e)); std::exit(2); } } while(0)
+__global__ void increment(int *a,int n) {
+  int i=blockIdx.x*blockDim.x+threadIdx.x;
+  if(i&lt;n) a[i]+=1;
+}
+double trial(int count,int *h,int *d,cudaStream_t *s) {
+  const int chunk=1&lt;&lt;20,total=2*chunk;
+  for(int i=0;i&lt;total;++i) h[i]=i;
+  auto begin=std::chrono::steady_clock::now();
+  for(int c=0;c&lt;2;++c) {
+    cudaStream_t stream=s[c%count];
+    CK(cudaMemcpyAsync(d+c*chunk,h+c*chunk,chunk*sizeof(int),cudaMemcpyHostToDevice,stream));
+    increment&lt;&lt;&lt;(chunk+255)/256,256,0,stream&gt;&gt;&gt;(d+c*chunk,chunk);
+    CK(cudaGetLastError());
+    CK(cudaMemcpyAsync(h+c*chunk,d+c*chunk,chunk*sizeof(int),cudaMemcpyDeviceToHost,stream));
+  }
+  for(int k=0;k&lt;count;++k) CK(cudaStreamSynchronize(s[k]));
+  auto end=std::chrono::steady_clock::now();
+  for(int i=0;i&lt;total;++i) if(h[i]!=i+1) std::exit(3);
+  return std::chrono::duration&lt;double,std::milli&gt;(end-begin).count();
+}
+int main() {
+  const size_t bytes=2*(1&lt;&lt;20)*sizeof(int);
+  int *h,*d; cudaStream_t s[2];
+  CK(cudaMallocHost(&amp;h,bytes)); CK(cudaMalloc(&amp;d,bytes));
+  for(int k=0;k&lt;2;++k) CK(cudaStreamCreateWithFlags(&amp;s[k],cudaStreamNonBlocking));
+  trial(1,h,d,s); trial(2,h,d,s);
+  double one=trial(1,h,d,s),two=trial(2,h,d,s);
+  std::printf(&quot;device_bytes=%zu pinned_bytes=%zu elements=2097152 verified\n&quot;,bytes,bytes);
+  std::printf(&quot;one_stream_ms=%.3f two_stream_ms=%.3f ratio=%.3f\n&quot;,one,two,one/two);
+  for(int k=0;k&lt;2;++k) CK(cudaStreamDestroy(s[k]));
+  CK(cudaFree(d)); CK(cudaFreeHost(h));
+}
+</code></pre>
+<pre><code class="output">device_bytes=8388608 pinned_bytes=8388608 elements=2097152 verified
+one_stream_ms=2.197 two_stream_ms=2.034 ratio=1.080</code></pre>
+<p>The displayed output is the first sample capture; the listing is checked by return code and its full-array assertions. In three complete retained captures, the one-stream time ranged from 1.785 to 2.197 ms and the two-stream time from 1.752 to 2.034 ms. The within-capture ratio of one-stream to two-stream time ranged from 0.997 to 1.080. Thus two streams were slightly slower in one capture and up to eight percent faster in another. These observations support no stable speedup claim and no claim of directly observed copy/compute overlap.</p>
+<p>A simple pipeline model explains what one might hope to gain without asserting it happened. Let \(t_H,t_K,t_R\) be service times per chunk for the two copy directions and the kernel, and let \(m\) be the number of chunks. With no overlap, the idealized service total is \(m(t_H+t_K+t_R)\). If the three stages have independent resources and enough buffering, their pipeline has fill and drain time plus a steady spacing controlled by the slowest stage:</p>
+\[
+T_{\rm pipe}\approx t_H+t_K+t_R+(m-1)\max(t_H,t_K,t_R). \tag{23.2}
+\]
+<p>This formula assumes stable service times, independent stage resources and negligible submission overhead. A device with copy-direction contention or a shared bandwidth bottleneck violates those assumptions. With only two chunks the fill and drain cost is substantial even in the ideal model. For a numerical illustration, stage times 2, 1 and 2 ms give 10 ms serial service and 7 ms ideal pipeline service, a factor \(10/7\approx1.43\). Those are model numbers, not local measurements.</p>
+<p>The code guarantees each chunk's dependency chain and validates the answers. Its two-stream timing tests the elapsed cost of a permitted concurrency pattern. Demonstrating actual simultaneous copy and compute would require a timeline trace that locates the operations in time; a favorable wall-time ratio alone cannot identify which overlap occurred. A ratio near one is also compatible with correct asynchronous submission: the workload can be too small, the stages can contend, or the machine can already saturate a shared resource. Correctness and scheduling opportunity are established by different arguments.</p>
+<p>For Jacobi iteration, introducing two streams cannot remove true stencil dependences. The next sweep reads neighbors from the previous complete field; splitting the rows into chunks requires boundary data and a valid cross-chunk ordering scheme. The independent increment chunks are deliberately simpler. Reusing their stream arrangement blindly in <code>jacobi_step</code> could allow a sweep to read unfinished data. The dependency graph, rather than the number of available streams, should determine where overlap is legal.</p>
+
+<h2 id="limits">Limits of compilation and execution evidence</h2>
+<p>The chapter verifies finite programs on one visible laptop GPU. It does not demonstrate a cluster allocation, a second GPU, arbitrary toolkit-driver interchangeability, peak arithmetic throughput or the internal scheduler's policy. The A100 inventory and timings belong to the recorded demonstration. The local inventories and outputs belong to this chapter's dated captures. Neither should be substituted for the other. The primary manuals opened for interpretation are the current CUDA 13.4 documentation, while the installed compiler is 13.3; local artifact inspection and execution establish the narrower observed behavior.</p>
+<p>A native image solves one artifact-availability problem but does not validate a whole software stack. A dependency introduced by a library, a newer runtime feature, a different host ABI or a different GPU target can add a new failure boundary. PTX retained in a fatbinary is an option for a capable driver, not a proof that every older driver can translate it. Reproducibility records therefore need compiler flags and artifact identities alongside versions; the phrase “CUDA installed” compresses several different conditions into one ambiguous label.</p>
+<p>The correctness oracles are intentionally transparent: 42, ten written slots, 1024 sevens, 680 in-range samples and 2097152 incremented integers. These constrain specific behaviors. They do not sample every input, prove absence of races in a different program, or establish a numerical method's stability. Exact outputs are used where the contract is deterministic; timings and sampled placement use successful exit status plus internal assertions, with displayed values labeled as samples.</p>
+<p>The most useful diagnostic order follows the dependency of the claims. Establish what was built, then what environment executes it, then where failure is first reported, then whether the complete intended result is right, and only then interpret a measurement. A faster wrong result and a successfully compiled unusable artifact are both failures of the application contract. Keeping these propositions separate makes the investigation shorter because each check rules out one class of explanation rather than mixing build, scheduling, execution and scientific validity.</p>
+
+<h2 id="exercises">Six exercises with reasoned solutions</h2>
+<h3>1. Derive complete launch coverage</h3>
+<p>A kernel processes one element at <code>blockIdx.x*blockDim.x+threadIdx.x</code> and guards its body by the array length. For \(n=1031\) and 128 threads per block, derive the required block count, valid index range, and number of inactive launched threads. Explain why one block cannot be repaired by enlarging the output allocation.</p>
+<details><summary>Solution</summary><p>Eight blocks produce only 1024 indices and miss seven elements. The ceiling gives nine blocks, producing \(9\times128=1152\) logical threads. Indices 0 through 1030 are valid, while 1031 through 1151 fail the guard, leaving 121 inactive threads. For each valid index, quotient and remainder on division by 128 provide a unique block and thread pair; hence there are neither holes nor duplicate writers. One block still supplies only indices 0 through 127 regardless of allocation size. More memory changes the set of legal addresses, not the set of executing indices. A grid-stride loop could cover more work with fewer threads, but that would be a different kernel algorithm requiring its own coverage proof.</p></details>
+<h3>2. Compute a timing model without inventing hardware performance</h3>
+<p>Suppose a batch of 500 launches takes 2.5 ms between events and each fully covered launch performs 2048 floating-point operations. Compute the mean interval and the corresponding operation-rate quotient. State why this quotient is not the GPU's peak arithmetic throughput.</p>
+<details><summary>Solution</summary><p>The mean is \(2.5/500=0.005\) ms, or 5 microseconds. Dividing the source count by that interval gives \(2048/(5\times10^{-6})=4.096\times10^8\) operations per second, about 0.410 billion operations per second. This is an effective rate for the specified sequence under its event boundary. It includes gaps and any fixed cost inside the interval, while the small working set may be cached. The kernel also loads and stores arrays. Neither the fraction of time doing arithmetic nor the actual native instruction mix is established by the quotient. The calculation is valid for its stated numerator and denominator; identifying it with peak throughput would add unsupported assumptions.</p></details>
+<h3>3. Give a counterexample to “successful compilation implies execution”</h3>
+<p>Construct an artifact/environment combination for which host compilation and linking succeed but the kernel cannot execute. Explain which evidence distinguishes this from a wrong numerical answer after successful execution.</p>
+<details><summary>Solution</summary><p>Package only PTX emitted by a toolkit whose PTX language version the executing driver cannot translate, while keeping the host binary and runtime otherwise usable. The host process can start and reach a launch, yet device code loading can return an unsupported-PTX error. Alternatively, a native-only image for an incompatible device can leave no suitable kernel image. The checked launch or completion call then fails before the answer oracle passes. A numerical error after successful execution instead has successful checked runtime operations followed by a failed result comparison. Both are application failures, but changing the numerical formula cannot repair unsupported code loading, and changing architecture flags does not prove the numerical formula correct.</p></details>
+<h3>4. Diagnose the 40-counter assumption</h3>
+<p>A device query returns 40 SMs. A program reads <code>%smid</code> and uses it as an index into 40 counters. Does the device query prove the access is in bounds? Design a bounded alternative that does not assume dense identifiers.</p>
+<details><summary>Solution</summary><p>No. The physical count and the identifier range are different quantities; the specification permits gaps. Forty identifiers could include values larger than 39. Allocate one sample per launched block, let its single diagnostic thread write at the block index, and copy the bounded log back. Obtain <code>%nsmid</code> as a range bound and reject samples outside it, then use a host map keyed by the observed values. The allocation size now depends on a controlled launch count rather than a hardware identifier. The map's counts should sum to the launched block count. These checks validate the log's range and conservation without claiming permanent SM affinity; a sample remains an observation at its read instant.</p></details>
+<h3>5. Judge a deployment recipe</h3>
+<p>A GPU-free login node builds code for a compute partition containing known 8.6 GPUs. The installed toolkit is newer than the nodes' driver capability for PTX translation. Compare <code>-arch=native</code>, explicit 8.6 native code, and a PTX-only executable as starting choices. What still needs testing after choosing the native target?</p>
+<details><summary>Solution</summary><p>Native discovery on the login node cannot infer an invisible compute-node GPU; any fallback default must not be mistaken for the intended partition target. An explicit native 8.6 image directly names that target and avoids relying on newer PTX translation for this kernel. A PTX-only choice retains the very dependency known to be problematic. The explicit image is therefore the appropriate starting artifact for the stated partition, subject to toolkit and driver support. It does not settle host CPU and ABI compatibility, dynamic libraries, runtime features, scheduler visibility, allocation size or the algorithm's correctness. Run the checked probe inside an actual allocation, inspect errors, then validate the application itself. A successful local build is only the first step of that chain.</p></details>
+<h3>6. Implement and measure a stream dependency change</h3>
+<p>Modify the two-stream experiment to process four equal chunks while keeping the total number of integers fixed. Specify the buffer-lifetime rules, a correctness oracle, and the evidence needed before claiming actual copy/compute overlap. Explain why one asynchronous API return is insufficient.</p>
+<details><summary>Solution</summary><p>Use chunks of \(2^{19}\) integers and assign chunk \(k\) to stream \(k\bmod2\), with disjoint offsets in the unchanged total allocation. Within each stream enqueue copy, increment and return copy in that order. Initialize every host entry to its global index and require every returned entry to equal that index plus one. Do not overwrite a chunk's host input until its outbound copy has completed; this implementation simply waits for both streams before any reinitialization. Do not validate or free host output until its inbound copy completes, and do not free device memory while any stream can access it. Measure submission through completion with identical warm-up and validation outside the interval, repeating both modes in alternating order if estimating a robust performance difference. A timeline trace is needed to demonstrate which operations actually overlap. An API return can establish only that submission returned; the work can remain queued or execute serially on contested resources. More chunks create more scheduling opportunities but also more launches and transfer calls, so a speedup is a measurement question.</p></details>
+
+<h2 id="primary-sources">Recordings and primary sources</h2>
+<ul>
+<li><a href="https://www.youtube.com/watch?v=Xi-yMwssHPc">NPTEL W9L1</a>, 26:10: environment inspection, cluster access, interactive and batch allocation, device queries.</li>
+<li><a href="https://www.youtube.com/watch?v=jM3Q6tftc6A">NPTEL W9L2</a>, 25:24: greeting, FP64/FP32 example and timing output, SM-counter code and output. These recordings provide the demonstrated examples and course-era observations.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html">NVIDIA CUDA Compiler Driver 13.4</a>, §§1.1–2.4 and §4.2.7: separate host/device translation, stable phases and target flags. Local 13.3 artifacts were checked separately.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-binary-utilities/index.html">CUDA Binary Utilities 13.4</a>, §§1.1–1.2 and §2.1: cubin format, host executables, PTX extraction and native disassembly.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/nvcc.html">CUDA Programming Guide, §2.7</a>: virtual and real targets, native code and retained PTX.</li>
+<li><a href="https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html">CUDA Compatibility: Minor Version Compatibility</a>, “Application Considerations”: limited feature support, PTX restrictions and explicit architecture selection.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__ERROR.html">CUDA Runtime API, §6.13</a>: error-name reporting, retrieving and clearing last error, and asynchronous-error caveat.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__DEVICE.html">CUDA Runtime API, §6.3</a>: device queries and device synchronization.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__EVENT.html">CUDA Runtime API, §6.15</a>: event recording, completion and elapsed-time units and resolution.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/mathematical-functions.html">CUDA Programming Guide, §5.5</a>: floating-point formats, FMA and rounding behavior.</li>
+<li><a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#special-registers-smid">PTX ISA 9.4, §§10.8–10.9</a>: SM-ID sampling, noncontiguous identifiers, range bound and rescheduling caveat.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/asynchronous-execution.html">CUDA Programming Guide, §2.5</a>: streams, events, completion and pinned-memory transfers.</li>
+<li><a href="https://slurm.schedmd.com/salloc.html">SchedMD salloc manual</a>, Description: allocation lifetime and command execution.</li>
+<li><a href="https://slurm.schedmd.com/sbatch.html">SchedMD sbatch manual</a>, Description and “Filename Pattern”: submission versus execution, directive parsing and output-name substitutions.</li>
+<li><a href="https://slurm.schedmd.com/gres.html">SchedMD GRES guide</a>, “Running Jobs” and “GPU Management”: resource requests and CUDA-visible device environment. All online documentation was opened on 28 October 2026; no cluster submission was performed.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-22-thread-divergence-and-memory-layouts.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-24-openacc-directives-loops-data-management.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

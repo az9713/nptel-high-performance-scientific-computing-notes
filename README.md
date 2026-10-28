@@ -16,9 +16,9 @@ maps distinguish lecture material, research extensions, and original teaching
 constructions. Chapter citations and sidecars record source uncertainties and
 claims that could not be checked.
 
-**This is a partial edition.** Chapters **1–20** are written and independently reviewed; chapters **21–31** remain pending.
+**This is a partial edition.** Chapters **1–25** are written and independently reviewed; chapters **26–31** remain pending.
 
-The plan groups **75 source recordings** (playlist items 2–76) into **31 topic chapters**; the separate course trailer is excluded. The written chapters cover **44 recordings** and contain **120 expandable worked solutions** and **196 runnable listings** (26 Bash, 103 C, 14 CUDA C++, 53 Python). The lecture index records each recording assignment and any remaining work.
+The plan groups **75 source recordings** (playlist items 2–76) into **31 topic chapters**; the separate course trailer is excluded. The written chapters cover **56 recordings** and contain **150 expandable worked solutions** and **221 runnable listings** (27 Bash, 112 C, 27 CUDA C++, 55 Python). The lecture index records each recording assignment and any remaining work.
 
 Transcripts were produced locally with faster-whisper small.en; they are machine transcriptions, not publisher captions. The NPTEL caption tracks are attached to the wrong videos and were not used.
 
@@ -64,7 +64,7 @@ successful exit only; the others are checked byte for byte.
 
 ## Evidence and scope
 
-Every written chapter has at least two recorded independent review rounds. The latest recorded review of every written chapter has zero blocking findings; all remaining findings were repaired and checked. Historical verdicts remain unchanged in the editorial record. Chapters requiring more than two rounds (chapter: rounds): 3: 3, 9: 4, 10: 5, 11: 4, 12: 3, 15: 3.
+Every written chapter has at least two recorded independent review rounds. The latest recorded review of every written chapter has zero blocking findings; all remaining findings were repaired and checked. Historical verdicts remain unchanged in the editorial record. Chapters requiring more than two rounds (chapter: rounds): 3: 3, 9: 4, 10: 5, 11: 4, 12: 3, 15: 3, 21: 3.
 
 Execution evidence is cumulative. Chapters 1–12 retain their original dated runs from the pinned historical source, with all current listing inputs checked for identity; they were not rerun under the later workspace-only policy. Chapters 13 onward record fresh workspace-contained runs. Each chapter keeps its own execution timestamp and environment profile. A successful run checks the stated finite example, not the general scientific claim.
 

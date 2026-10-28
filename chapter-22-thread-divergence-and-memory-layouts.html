@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="72e91651d394640fb033d6ef4fec65c44ced7332297a1c2f486f4c366a65982b"><title>Thread divergence and memory layouts · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>Thread divergence and memory layouts</h1>
+<p class="lead">A particle calculation updates one coordinate of 1,048,576 particles. Each particle carries eight 4-byte fields, so its records occupy 32 MiB, where one MiB is \(2^{20}\) bytes. The update reads two fields and writes one: only 12 MiB of useful scalar traffic per sweep. Yet a warp can request 32 memory sectors for one field load where a different layout requests four. A second decision, whether particles with different update rules share a warp, changes how many instruction paths the warp must issue. These two losses have different causes. Recovering one can worsen the other; a useful design must preserve every particle and account for both.</p>
+<p class="source-note">Grounded in <a href="https://www.youtube.com/watch?v=to-o44bgGcg">W8L5</a> and <a href="https://www.youtube.com/watch?v=o0KYMgx2pic">W8L6</a>. <strong>Lecture material:</strong> even/odd and half-warp branches, arithmetic rewrites, variable loop counts, strided access, illustrative cache lines, row-major and column-major matrices, transposing a matrix operand, and an introduction to Numba CUDA. <strong>Research extensions:</strong> NVIDIA's CUDA 13.0 Programming Guide supplies the warp execution model and independent thread scheduling; its Best Practices Guide supplies coalescing, predication and shared-memory bank rules; PTX ISA 9.0 distinguishes comparison, selection and branching. NumPy documents strides and transpose views. Numba-CUDA documents device arrays, launch syntax and indexing; Numba's deprecation notice updates the package context. CuPy, PyCUDA and CUDA Python documentation locate the alternative Python interfaces. <strong>Original teaching constructions:</strong> the particle model, the lane-work and sector-set derivations, the corrected cache accounting, the particle permutation experiment, the AoS/SoA comparison, the shared-memory bank proof, the bounded programs and all six worked exercises. No hardware transaction counters were collected.</p>
+
+<h2 id="model">The objects of the chapter and the running case</h2>
+<p>A particle is a labeled record \(P_i=(x_i,y_i,z_i,v_{x,i},v_{y,i},v_{z,i},m_i,q_i)\), for integer label \(0\le i\lt N\), where \(N\) is the number of particles. The first three fields are positions, the next three velocities, \(m_i\) is mass and \(q_i\) is an auxiliary scalar. All eight fields use the same 4-byte representation in the layout experiment. Positions and velocities have been divided by reference length and velocity scales; the update interval has been divided by the corresponding reference time. Values in the program are therefore dimensionless. This prevents a numerical expression such as \(y_i+0.25v_{x,i}\) from adding incompatible units.</p>
+<p>The selected update is \(x_i^{\mathrm{new}}=y_i+\Delta t\,v_{x,i}\), with \(\Delta t=1/4\); the other seven fields remain unchanged. This deliberately simple map isolates field access. It is a test of representation and ownership, rather than a complete time integrator for particle dynamics. Taking the old value of \(y_i\) as a fixed reference also makes repeated kernel launches idempotent: every repetition produces the same answer instead of advancing the system further. A separate integer experiment assigns even and odd particle labels different update rules to study control flow without floating-point or input-memory effects.</p>
+<p>A <em>warp</em> is the group of 32 CUDA threads used here. Its <em>lanes</em> are numbered \(\ell=0,\ldots,31\). A <em>mask</em> is the subset of lanes participating in an instruction. A full warp has 32 live lanes, but a branch or a boundary condition can make an instruction's mask smaller. The <em>logical particle label</em> identifies the physical object being updated; the <em>execution position</em> identifies its assigned thread. We write \(i=\pi(j)\) when execution position \(j\) processes particle \(i\), where \(\pi\) must be a permutation if every particle is to be processed exactly once. Changing \(\pi\) changes scheduling, not the intended particle map.</p>
+<p>An address is a byte offset from an allocation base. A <em>layout</em> maps a logical field and particle label to that offset. A <em>stride</em> is the difference in byte addresses when one index increases by one. An <em>aligned</em> address is an integer multiple of a specified alignment; the specification matters, because alignment to 4 bytes and alignment to 32 bytes answer different questions. A <em>sector</em> in our global-memory model is an aligned interval of 32 bytes. A <em>requested sector count</em> counts the sectors touched by one warp memory instruction. It is distinct from cache misses and from bytes reaching off-chip memory.</p>
+<p>All CUDA listings were compiled with CUDA 13.3, <code>-arch=native -O2 -std=c++17</code>, and executed on the RTX 3050 Laptop GPU, compute capability 8.6, under WSL 2. Compute capability is NVIDIA’s hardware feature-version identifier, distinct from the CUDA toolkit version. The measurements retained three independent process captures on 2026-10-28 UTC. Each process contains three timing batches per variant. CUDA events, markers recorded in device-stream order, surround a finite sequence of repeated launches; printed microseconds are elapsed event time divided by repetitions. Allocation, initial transfer and host checking lie outside the events. Host submission gaps, operating-system activity, clocks and cache state can still affect the intervals. Timing listings use return-code checking because their numbers vary, and each program fails if any checked payload differs.</p>
+
+<h2 id="divergence">Divergence spends instruction slots on different masks <a class="timestamp" href="https://www.youtube.com/watch?v=to-o44bgGcg&amp;t=6s">W8L5 0:06</a></h2>
+<p>The relevant question is whether lanes in the <em>same</em> warp follow different instruction paths. A condition that is identical for all 32 lanes is uniform within that warp even if another warp takes the opposite path. With 256 threads per block, a condition based on <code>threadIdx.x / 32</code> can assign different warps different tasks without splitting any individual warp. A condition based on <code>threadIdx.x % 2</code> alternates within each full warp. Both contain a comparison; only the second necessarily divides the lane set by parity.</p>
+<p>The <a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-programming-guide/index.html#simt-architecture">CUDA 13.0 Programming Guide, §7.1</a>, defines warp issue and path masking, and describes independent thread scheduling from Volta onward. Per-thread execution state allows sub-warp divergence and reconvergence. It does not turn the 32 lanes into 32 independent full-width instruction engines. Our following model counts issued path work, rather than prescribing an exact historical reconvergence schedule or asserting that all threads always advance in lockstep.</p>
+<p>Let a branch have two paths, A and B. Their instruction costs under a deliberately simplified issue model are \(c_A\) and \(c_B\), measured in equal-cost instruction slots. Let \(n_A\) and \(n_B\) be the numbers of lanes taking them, with \(n_A+n_B=32\). Ignore the branch itself, reconvergence, pipeline dependencies and memory stalls. If both paths are present and issued separately, the warp spends \(c_A+c_B\) slots while accomplishing \(n_Ac_A+n_Bc_B\) lane-instructions. Define useful lane utilization as</p>
+\[
+U_{\mathrm{lane}}=\frac{n_Ac_A+n_Bc_B}{32(c_A+c_B)},\qquad n_A,n_B\gt0. \tag{22.1}
+\]
+<p>The numerator counts work that the algorithm requested of actual lanes. The denominator counts all available lane slots in those issued paths. If both paths cost ten slots and each has sixteen lanes, the useful work is 320 lane-instructions out of 640 available lane slots: \(U_{\mathrm{lane}}=1/2\). This is the precise content of the half-warp serialization picture. It does not mean that sixteen scalar threads execute one after another, nor that either path takes exactly one GPU cycle.</p>
+<p>Path probabilities alone are insufficient to predict the loss. Suppose only one lane takes A, with \(c_A=100\), and 31 lanes take B, with \(c_B=1\). The model gives \(131/(32\cdot101)\approx0.0405\). A rare expensive path can dominate issued work even though almost every particle follows the cheap rule. Conversely, if all lanes take A, path B is absent; the denominator becomes \(32c_A\), and utilization is one. Applying the two-present-path denominator to an absent path would incorrectly penalize a uniform warp.</p>
+<p>The same reasoning gives a practical grouping criterion. Across 64 particles, suppose 32 need A and 32 need B. Two mixed warps issue approximately \(2(c_A+c_B)\) path slots. Two uniform warps, one of each type, issue \(c_A+c_B\). Their ideal issue-work ratio is two, even if A is longer than B. This comparison concerns total issue demand across warps. One uniform A warp can still finish later than the B warp, and an entire kernel also depends on available blocks and scheduling. Grouping is useful only when enough work remains to occupy the device and its reordering cost is affordable.</p>
+<p>The model's equal-cost slots omit instruction throughput differences, dependent arithmetic chains, register allocation, cache behavior and overlapping work from other warps. A measured ratio near two would therefore be consistent with the model without proving it. A different ratio would not by itself identify a compiler failure or a different warp width. The prediction is a mechanism to test, with a well-defined counterfactual assignment of the same particle work.</p>
+
+<h2 id="rewrites">An arithmetic rewrite first needs an equivalence proof <a class="timestamp" href="https://www.youtube.com/watch?v=to-o44bgGcg&amp;t=342s">W8L5 5:42</a></h2>
+<p>A branch that chooses a coefficient can sometimes be expressed as a common arithmetic operation. For nonnegative index \(i\), let \(b_i=i\bmod2\), which is zero for even labels and one for odd labels. For input \(d_i\) and output \(a_i\), the rule “multiply by two for even labels, multiply by three for odd labels” becomes \(a_i=d_i(2+b_i)\). A less confusing code spelling is <code>out[i] = in[i] * (2 + (i &amp; 1));</code>. Substitute parity zero and parity one to establish equivalence before asking how it compiles.</p>
+<p>There is a material distinction between this coefficient example and the initial branch slide. At approximately 1:15 the slide doubles an even entry but adds one to an odd entry. At approximately 5:45 the multiplication rewrite uses coefficients two and three. Those are different maps. For odd input five, adding one gives six and multiplying by three gives fifteen. The coefficient expression is valid for its stated multiplication task; it is not an equivalent optimization of the first task. A valid arithmetic expression for that first task, for bounded nonnegative integers with representable intermediates, is \((2-b_i)d_i+b_i\): parity zero gives \(2d_i\), parity one gives \(d_i+1\).</p>
+<p>The half-warp example has a similarly direct proof. For lane \(\ell\), define Boolean \(b=[\ell\ge16]\), interpreted as integer zero or one. Then adding \(1+b\) adds one to lanes 0–15 and two to lanes 16–31. The slide around 9:15 gives the expression <code>1 + (idx &gt;= 16)</code> but reverses true and false in its parenthetical annotation. The expression and its truth table determine the result: the comparison is true in the upper half and contributes one there. The branch boundary belongs at 16, so the two cases are “less than 16” and “at least 16.”</p>
+<p>A predicate is a Boolean guard. A predicated instruction takes effect only for lanes whose guard is true, allowing conditional effects within a common instruction sequence. A comparison is not itself a divergent branch. The <a href="https://docs.nvidia.com/cuda/archive/13.0.0/parallel-thread-execution/index.html#predicated-execution">PTX ISA 9.0, §9.3</a>, separately represents predicates, predicated instructions and conditional branches. A compiler can use a comparison to select a register value while keeping a common instruction sequence. It can also turn a short source-level <code>if</code> into predicated instructions. Therefore neither the presence of <code>if</code> nor replacing it with <code>?:</code> establishes the generated control flow. Evaluating a condition alone therefore does not establish divergence.</p>
+<p>Arithmetic selection also has a semantic boundary. Computing both candidate expressions and multiplying one by zero may evaluate an invalid address, divide by zero, overflow a signed integer or introduce a NaN (a floating-point not-a-number value) that survives multiplication by zero. A source conditional can avoid evaluating the unused expression. Even when both candidates are valid, evaluating both expensive paths may cost more than executing a masked short path. The correct workflow is to prove value and effect equivalence on a stated domain, inspect relevant compiled code when necessary, and measure the actual kernel. “No branch in the source” is neither a correctness proof nor a speed guarantee.</p>
+
+<h2 id="loops">Variable loop counts create a long tail of inactive lanes <a class="timestamp" href="https://www.youtube.com/watch?v=to-o44bgGcg&amp;t=722s">W8L5 12:02</a></h2>
+<p>Let lane \(\ell\) need \(L_\ell\) iterations of an equal-cost loop body. Under a common masked-loop model, the loop issues through \(L_{\max}=\max_\ell L_\ell\) rounds. Lane \(\ell\) participates in its first \(L_\ell\) rounds and is inactive afterward. When \(L_{\max}\gt0\),</p>
+\[
+U_{\mathrm{loop}}=\frac{\sum_{\ell=0}^{31}L_\ell}{32L_{\max}}. \tag{22.2}
+\]
+<p>For <code>for (int k=0; k&lt;idx; ++k)</code> with <code>idx</code> equal to lane index, the counts are 0 through 31. Their sum is \(31\cdot32/2=496\), and the longest count is 31, giving utilization \(496/992=1/2\). The strict bound means that lane 31 executes 31 iterations. If the bound were inclusive, the loop would be a different program. The condition has to be read exactly.</p>
+<p>The body on the slide adds \(k\) to one entry. Over exact integer arithmetic, its net increment is \(L(L-1)/2\). Replacing that loop with a triangular-number formula can eliminate most work, a stronger change than reducing divergence. But the formula's intermediate multiplication can overflow when repeated additions did not, and changing the order of floating-point additions can change rounding. A compiler may already simplify some loops. Use this closed form only after specifying the numeric domain and the exact result required.</p>
+<p>When each iteration performs a genuine recurrence, no such formula may exist. One option is to sort or bucket particles by predicted iteration count. Sorting changes neighboring data and costs memory movement; it can damage spatial locality in particle interaction calculations. Another option is to stop a common kernel after a bounded number of iterations, compact the unfinished particles and continue them in another launch. Compaction packs selected labels into a dense list while preserving a map back to output ownership. The extra scan, writes and launches must be charged to the algorithm. Equation (22.2) helps locate a potential gain; it does not pay those costs.</p>
+<p><strong>A bounded control-flow experiment.</strong> The following complete program updates 65,536 logical particles by unsigned 32-bit recurrences. Even labels take 128 rounds and odd labels take 32 rounds, with different constants and shift operations. Unsigned arithmetic intentionally wraps modulo \(2^{32}\). The two non-inlined device functions keep the source paths substantial, but their annotation alone does not establish the final instruction schedule. No assembly or profiler trace is used to infer a cycle count.</p>
+<p>The mixed assignment uses logical label equal to execution position. In each group of 64 execution positions, the grouped assignment processes the 32 even labels first and the 32 odd labels second. The expression <code>2*(i%32)+(i/32)%2</code> visits 0,2,…,62 and then 1,3,…,63; adding the group's base makes it a bijection. Every particle therefore retains its seed and its rule. Output remains contiguous in execution order; the host applies the same label map when checking every returned word. The experiment generates seeds from labels rather than gathering a reordered input array, so it excludes the cost of physically reordering real particle records.</p>
+<pre><code class="language-cuda" data-file="divergence.cu" data-build="nvcc -arch=native -O2 -std=c++17 divergence.cu -o divergence" data-run="timeout 20 ./divergence" data-needs="gpu" data-check="returncode">#include &lt;cuda_runtime.h&gt;
+#include &lt;algorithm&gt;
+#include &lt;cstdint&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+#define CUDA(call) do { cudaError_t e=(call); if(e!=cudaSuccess) { \
+    std::fprintf(stderr,&quot;%s:%d: %s\n&quot;,__FILE__,__LINE__,cudaGetErrorString(e)); \
+    std::exit(2); } } while(0)
+
+__device__ __noinline__ uint32_t path_a(uint32_t x) {
+    #pragma unroll 1
+    for(int k=0;k&lt;128;++k) x=(x*1664525u+1013904223u)^(x&gt;&gt;7);
+    return x;
+}
+__device__ __noinline__ uint32_t path_b(uint32_t x) {
+    #pragma unroll 1
+    for(int k=0;k&lt;32;++k) x=(x*22695477u+1u)^(x&gt;&gt;9);
+    return x;
+}
+__host__ __device__ int logical_id(int i,int grouped) {
+    return grouped ? (i/64)*64+2*(i%32)+(i/32)%2 : i;
+}
+__global__ void update(uint32_t *out,int n,int grouped) {
+    int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i&lt;n) {
+        int id=logical_id(i,grouped);
+        uint32_t x=uint32_t(id)+17u;
+        out[i]=(id&amp;1) ? path_b(x) : path_a(x);
+    }
+}
+uint32_t reference(int id) {
+    uint32_t x=uint32_t(id)+17u;
+    int count=(id&amp;1)?32:128;
+    for(int k=0;k&lt;count;++k)
+        x=(id&amp;1)?((x*22695477u+1u)^(x&gt;&gt;9)):
+                  ((x*1664525u+1013904223u)^(x&gt;&gt;7));
+    return x;
+}
+int main() {
+    constexpr int n=65536,repeats=40;
+    uint32_t *out=nullptr;
+    CUDA(cudaMalloc(&amp;out,size_t(n)*sizeof(uint32_t)));
+    std::vector&lt;uint32_t&gt; h(n);
+    cudaEvent_t start,stop;
+    CUDA(cudaEventCreate(&amp;start)); CUDA(cudaEventCreate(&amp;stop));
+    float times[2][3];
+    for(int batch=0;batch&lt;3;++batch) for(int mode=0;mode&lt;2;++mode) {
+        update&lt;&lt;&lt;n/256,256&gt;&gt;&gt;(out,n,mode);
+        CUDA(cudaGetLastError()); CUDA(cudaDeviceSynchronize());
+        CUDA(cudaEventRecord(start));
+        for(int r=0;r&lt;repeats;++r) update&lt;&lt;&lt;n/256,256&gt;&gt;&gt;(out,n,mode);
+        CUDA(cudaGetLastError()); CUDA(cudaEventRecord(stop));
+        CUDA(cudaEventSynchronize(stop));
+        float ms; CUDA(cudaEventElapsedTime(&amp;ms,start,stop));
+        times[mode][batch]=ms*1000.0f/repeats;
+        CUDA(cudaMemcpy(h.data(),out,size_t(n)*sizeof(uint32_t),cudaMemcpyDeviceToHost));
+        for(int i=0;i&lt;n;++i) if(h[i]!=reference(logical_id(i,mode))) {
+            std::fprintf(stderr,&quot;mismatch mode=%d i=%d\n&quot;,mode,i); return 1;
+        }
+    }
+    std::puts(&quot;particles=65536 full_output_checks=6 PASS&quot;);
+    for(int mode=0;mode&lt;2;++mode) {
+        std::sort(times[mode],times[mode]+3);
+        std::printf(&quot;%s_us min=%.3f median=%.3f max=%.3f\n&quot;,
+            mode?&quot;grouped&quot;:&quot;mixed&quot;,times[mode][0],times[mode][1],times[mode][2]);
+    }
+    CUDA(cudaEventDestroy(start)); CUDA(cudaEventDestroy(stop)); CUDA(cudaFree(out));
+}
+</code></pre>
+<pre><code class="output">particles=65536 full_output_checks=6 PASS
+mixed_us min=31.872 median=31.923 max=32.256
+grouped_us min=18.048 median=19.252 max=29.901</code></pre>
+<p>The displayed output is capture 3, a sample run rather than an exact-output contract. Across all three process captures, mixed-assignment batch times ranged from 31.770 to 32.768 microseconds and grouped times from 17.792 to 29.901 microseconds. Capture 3's medians give a ratio \(31.923/19.252\approx1.66\). This demonstrates a measured benefit of this assignment on this build and device. The same label multiset, recurrence work and contiguous output traffic make the comparison useful, but changed indexing instructions, call behavior and scheduling still contribute. It is not a measured branch-efficiency percentage, and it does not establish a universal twofold speedup.</p>
+
+<h2 id="sectors">Coalescing is a property of one instruction's address set <a class="timestamp" href="https://www.youtube.com/watch?v=to-o44bgGcg&amp;t=1063s">W8L5 17:43</a></h2>
+<p>A warehouse analogy explains why scattered items require more visits, but an address model makes the unit of accounting explicit. For one warp memory instruction, let \(A\) be its active lane set, let \(a_\ell\) be the first byte requested by active lane \(\ell\), and let \(w\) be the number of bytes requested by each active lane. With sector width \(s=32\) bytes, define</p>
+\[
+\mathcal S=\bigcup_{\ell\in A}\left\{\left\lfloor\frac{a_\ell+b}{s}\right\rfloor: b=0,\ldots,w-1\right\},\qquad n_s=|\mathcal S|. \tag{22.3}
+\]
+<p>This is a set union because two lanes requesting different bytes in the same sector share that sector request. If one lane's object crosses a sector boundary, both sectors belong to the set. The <a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-best-practices-guide/index.html#coalesced-access-to-global-memory">CUDA 13.0 Best Practices Guide, §10.2.1</a>, gives the 32-byte transaction model for compute capability 6.0 and later. We use its rule for requested sectors and keep lower-level memory traffic separate.</p>
+<p>For a full warp reading distinct 4-byte words with \(a_\ell=4\ell\), addresses 0–127 lie in sectors 0–3, so \(n_s=4\). Moving the first address to byte four makes the range 4–131 touch sectors 0–4, so \(n_s=5\). This access remains contiguous and correctly aligned for 4-byte words; its first word is misaligned relative to a 32-byte sector boundary. With stride two in elements, \(a_\ell=8\ell\); the 32 words span sectors 0–7 and use half their bytes. Stride eight gives \(a_\ell=32\ell\), one word in each of 32 sectors.</p>
+<p>For distinct requested bytes, define a request-level useful fraction \(\eta=|\cup_{\ell\in A}[a_\ell,a_\ell+w)|/(32n_s)\). The unit-stride, offset-one, stride-two and stride-eight examples give 1, 0.8, 0.5 and 0.125. This is byte utilization of the requested sectors. If all lanes read the same word, the unique numerator is four bytes, even though 32 consumers use the value. Calling that access “one eighth as useful” would confuse reuse with waste. For broadcasts and overlapping requests, state both the unique byte footprint and the number of consumers.</p>
+<p>Consecutive lane numbers need not access consecutive words to achieve the four-sector result. A permutation of the same 32 adjacent words has exactly the same set \(\mathcal S\). For instance, mapping lane \(\ell\) to word \((7\ell)\bmod32\) permutes all words because seven and 32 have no common factor. Its requested sectors remain four. “Adjacent threads should access adjacent elements” is a useful design heuristic, while equation (22.3) is the more precise test.</p>
+<p>Stride and misalignment should also be separated. Stride two may start at byte zero and satisfy every word's natural alignment. It wastes sector capacity through gaps, not because the first address violates word alignment. The stride-two slide near 26:15 has code <code>data[idx*2]</code> and a nearby annotation saying “stride of 3.” The code and drawn locations establish stride two. Furthermore, the slide writes the gathered value into <code>data[idx]</code> in the same array. That can overlap another thread's source and is not a safe generic parallel gather. Use separate input and output arrays with validated extents, or prove the access dependencies for a particular transformation.</p>
+<p>These counts do not specify how many requests miss in the first-level cache (L1) or second-level cache (L2), how neighboring warps reuse sectors, whether a compiler vectorizes fields, or how many dynamic random-access memory (DRAM) bursts occur. A four-sector request can hit in cache; two requests can reuse one fetched sector. Even the same requested sector pattern can have different timing because it interacts with stores, outstanding requests and address calculation. The timing experiment later tests layout performance; only an appropriate profiler measurement could establish the corresponding hardware traffic.</p>
+
+<h2 id="cache-accounting">Count unique lines separately from row-line incidences <a class="timestamp" href="https://www.youtube.com/watch?v=to-o44bgGcg&amp;t=1757s">W8L5 29:17</a></h2>
+<p>The illustrative matrix-vector product uses a 3 by 3 matrix of 4-byte values and an assumed cache-line width of 8 bytes. An 8-byte line holds two 4-byte elements. The model is pedagogical; 8 and 16 bytes here are assumed line widths, not measured RTX cache-line specifications. Consider an aligned, tightly packed row-major matrix whose element offsets are 0 through 8. The three rows touch line-index sets \(\{0,1\}\), \(\{1,2\}\) and \(\{3,4\}\), since each line holds two elements.</p>
+<p>Summing the three set sizes gives six <em>row-line incidences</em>. Taking their union gives five <em>distinct matrix lines</em>. The slide's six matrix-line cycles counts a line twice at the boundary between the first two rows. It is not a compulsory count of six distinct cold line fetches. If the shared line remains cached, the second row reuses it. A separate aligned three-element vector occupies two lines. Under a cold, unlimited-retention toy cache with the matrix and vector in separate allocations, their combined compulsory footprint is seven lines, while summing the slide's per-row matrix incidences and one vector footprint gives eight. Neither number is a prediction of elapsed clock cycles.</p>
+<p>Increasing the row width to four elements makes each row occupy exactly two of these assumed lines, but it also changes the mathematical problem. Adding a dummy element to each row of the original 3 by 3 matrix is <em>padding</em>, which changes the leading dimension while preserving the nine mathematical entries. It can align row starts at the cost of extra storage; it does not reduce the number of useful entries or establish a net speedup. Increasing the hypothetical hardware line width to 16 bytes changes the model again. Those are distinct interventions and should be evaluated as such.</p>
+<p>The following executable address model checks the sector counts, a permuted access, the bank mappings used later and the unique-line distinction. It requires only Python's standard library and performs no device measurement. Its output is deterministic, and every reported count is asserted. The integer divisions represent byte or word intervals explicitly, which makes off-by-one errors and ambiguous units visible.</p>
+<pre><code class="language-python" data-file="access_model.py" data-run="python3 -B access_model.py" data-check="exact">from math import gcd
+
+def sectors(addresses, width=4, segment=32):
+    return {b // segment for a in addresses for b in range(a, a + width)}
+
+cases = [(&quot;unit&quot;, 4, 0, 4), (&quot;offset1&quot;, 4, 4, 5),
+         (&quot;stride2&quot;, 8, 0, 8), (&quot;stride8&quot;, 32, 0, 32)]
+for name, stride, offset, wanted in cases:
+    addresses = [offset + lane * stride for lane in range(32)]
+    got = len(sectors(addresses))
+    assert got == wanted
+    print(f&quot;{name}: requested_sectors={got} useful_fraction={128/(32*got):.3f}&quot;)
+assert len(sectors([4 * ((7 * lane) % 32) for lane in range(32)])) == 4
+print(&quot;permutation_of_unit: requested_sectors=4&quot;)
+for pitch in (32, 33):
+    banks = [(lane * pitch + 5) % 32 for lane in range(32)]
+    multiplicity = max(banks.count(b) for b in set(banks))
+    assert multiplicity == gcd(pitch, 32)
+    print(f&quot;pitch={pitch}: distinct_banks={len(set(banks))} distinct_words_per_bank={multiplicity}&quot;)
+rows = [{(3 * row + col) // 2 for col in range(3)} for row in range(3)]
+assert sum(map(len, rows)) == 6 and len(set.union(*rows)) == 5
+print(&quot;3x3_float_matrix_8byte_lines: row_incidences=6 distinct_lines=5&quot;)
+</code></pre>
+<pre><code class="output">unit: requested_sectors=4 useful_fraction=1.000
+offset1: requested_sectors=5 useful_fraction=0.800
+stride2: requested_sectors=8 useful_fraction=0.500
+stride8: requested_sectors=32 useful_fraction=0.125
+permutation_of_unit: requested_sectors=4
+pitch=32: distinct_banks=1 distinct_words_per_bank=32
+pitch=33: distinct_banks=32 distinct_words_per_bank=1
+3x3_float_matrix_8byte_lines: row_incidences=6 distinct_lines=5</code></pre>
+<p>The distinction persists in the book's Jacobi solver. A warp computing adjacent interior columns can request contiguous words for each of its north, south, east and west loads. The four instructions have overlapping footprints across lanes, and adjacent output warps may reuse some sectors. Adding each instruction's requested bytes gives a request count; taking unique addresses gives a footprint; counting cache misses gives another quantity. Arithmetic intensity must state the memory level whose byte count forms its denominator. Using an exaggerated per-thread traffic total as if it were measured off-chip bytes can make a bandwidth limit appear where none was measured.</p>
+
+<h2 id="layouts">A multidimensional array needs an explicit address map <a class="timestamp" href="https://www.youtube.com/watch?v=o0KYMgx2pic&amp;t=6s">W8L6 0:06</a></h2>
+<p>A matrix is a mathematical map from pairs of indices to values. An allocation supplies a sequence of addressable bytes. An address map connects the two, and the map is part of the representation rather than part of matrix algebra. Let a matrix have \(M\) rows and \(K\) columns, with zero-based indices \(0\le r\lt M\), \(0\le c\lt K\). Let each element occupy \(w\) bytes. For a row-major allocation with row pitch \(p_r\ge K\) measured in elements, and for a column-major allocation with column pitch \(p_c\ge M\), the offsets are</p>
+\[
+a_{\mathrm{row}}(r,c)=w(rp_r+c),\qquad a_{\mathrm{col}}(r,c)=w(cp_c+r). \tag{22.4}
+\]
+<p>The pitch is also called a leading dimension in many numerical interfaces. With tight packing, \(p_r=K\) and \(p_c=M\). The row-major map is injective because equality of \(rp_r+c\) for two valid pairs implies \(p_r(r-r')=c'-c\), whose right side has magnitude less than \(p_r\); therefore both differences vanish. Every matrix entry has a unique location. When the pitch exceeds the logical extent, some allocated locations are padding rather than matrix entries. A kernel must distinguish logical bounds from allocated pitch.</p>
+<p>For the matrix with rows \((a_1,a_2,a_3)\), \((a_4,a_5,a_6)\), \((a_7,a_8,a_9)\), tightly packed row order is \(a_1,a_2,a_3,a_4,a_5,a_6,a_7,a_8,a_9\); column order is \(a_1,a_4,a_7,a_2,a_5,a_8,a_3,a_6,a_9\). Changing the storage order while retaining the old index formula changes which mathematical matrix the code reads. Correct conversion must rearrange values or change the indexing contract consistently. Merely declaring that a buffer is column-major cannot move its existing bytes.</p>
+<p>Two separate one-dimensional arrays do not acquire different internal order because one is drawn horizontally and the other vertically. Their allocated elements remain one-dimensional sequences. Nor are separately allocated arrays guaranteed to be adjacent in the address space. The lecture diagrams place the second array immediately after the first to illustrate concatenation. That arrangement is an additional assumption, achievable by storing both in one larger allocation with explicit offsets. It is not a consequence of declaring two arrays. A list of pointers or a Python list of row objects also need not be one packed rectangular allocation.</p>
+<p>A language name alone is not enough to establish every object's layout. A C array of fixed-width rows has a different contract from a dynamically constructed array of row pointers. NumPy arrays can carry arbitrary byte strides, including transposed and sliced views. The <a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.strides.html">NumPy strides reference</a> defines the offset as the index–stride dot product; its <a href="https://numpy.org/doc/stable/reference/generated/numpy.array.html">array constructor</a> offers an explicit storage-order argument. A homogeneous numerical buffer, a heterogeneous DataFrame and a language-level nested container are different objects. Treating all of them as one column-major or row-major allocation obscures the information a GPU kernel actually requires.</p>
+<p>The GPU mapping adds another independent choice. For a row-major matrix, assigning neighboring lanes to neighboring columns makes \(a(r,c+1)-a(r,c)=w\). Assigning them to neighboring rows makes the difference \(wp_r\). Either traversal may be valid mathematically; the warp request patterns differ. Column-major storage reverses these roles. The map from lanes to indices and the map from indices to addresses must be composed before drawing a performance conclusion. For Jacobi, a block whose x direction spans adjacent columns naturally follows the packed dimension of the book's row-major grid.</p>
+
+<h2 id="particles">AoS and SoA change which particle fields are neighbors <a class="timestamp" href="https://www.youtube.com/watch?v=o0KYMgx2pic&amp;t=528s">W8L6 8:48</a></h2>
+<p>An <em>array of structures</em>, abbreviated AoS, stores a complete particle record followed by the next record. For our packed eight-field record, field number \(\varphi\in\{0,\ldots,7\}\) of particle \(i\) has offset \(32i+4\varphi\). A <em>structure of arrays</em>, abbreviated SoA, stores one field for every particle before the next field. Using one allocation containing all eight field arrays gives offset \(4(\varphi N+i)\). These layouts hold the same values and use the same 32-byte payload per particle. Their difference is which index has unit stride.</p>
+<p>For a warp assigned consecutive particle labels, one scalar field load in AoS has lane addresses \(a_\ell=a_{\mathrm{base}}+32\ell+4\varphi\), where \(a_{\mathrm{base}}\) is the first record’s address. With an aligned first record, each lane touches its own sector, so equation (22.3) gives 32 requested sectors. SoA has \(a_\ell=a_{\varphi}+4\ell\), giving four sectors when the field base and warp start satisfy the alignment assumptions. Here \(N=2^{20}\), so every field block starts at a multiple of 32 bytes. The per-instruction useful fraction changes from one eighth to one for a scalar field accessed by all lanes.</p>
+<p>This does not make the entire AoS kernel move eight times as many bytes from DRAM. The update loads fields <code>y</code> and <code>vx</code> and stores field <code>x</code>. In AoS, these fields share each record's sector, so different instructions can reuse fetched data or combine effects through the cache hierarchy. In SoA, each selected field forms its own dense region. Three scalar operations request three address sets, and their cache histories determine what travels further down the memory hierarchy. The compiler may also change the instruction width. The “32 versus four” result is an address-model prediction for a specified scalar instruction, not a profiler observation about the whole kernel.</p>
+<p>SoA is especially attractive when many threads perform the same operation on one or a few fields. AoS can be convenient when a task consumes all fields of one object, transfers complete records between interfaces or follows pointers to individual particles. An <em>array of structures of arrays</em>, often abbreviated AoSoA, stores small particle groups whose fields are contiguous within each group. Its group width can match a vector or warp-oriented access pattern while keeping related fields nearby. These are design options; the appropriate choice depends on the kernels that dominate total runtime, rather than the convenience of a single declaration.</p>
+<p>The next program isolates the one-coordinate update from the opening case. It allocates both complete representations on the device, 32 MiB each. Both start with exactly the same eight fields. It reads <code>y</code> and <code>vx</code>, overwrites <code>x</code> and leaves every other field intact. A dyadic fraction is an integer divided by a power of two. The inputs are small dyadic fractions, exactly representable in binary. Their product with one quarter and their sum remain representable, so exact equality against the independent host formula is appropriate here. This would not justify exact equality for an arbitrary floating-point integrator.</p>
+<p>The host validates all eight fields of every particle in both representations after the timed batches: 16,777,216 field comparisons. Checking only an aggregate sum could miss a permutation or corruption of equal-and-opposite entries. Checking only <code>x</code> could miss unintended writes to other fields. The named-field copy into a local array avoids treating a C++ struct as though it were a language-level array across its members. The size assertion enforces the record size used in the address model. No sorting or layout-conversion cost is included in the event interval.</p>
+<pre><code class="language-cuda" data-file="particle_layout.cu" data-build="nvcc -arch=native -O2 -std=c++17 particle_layout.cu -o particle_layout" data-run="timeout 20 ./particle_layout" data-needs="gpu" data-check="returncode">#include &lt;cuda_runtime.h&gt;
+#include &lt;algorithm&gt;
+#include &lt;cstdint&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+#define CUDA(call) do { cudaError_t e=(call); if(e!=cudaSuccess) { \
+    std::fprintf(stderr,&quot;%s:%d: %s\n&quot;,__FILE__,__LINE__,cudaGetErrorString(e)); \
+    std::exit(2); } } while(0)
+
+struct Particle { float x,y,z,vx,vy,vz,mass,tag; };
+static_assert(sizeof(Particle)==32,&quot;model requires a 32-byte record&quot;);
+__global__ void aos_update(Particle *p,int n) {
+    int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i&lt;n) p[i].x=p[i].y+0.25f*p[i].vx;
+}
+__global__ void soa_update(float *p,int n) {
+    int i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i&lt;n) p[i]=p[n+i]+0.25f*p[3*n+i];
+}
+float initial(int i,int f) {
+    if(f==0) return -1.0f;
+    if(f==1) return float(i%1024)*0.125f;
+    if(f==3) return float(i%17-8)*0.25f;
+    return float(f)+float(i%31)*0.03125f;
+}
+float expected(int i,int f) {
+    return f==0?initial(i,1)+0.25f*initial(i,3):initial(i,f);
+}
+int main() {
+    constexpr int n=1&lt;&lt;20,repeats=40;
+    constexpr size_t fields=8, bytes=size_t(n)*32;
+    std::vector&lt;Particle&gt; a(n); std::vector&lt;float&gt; s(size_t(n)*fields);
+    for(int i=0;i&lt;n;++i) {
+        a[i]={initial(i,0),initial(i,1),initial(i,2),initial(i,3),
+              initial(i,4),initial(i,5),initial(i,6),initial(i,7)};
+        for(int f=0;f&lt;8;++f) s[size_t(f)*n+i]=initial(i,f);
+    }
+    Particle *da=nullptr; float *ds=nullptr;
+    CUDA(cudaMalloc(&amp;da,bytes)); CUDA(cudaMalloc(&amp;ds,bytes));
+    CUDA(cudaMemcpy(da,a.data(),bytes,cudaMemcpyHostToDevice));
+    CUDA(cudaMemcpy(ds,s.data(),bytes,cudaMemcpyHostToDevice));
+    cudaEvent_t start,stop;
+    CUDA(cudaEventCreate(&amp;start)); CUDA(cudaEventCreate(&amp;stop));
+    float times[2][3];
+    for(int batch=0;batch&lt;3;++batch) for(int mode=0;mode&lt;2;++mode) {
+        if(mode) soa_update&lt;&lt;&lt;n/256,256&gt;&gt;&gt;(ds,n);
+        else aos_update&lt;&lt;&lt;n/256,256&gt;&gt;&gt;(da,n);
+        CUDA(cudaGetLastError()); CUDA(cudaDeviceSynchronize());
+        CUDA(cudaEventRecord(start));
+        for(int r=0;r&lt;repeats;++r) {
+            if(mode) soa_update&lt;&lt;&lt;n/256,256&gt;&gt;&gt;(ds,n);
+            else aos_update&lt;&lt;&lt;n/256,256&gt;&gt;&gt;(da,n);
+        }
+        CUDA(cudaGetLastError()); CUDA(cudaEventRecord(stop));
+        CUDA(cudaEventSynchronize(stop));
+        float ms; CUDA(cudaEventElapsedTime(&amp;ms,start,stop));
+        times[mode][batch]=ms*1000.0f/repeats;
+    }
+    CUDA(cudaMemcpy(a.data(),da,bytes,cudaMemcpyDeviceToHost));
+    CUDA(cudaMemcpy(s.data(),ds,bytes,cudaMemcpyDeviceToHost));
+    for(int i=0;i&lt;n;++i) {
+        float values[8]={a[i].x,a[i].y,a[i].z,a[i].vx,a[i].vy,a[i].vz,a[i].mass,a[i].tag};
+        for(int f=0;f&lt;8;++f) if(values[f]!=expected(i,f)||s[size_t(f)*n+i]!=expected(i,f)) {
+            std::fprintf(stderr,&quot;mismatch i=%d field=%d\n&quot;,i,f); return 1;
+        }
+    }
+    std::puts(&quot;particles=1048576 fields_per_particle=8 both_full_payloads PASS&quot;);
+    for(int mode=0;mode&lt;2;++mode) {
+        std::sort(times[mode],times[mode]+3);
+        std::printf(&quot;%s_us min=%.3f median=%.3f max=%.3f\n&quot;,
+            mode?&quot;SoA&quot;:&quot;AoS&quot;,times[mode][0],times[mode][1],times[mode][2]);
+    }
+    CUDA(cudaEventDestroy(start)); CUDA(cudaEventDestroy(stop));
+    CUDA(cudaFree(da)); CUDA(cudaFree(ds));
+}
+</code></pre>
+<pre><code class="output">particles=1048576 fields_per_particle=8 both_full_payloads PASS
+AoS_us min=377.037 median=377.114 max=377.190
+SoA_us min=73.472 median=73.549 max=73.549</code></pre>
+<p>The sample output is capture 3. Across the nine batches in three processes, AoS ranged from 377.037 to 387.123 microseconds and SoA from 73.472 to 75.034 microseconds. Capture 3's medians give \(377.114/73.549\approx5.13\). Both payloads passed the full check. Dividing useful traffic, \(12N\) bytes, by SoA's median gives approximately 171 GB/s in decimal units. That is an <em>effective useful-byte rate</em> for this operation and timing boundary, not a measurement of DRAM bandwidth or a hardware traffic count.</p>
+<p>A real particle solver may advance positions from their own old values, update velocities, evaluate neighbor interactions and exchange records with the host. Its useful traffic, reuse and conversion cost differ. If one conversion costs \(C\) seconds and a chosen SoA kernel saves \(\Delta T\) seconds per reuse, keeping the converted layout for \(R\) reuses pays only when \(R\Delta T\gt C\). Charge both directions if the outside interface requires a return conversion. The durable design decision is often to keep the dominant kernels' representation across many steps rather than converting for every launch.</p>
+
+<h2 id="transpose">Transposing an operand changes storage only when bytes move <a class="timestamp" href="https://www.youtube.com/watch?v=o0KYMgx2pic&amp;t=702s">W8L6 11:42</a></h2>
+<p>For matrices \(A\) of shape \(M\times K\) and \(B\) of shape \(K\times J\), matrix multiplication is \(C_{r,c}=\sum_{k=0}^{K-1}A_{r,k}B_{k,c}\). Here \(J\) is the output column count, and \(k\) is the reduction index. A single scalar dot product visits a row of A and a column of B. If both matrices are tightly packed in row-major order, the A addresses change by one element as \(k\) changes, while B addresses change by \(J\) elements. The lecture's three-element illustration makes the column stride visible.</p>
+<p>For a serial dot-product traversal, explicitly packing \(B^{\mathsf T}\) into row-major storage turns that column into a dense row. The correct replacement reads the packed value at \((c,k)\), not \((k,c)\). Otherwise the code computes a different product. Also distinguish a mathematical transpose from a physical one. A view can exchange shape and strides without copying data. The <a href="https://numpy.org/doc/stable/reference/generated/numpy.transpose.html">NumPy transpose reference</a> describes the axis permutation and view behavior; a view of the original row-major B does not by itself make B's original columns contiguous in memory. Packing is an actual conversion whose cost belongs in a performance comparison.</p>
+<p>The single-thread locality argument does not automatically prescribe the best GPU multiplication. If neighboring lanes compute neighboring output columns, then at fixed \(k\) they read \(B_{k,c}\) at consecutive columns. That instruction can already be coalesced in row-major B even though each individual thread walks down a strided column over time. Transposing solely from the single-dot-product viewpoint can therefore damage a good warp access pattern. The tiled multiplication of the preceding chapter loads contiguous tiles and reuses them cooperatively; it addresses both reuse and cross-lane access.</p>
+<p>A physical transpose also presents an apparent conflict: contiguous input reads and contiguous transposed output writes follow different directions. For a square matrix, let a block cover a 32 by 32 input tile. Threads first load rows of the tile into shared memory. After a barrier, they read it in the other direction and store rows of the transposed output tile. Shared memory changes the ownership of values between the read and the write, allowing both global phases to be contiguous across lanes. The mathematical output is \(\mathrm{out}_{c,r}=\mathrm{in}_{r,c}\); the tile index exchange implements that identity.</p>
+<p>The barrier is an algorithmic obligation: a thread reading a tile entry may be reading a value loaded by a different thread. It must not do so before the write is visible. In the bounded transpose listing below, the matrix dimension is exactly divisible by 32, all 256 block threads execute every phase and every tile entry has a loader. For general dimensions, guarded loads and stores must preserve this ownership proof. An early return can remove a required loader even if the barrier rules allow already-exited threads to cease participating. Counting which values exist is as important as counting which threads reach a barrier.</p>
+
+<h2 id="banks">Shared-memory bank conflicts are a second address problem</h2>
+<p>A bank is a subdivision of shared memory that can service accesses in parallel with other banks. Shared memory has a banked organization. For the scalar 32-bit accesses modeled here, there are 32 banks and consecutive 4-byte words map to consecutive banks. The <a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-best-practices-guide/index.html#shared-memory-and-memory-banks">CUDA 13.0 Best Practices Guide, §10.2.3.1</a>, describes conflicts among distinct addresses in a bank and the same-location broadcast exception. This is a research extension to the recordings' layout discussion. Coalesced global access does not guarantee conflict-free shared access.</p>
+<p>Let a shared tile have row pitch \(p_s\) in 32-bit words. A read of column \(c\) by lanes assigned to rows \(\ell\) accesses word \(\ell p_s+c\), hence bank</p>
+\[
+b_\ell=(\ell p_s+c)\bmod32. \tag{22.5}
+\]
+<p>Two lanes have the same bank when \(32\) divides \((\ell-\ell')p_s\). Write \(g=\gcd(p_s,32)\), the greatest common divisor. Dividing by \(g\) leaves coprime integers \(p_s/g\) and \(32/g\), so equality of banks requires lane differences that are multiples of \(32/g\). The bank sequence repeats after \(32/g\) lanes. There are \(32/g\) distinct banks, each addressed by \(g\) lanes. Since the words lie in different rows, these are distinct word addresses, not a broadcast. This proves the conflict multiplicity for this access model.</p>
+<p>Pitch 32 gives \(g=32\): every lane selects the same bank at a distinct word. Pitch 33 gives \(g=1\): every lane selects a different bank. Padding a 32 by 32 float tile to 32 by 33 changes shared storage from 4,096 to 4,224 bytes, an extra 128 bytes per block. Row reads remain unit-stride, while column reads gain a one-bank step modulo 32. Padding changes the storage pitch, not the logical tile dimensions, so the extra column is never an extra matrix value.</p>
+<p>The greatest-common-divisor result is intentionally narrow. It assumes scalar 32-bit words, a full warp, the stated bank mapping and distinct words. Wider loads, other element widths, instruction splitting and specialized matrix instructions require their own mapping analysis. Thirty-two lanes reading the same word can be served by broadcast and do not create the distinct-word conflict just proved. Likewise, several warps reading different addresses in the same bank introduce aggregate demand, but the simple per-warp conflict multiplicity does not count their entire schedule.</p>
+<p>The following transpose compares pitch 32 and pitch 33 with the same global mapping. A block has 32 threads in x and eight in y; four iterations per thread cover the 1,024 tile entries. In each iteration, a warp's global loads and stores cover 32 consecutive floats. The shared read <code>tile[threadIdx.x][threadIdx.y+j]</code> is the column operation in equation (22.5). Input and output allocations are separate, avoiding an in-place transpose race. The program checks all 65,536 output entries after each of six timed batches.</p>
+<pre><code class="language-cuda" data-file="transpose_banks.cu" data-build="nvcc -arch=native -O2 -std=c++17 transpose_banks.cu -o transpose_banks" data-run="timeout 20 ./transpose_banks" data-needs="gpu" data-check="returncode">#include &lt;cuda_runtime.h&gt;
+#include &lt;algorithm&gt;
+#include &lt;cstdint&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstdlib&gt;
+#include &lt;vector&gt;
+#define CUDA(call) do { cudaError_t e=(call); if(e!=cudaSuccess) { \
+    std::fprintf(stderr,&quot;%s:%d: %s\n&quot;,__FILE__,__LINE__,cudaGetErrorString(e)); \
+    std::exit(2); } } while(0)
+
+template&lt;int pitch&gt; __global__ void transpose(const float *in,float *out,int n) {
+    __shared__ float tile[32][pitch];
+    int x=blockIdx.x*32+threadIdx.x;
+    int y=blockIdx.y*32+threadIdx.y;
+    #pragma unroll
+    for(int j=0;j&lt;32;j+=8) tile[threadIdx.y+j][threadIdx.x]=in[(y+j)*n+x];
+    __syncthreads();
+    x=blockIdx.y*32+threadIdx.x;
+    y=blockIdx.x*32+threadIdx.y;
+    #pragma unroll
+    for(int j=0;j&lt;32;j+=8) out[(y+j)*n+x]=tile[threadIdx.x][threadIdx.y+j];
+}
+int main() {
+    constexpr int n=256,repeats=100;
+    constexpr size_t count=size_t(n)*n,bytes=count*sizeof(float);
+    std::vector&lt;float&gt; in(count),out(count);
+    for(size_t i=0;i&lt;count;++i) in[i]=float(i);
+    float *di=nullptr,*dout=nullptr;
+    CUDA(cudaMalloc(&amp;di,bytes)); CUDA(cudaMalloc(&amp;dout,bytes));
+    CUDA(cudaMemcpy(di,in.data(),bytes,cudaMemcpyHostToDevice));
+    dim3 block(32,8),grid(n/32,n/32);
+    cudaEvent_t start,stop;
+    CUDA(cudaEventCreate(&amp;start)); CUDA(cudaEventCreate(&amp;stop));
+    float times[2][3];
+    for(int batch=0;batch&lt;3;++batch) for(int mode=0;mode&lt;2;++mode) {
+        if(mode) transpose&lt;33&gt;&lt;&lt;&lt;grid,block&gt;&gt;&gt;(di,dout,n);
+        else transpose&lt;32&gt;&lt;&lt;&lt;grid,block&gt;&gt;&gt;(di,dout,n);
+        CUDA(cudaGetLastError()); CUDA(cudaDeviceSynchronize());
+        CUDA(cudaEventRecord(start));
+        for(int r=0;r&lt;repeats;++r) {
+            if(mode) transpose&lt;33&gt;&lt;&lt;&lt;grid,block&gt;&gt;&gt;(di,dout,n);
+            else transpose&lt;32&gt;&lt;&lt;&lt;grid,block&gt;&gt;&gt;(di,dout,n);
+        }
+        CUDA(cudaGetLastError()); CUDA(cudaEventRecord(stop));
+        CUDA(cudaEventSynchronize(stop));
+        float ms; CUDA(cudaEventElapsedTime(&amp;ms,start,stop));
+        times[mode][batch]=ms*1000.0f/repeats;
+        CUDA(cudaMemcpy(out.data(),dout,bytes,cudaMemcpyDeviceToHost));
+        for(int i=0;i&lt;n;++i) for(int j=0;j&lt;n;++j) if(out[size_t(j)*n+i]!=in[size_t(i)*n+j]) {
+            std::fprintf(stderr,&quot;mismatch mode=%d i=%d j=%d\n&quot;,mode,i,j); return 1;
+        }
+    }
+    std::puts(&quot;matrix=256x256 full_output_checks=6 PASS&quot;);
+    for(int mode=0;mode&lt;2;++mode) {
+        std::sort(times[mode],times[mode]+3);
+        std::printf(&quot;pitch%d_us min=%.3f median=%.3f max=%.3f\n&quot;,
+            mode?33:32,times[mode][0],times[mode][1],times[mode][2]);
+    }
+    CUDA(cudaEventDestroy(start)); CUDA(cudaEventDestroy(stop));
+    CUDA(cudaFree(di)); CUDA(cudaFree(dout));
+}
+</code></pre>
+<pre><code class="output">matrix=256x256 full_output_checks=6 PASS
+pitch32_us min=23.084 median=24.494 max=24.617
+pitch33_us min=7.045 median=23.868 max=23.972</code></pre>
+<p>The sample is capture 3. Across three processes, pitch-32 batch times ranged from 9.073 to 24.617 microseconds, and pitch-33 times from 5.960 to 23.972 microseconds. These ranges overlap substantially. The displayed medians, 24.494 and 23.868 microseconds, are almost equal; other captures separated more. Small kernels timed through repeated launches are sensitive to submission pacing and system activity. The address proof establishes removal of the modeled column conflict, and full checks establish the transpose result on these runs. The timing evidence does not establish a fixed conflict penalty, a universal speedup or a measured count of bank transactions. Padding can also change how many blocks can reside simultaneously through shared-memory allocation thresholds in larger kernels.</p>
+
+<h2 id="python">Python interfaces preserve the same indexing and ownership questions <a class="timestamp" href="https://www.youtube.com/watch?v=o0KYMgx2pic&amp;t=1164s">W8L6 19:24</a></h2>
+<p>A just-in-time compiler compiles a function during execution or at its first relevant specialization rather than requiring a separate ahead-of-time build command. It does not imply execution on a GPU. A CPU JIT function and a CUDA kernel have different launch and memory contracts. The lecture contrasts Numba's CPU <code>jit</code> decorator with <code>cuda.jit</code>. The latter describes a CUDA kernel or device function, depending on its options; it is not a promise that arbitrary Python objects or libraries become valid device code.</p>
+<p>As checked on 2026-10-28, <a href="https://numba.readthedocs.io/en/stable/reference/deprecation.html#deprecation-of-the-built-in-cuda-target">Numba's CUDA deprecation notice</a> says that development of the CUDA target moved to the separate <code>numba-cuda</code> package. The familiar <code>from numba import cuda</code> namespace can remain, while package ownership and supported versions change. A working environment requires a compatible driver, toolkit and package combination; printing NumPy and Numba version strings proves only that those imports succeeded. It does not verify a kernel launch, an allocation or the results of device computation.</p>
+<p>The <a href="https://nvidia.github.io/numba-cuda/user/kernels.html">Numba-CUDA kernel guide</a> documents the launch spelling <code>kernel[blocks, threads](arguments)</code>. A kernel writes outputs through its arguments rather than returning an ordinary Python result. Launches are asynchronous unless a particular transfer or synchronization makes the host wait. In a one-dimensional grid, the <a href="https://nvidia.github.io/numba-cuda/reference/kernel.html#thread-indexing">kernel indexing reference</a> defines <code>cuda.grid(1)</code> as the familiar block offset plus thread offset. <code>cuda.gridsize(1)</code> is block width times grid width. In two or three dimensions these functions return coordinate or extent tuples, not a scalar flattening of every dimension.</p>
+<p>For the particle update, the conceptual device body is therefore the same: obtain a global particle index, compare it with the logical extent, then write exactly that particle's output coordinate. This chapter leaves the following as an API translation fragment. It is not a complete executed program; no Numba package was installed and no Numba device run is claimed. The verified CUDA C++ listing remains the executable reference.</p>
+<pre><code class="language-python">from numba import cuda
+
+@cuda.jit
+def update_x(y, vx, x):
+    i = cuda.grid(1)
+    if i &lt; x.size:
+        x[i] = y[i] + 0.25 * vx[i]
+
+# Host-side launch fragment, after compatible device arrays exist:
+# threads = 256
+# blocks = (x.size + threads - 1) // threads
+# update_x[blocks, threads](y, vx, x)
+# cuda.synchronize()</code></pre>
+<p>The <a href="https://nvidia.github.io/numba-cuda/reference/memory.html">Numba-CUDA memory reference</a> defines <code>cuda.device_array</code> as an uninitialized device allocation, consistent with the slide's device-memory description. <code>device_array_like</code> derives allocation information from an existing array; it does not initialize the new values by copying that array's contents. <code>to_device</code> performs a transfer, and <code>copy_to_host</code> retrieves results. Device-wide host synchronization waits for submitted work; it does not repair two device threads racing during a kernel. A block barrier and a host synchronization solve different ordering problems.</p>
+<p>The alternatives named in the recording sit at different abstraction levels. <a href="https://docs.cupy.dev/en/stable/overview.html">CuPy</a> supplies NumPy/SciPy-style GPU arrays and operations. <a href="https://documen.tician.de/pycuda/">PyCUDA</a> exposes CUDA interfaces and kernel compilation facilities from Python. <a href="https://nvidia.github.io/cuda-python/latest/">NVIDIA's CUDA Python documentation</a> organizes multiple Python components, including low-level bindings. The checked latest page labels itself a development-branch build; it is not a frozen installed-version guarantee. Vendor ownership alone does not establish that one interface is more complete for every application or faster for a particular kernel. In every interface, ask which arrays reside on the device, which operations cause copies, what their strides are and where completion is observed.</p>
+
+<h2 id="lecture-claims">Lecture claims and their status</h2>
+<table><thead><tr><th>Claim or example</th><th>Checked interpretation</th></tr></thead><tbody>
+<tr><td>W8L5 1:15–7:59: parity branch and coefficient rewrite</td><td>The first slide uses even doubling and odd increment; the later rewrite uses multipliers two and three. They must be treated as different maps.</td></tr>
+<tr><td>W8L5 9:08–11:30: condition evaluation and divergence</td><td>A comparison can feed selection or predication; generated paths and per-warp masks determine divergence. The Boolean annotation reverses true and false.</td></tr>
+<tr><td>W8L5 12:02–14:50: loops have unequal trip counts</td><td>Correct mechanism. With a strict upper bound equal to lane index, lane 31 executes 31 iterations.</td></tr>
+<tr><td>W8L5 24:28–28:39: stride-two gather</td><td>The drawn indices match stride two. Separate bounds and source/destination ownership are required for a safe executable gather.</td></tr>
+<tr><td>W8L5 29:17–36:53: assumed cache lines</td><td>Eight bytes hold two 4-byte values. Six matrix row-line incidences cover five distinct matrix lines in the packed example; neither counts elapsed GPU cycles.</td></tr>
+<tr><td>W8L6 4:10–11:03: sequential array storage</td><td>Correct within each packed allocation. Adjacency of two independent allocations is an additional assumption.</td></tr>
+<tr><td>W8L6 11:42–18:54: transpose for locality</td><td>Physical packing can improve a scalar traversal. A transpose view may move no bytes, and warp mapping can already coalesce a row-major operand.</td></tr>
+<tr><td>W8L6 27:19–32:04: Numba allocation, indexing and synchronization</td><td>Device arrays allocate on the device; multidimensional indexing returns tuples. Host waiting is distinct from preventing a race inside a kernel.</td></tr>
+</tbody></table>
+
+<h2 id="limits">Limits and a disciplined tuning decision</h2>
+<p>The chapter separates three statements that require different evidence. An address calculation establishes a requested sector set or bank mapping under explicit assumptions. A correctness check establishes agreement with a reference for the tested finite payload. An event interval measures a particular execution boundary on a particular system. None alone establishes all the others. These runs collected no instruction, cache, bank-conflict or DRAM counters. Their timings cannot be converted into actual hardware transaction counts by dividing by a presumed transaction latency.</p>
+<p>The synthetic recurrence has no input gather or particle interaction; it tests an assignment of independent labeled work. The particle layout test uses an idempotent, exactly representable map and excludes conversion. The transpose uses a square dimension divisible by the tile width and excludes allocation and transfers. General solvers need validation of boundaries, aliases, loader coverage, numerical error and complete timesteps. Grouping by control-flow type may improve lane utilization while worsening neighbor locality, and layout conversion may consume the saved time.</p>
+<p>A defensible tuning sequence starts with a stable logical result and ownership map. Derive the lane-to-address pattern for the actual compiled memory operations you intend to reason about. Identify whether control-flow tails, global-memory requests, shared-memory conflicts or launch overhead plausibly dominate. Change one representation or assignment, preserve a full reference check, and measure a boundary that matches the application decision. Inspect compiler output and profiler counters when attributing a mechanism requires them. Keep the chosen layout across repeated useful work when amortization justifies it; otherwise the faster isolated kernel may still produce the slower application.</p>
+
+<h2 id="exercises">Six exercises with worked solutions</h2>
+<h3>1. Derive the benefit available from grouping a rare expensive path</h3>
+<p>Eight warps each contain four A particles with path cost 40 issue slots and 28 B particles with path cost four slots. Under the serialized-path model, compute useful lane utilization and total issued slots before grouping. Reassign the same 256 particles into uniform warps and compute the ideal issue-work ratio. State a missing cost.</p>
+<details><summary>Solution</summary>
+<p>Each mixed warp issues \(40+4=44\) slots and completes \(4\cdot40+28\cdot4=272\) lane-instructions. Its utilization is \(272/(32\cdot44)=17/88\approx0.1932\). Eight warps issue 352 slots and perform 2,176 useful lane-instructions. Across the whole set there are 32 A particles and 224 B particles, allowing one full A warp and seven full B warps. Their combined issue demand is \(40+7\cdot4=68\) slots. All lanes are useful in these slots, so \(32\cdot68=2176\), matching the unchanged work.</p>
+<p>The ideal issue-work ratio is \(352/68=88/17\approx5.18\). It can exceed two because each mixed warp previously paid for a rare long path. This is not a wall-clock prediction. Gathering particle data, building a permutation, scattering results, maintaining neighbor relations and having enough resident work are omitted. A comparison that changes the number of A particles would not test grouping of the same task.</p>
+</details>
+<h3>2. Compute requested sectors and diagnose an alignment shortcut</h3>
+<p>A full warp reads one 4-byte value per lane at addresses \(12+8\ell\), for lanes 0 through 31, with 32-byte sectors. Find the requested sectors and unique-byte useful fraction. Is every word naturally aligned? Would multiplying the aligned stride-two result by a generic misalignment penalty give an exact answer?</p>
+<details><summary>Solution</summary>
+<p>The first word occupies bytes 12–15, in sector zero. The last starts at \(12+8\cdot31=260\) and occupies 260–263, in sector eight. The step is eight bytes, and within this span every sector contains at least one requested word; hence the sector set is 0 through 8 and has nine members. Distinct words total 128 bytes, so the useful fraction is \(128/(9\cdot32)=4/9\approx0.4444\). Each starting address is divisible by four, so each word is naturally aligned.</p>
+<p>The base is offset relative to a sector boundary, while the stride leaves gaps. The two effects interact through the actual sector set. The aligned stride-two case has eight sectors; shifting by 12 bytes adds a ninth here. A generic multiplicative penalty has no exact status. For another offset it can add no sector or a different edge footprint. Constructing the set from byte intervals handles both effects without double counting.</p>
+</details>
+<h3>3. Give a counterexample to arithmetic evaluation of both branches</h3>
+<p>A kernel uses <code>if (i &lt; n) out[i] = in[i]; else out[i] = 0;</code>, with an output allocation large enough for every launched thread but an input allocation of only n entries. Someone proposes <code>out[i] = (i &lt; n) * in[i];</code>. Explain why equal algebraic values on valid indices do not prove equivalence, and give a valid alternative.</p>
+<details><summary>Solution</summary>
+<p>For \(i\ge n\), the proposed expression still evaluates <code>in[i]</code>, which is outside the input allocation. Multiplying the resulting value by zero does not make the access valid. The original conditional skips that access in the else case. For floating-point input, even an in-bounds unused NaN could make arithmetic masking produce NaN instead of zero. The transformation changes evaluation effects as well as values.</p>
+<p>Keep the original conditional, or use <code>out[i] = (i &lt; n) ? in[i] : 0;</code> with the same valid output bounds. The source conditional operator evaluates only its selected operand. The compiler must preserve those semantics, whether it emits branches or safely predicated accesses. No source-level rewrite is required merely to hide the comparison. The output extent assumption matters: if output also has only n entries, every out-of-range thread should skip the output write too.</p>
+</details>
+<h3>4. Diagnose the transposed-view locality argument</h3>
+<p>A tightly packed row-major matrix B has 64 rows and 96 columns of 4-byte values. Give its two byte strides and those of a transpose view. A thread walks one original column while its neighboring lanes handle neighboring original columns. Explain the difference between that thread's temporal stride and one warp instruction's spatial stride. Does a transpose view physically pack columns?</p>
+<details><summary>Solution</summary>
+<p>B's row and column strides are \((96\cdot4,4)=(384,4)\) bytes. The transpose view has shape 96 by 64 and strides \((4,384)\). Its entry \((c,k)\) still refers to original entry \((k,c)\) at offset \(384k+4c\). The view exchanges index interpretation; it does not rearrange bytes. A physically packed row-major transpose would instead have strides \((256,4)\) for its 96 by 64 shape and would require a copy.</p>
+<p>One thread with fixed original column c advances k and therefore steps 384 bytes. At fixed k, adjacent lanes with adjacent c values read addresses differing by four bytes. A warp beginning at a suitable aligned column can therefore request four sectors even though each thread's sequence is strided over time. The single-thread traversal cannot determine warp coalescing alone. Packing may help another access mapping or reuse pattern, but its cost and the new mapping must be evaluated explicitly.</p>
+</details>
+<h3>5. Make a layout decision with conversion and mixed kernels</h3>
+<p>Suppose converting complete particle records into SoA and back costs 2.4 milliseconds in total. Over an interval, a field-selective kernel runs R times and saves 0.30 milliseconds per run in SoA. A complete-record kernel runs twice and costs an extra 0.15 milliseconds per run in SoA. Find the smallest integer R that makes conversion beneficial under this additive model. State what must remain valid after grouping by particle type.</p>
+<details><summary>Solution</summary>
+<p>Relative to keeping AoS, the SoA plan changes time by \(2.4+2(0.15)-0.30R=2.7-0.30R\) milliseconds. A strict improvement requires \(R\gt9\), so the smallest integer is ten. At nine runs the two plans tie in this model. At ten runs the modeled saving is only 0.30 milliseconds, so measurement uncertainty and unmodeled overhead could reverse the decision. These are supplied hypothetical costs, not measurements from the chapter's event intervals.</p>
+<p>Grouping must preserve a bijection between logical labels and execution positions, move all fields belonging to the same particle consistently, and restore the required output order or expose the permutation to consumers. Neighbor lists and external particle identifiers must use the same interpretation. A fast coordinate update that pairs one particle's mass with another particle's velocity is scientifically wrong even if its coordinate checksum happens to match.</p>
+</details>
+<h3>6. Design a bank-conflict measurement with a complete correctness check</h3>
+<p>For a shared tile of 32-bit words, compare column accesses with row pitches 32, 33 and 34. Derive bank multiplicities. Then specify how you would extend the transpose experiment to test pitch 34 and what observations would support a performance explanation without confusing it with a hardware transaction count.</p>
+<details><summary>Solution</summary>
+<p>Equation (22.5) gives a bank sequence \((\ell p_s+c)\bmod32\). The greatest common divisors are 32, one and two. Pitch 32 uses one bank with 32 distinct words; pitch 33 uses 32 banks with one word each; pitch 34 uses sixteen banks with two distinct words each. Shared storage for 32 rows is respectively 4,096, 4,224 and 4,352 bytes. The logical tile remains 32 by 32 in every case. These scalar address-model results do not themselves give elapsed cycles.</p>
+<p>Add a <code>transpose&lt;34&gt;</code> variant with the same global mapping, block dimensions, input and output extents. Keep separate input and output buffers. Check every returned element against the host transpose after each measurement batch, including entries outside any sampled subset. Warm each variant, alternate measurement order or randomize it reproducibly, collect multiple process captures, retain build flags and bound the run. Compare timing distributions and verify that shared allocation has not changed resident-block limits in a way that dominates the result.</p>
+<p>A stable ordering of measured rates consistent with the predicted mappings would support, but not isolate, the bank explanation. Compiler inspection can establish the instruction widths and indexing actually emitted. Suitable profiler counters, collected with their documented definitions and units, can test the traffic mechanism directly. The chapter has not executed the proposed pitch-34 extension, so no output or speed claim for it is supplied.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources and what they support</h2>
+<ol>
+<li><a href="https://www.youtube.com/watch?v=to-o44bgGcg">NPTEL W8L5, thread divergence and memory access</a>, 42:08: parity and half-warp examples, arithmetic rewrites, loop counts, stride-two access and assumed 8/16-byte cache-line illustrations. Original slides establish the visual examples; exact spoken wording is not independently verified.</li>
+<li><a href="https://www.youtube.com/watch?v=o0KYMgx2pic">NPTEL W8L6, memory layouts</a>, 34:18: row/column maps, small matrix-product locality example, transpose and introductory Python GPU interfaces.</li>
+<li><a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-programming-guide/index.html#simt-architecture">NVIDIA CUDA C++ Programming Guide 13.0, §7.1</a>: warp execution, masking and independent thread scheduling. This supplies an architecture-qualified basis for the original issue-work model.</li>
+<li><a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-best-practices-guide/index.html">NVIDIA CUDA C++ Best Practices Guide 13.0</a>, §§10.2.1, 10.2.3.1–3 and 12.1.2: requested 32-byte sectors, bank mapping, broadcast exception, padding and predication. Timing and address-model results in this chapter are original calculations and runs.</li>
+<li><a href="https://docs.nvidia.com/cuda/archive/13.0.0/parallel-thread-execution/index.html#predicated-execution">NVIDIA PTX ISA 9.0, §9.3</a>: predicates, guarded instructions and conditional branches are distinct mechanisms.</li>
+<li><a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.strides.html">NumPy ndarray.strides</a>, attribute definition and notes; <a href="https://numpy.org/doc/stable/reference/generated/numpy.array.html">numpy.array</a>, order parameter; <a href="https://numpy.org/doc/stable/reference/generated/numpy.transpose.html">numpy.transpose</a>, return and notes: byte-stride address maps, selectable order and axis-permutation views.</li>
+<li><a href="https://nvidia.github.io/numba-cuda/user/kernels.html">Numba-CUDA, Writing CUDA Kernels</a>, kernel declaration and invocation; <a href="https://nvidia.github.io/numba-cuda/reference/kernel.html#thread-indexing">CUDA Kernel API, thread indexing</a>; <a href="https://nvidia.github.io/numba-cuda/reference/memory.html">Memory Management</a>: launch syntax, scalar/tuple indexing, device allocations and explicit transfers.</li>
+<li><a href="https://numba.readthedocs.io/en/stable/reference/deprecation.html#deprecation-of-the-built-in-cuda-target">Numba, deprecation of the built-in CUDA target</a>: development moved to numba-cuda. Current package statements were checked on 2026-10-28; no local Numba runtime validation is implied.</li>
+<li><a href="https://docs.cupy.dev/en/stable/overview.html">CuPy overview</a>; <a href="https://documen.tician.de/pycuda/">PyCUDA documentation introduction</a>; <a href="https://nvidia.github.io/cuda-python/latest/">CUDA Python overview</a>: scope of the Python interfaces named in W8L6. The latest CUDA Python page is a development build, not a frozen release contract.</li>
+</ol>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-21-gpu-memory-types-and-memory-management.html">Previous available chapter</a><a href="index.html">Lecture index</a><a rel="next" href="chapter-23-cuda-compilation-and-execution.html">Next available chapter</a></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

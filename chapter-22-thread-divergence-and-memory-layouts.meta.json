@@ -1,0 +1,455 @@
+{
+  "chapter": 22,
+  "title": "Thread divergence and memory layouts",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "to-o44bgGcg",
+      "label": "W8L5",
+      "playlist_index": 48,
+      "duration_seconds": 2528
+    },
+    {
+      "video_id": "o0KYMgx2pic",
+      "label": "W8L6",
+      "playlist_index": 49,
+      "duration_seconds": 2058
+    }
+  ],
+  "frames_viewed": {
+    "to-o44bgGcg": [
+      "f0003",
+      "f0012",
+      "f0019",
+      "f0027",
+      "f0034",
+      "f0053",
+      "f0062",
+      "f0080"
+    ],
+    "o0KYMgx2pic": [
+      "f0003",
+      "f0009",
+      "f0016",
+      "f0023",
+      "f0030",
+      "f0036",
+      "f0049",
+      "f0056",
+      "f0058"
+    ]
+  },
+  "source_uncertainties": [
+    "The 8-byte and 16-byte cache-line illustrations are hypothetical lecture models, rather than device cache-line specifications. No hardware transaction, cache, branch-efficiency or bank-conflict counters were collected.",
+    "The serialized-path and masked-loop equations are original simplified issue-work models qualified by compiler lowering and independent thread scheduling; they do not predict exact cycles.",
+    "Numba fragment is explicitly non-runnable explanatory API translation. No Numba package installation or device execution was performed. Version-string imports would not verify device execution.",
+    "The current CUDA Python latest page explicitly identifies a development-branch build; its description is not an installed-version guarantee.",
+    "Particle AoS/SoA event intervals exclude conversion; recurrence grouping excludes input permutation/gather cost; square transpose excludes general tail tiles.",
+    "Tiny transpose timings vary widely and overlap; measured samples do not establish a universal padding speedup or direct conflict penalty.",
+    "Source attribution repaired after R1: original slide pixels were inspected; the machine transcripts were not treated as proof of exact speech. No audio listening or independent spoken-word verification was performed. The CPU-allocation phrase is machine-transcript wording only; original allocation slides say GPU/device memory. Loop counts and byte capacity are stated as mathematical facts without unsupported speech-error allegations."
+  ],
+  "lecture_corrections": [
+    {
+      "source": "W8L5",
+      "time_seconds": 75,
+      "frames": [
+        "f0003",
+        "f0012"
+      ],
+      "correction": "Initial parity branch doubles even entries and increments odd ones; the later multiplier 2/3 expression is a different map. Odd input 5 yields 6 versus 15."
+    },
+    {
+      "source": "W8L5",
+      "time_seconds": 555,
+      "frames": [
+        "f0019"
+      ],
+      "correction": "Comparison idx>=16 contributes 1 when true; the slide parenthesis reverses true and false. Evaluating a comparison and using ternary syntax do not themselves establish divergent control flow."
+    },
+    {
+      "source": "W8L5",
+      "time_seconds": 856,
+      "frames": [
+        "f0027"
+      ],
+      "correction": "The original slide has the strict bound k<idx. It gives 31 iterations for lane 31. This is a mathematical clarification, not an independently verified error of speech."
+    },
+    {
+      "source": "W8L5",
+      "time_seconds": 1575,
+      "frames": [
+        "f0053"
+      ],
+      "correction": "Code and pictured indices use stride 2 despite the stride 3 parenthetical. The in-place gather can overlap another thread\u2019s source reads. A generic safe transformation requires validated extents and separate buffers."
+    },
+    {
+      "source": "W8L5",
+      "time_seconds": 1845,
+      "frames": [
+        "f0062"
+      ],
+      "correction": "The original slide specifies 8-byte lines and 4-byte elements, so each line holds two elements. The assumed aligned packed 3x3 matrix has six row-line incidences but five distinct lines. A separate aligned vector occupies two more lines, giving seven unique cold lines. These counts are not elapsed cycles. No incorrect spoken byte count is independently alleged."
+    },
+    {
+      "source": "W8L6",
+      "time_seconds": 250,
+      "frames": [
+        "f0009"
+      ],
+      "correction": "Separate allocations are not guaranteed adjacent. Concatenation in the diagrams is an explicit additional assumption."
+    },
+    {
+      "source": "W8L6",
+      "time_seconds": 90,
+      "frames": [
+        "f0003"
+      ],
+      "correction": "Specify actual array type, allocation and strides instead of applying universal language or DataFrame layout claims. NumPy supports noncontiguous views."
+    },
+    {
+      "source": "W8L6",
+      "time_seconds": 1725,
+      "frames": [
+        "f0056",
+        "f0058"
+      ],
+      "correction": "The original slide explicitly describes uninitialized device memory and allocation on the GPU, consistent with the API. Only the machine transcript contains the CPU wording. No audio was independently checked and no spoken-error claim is made. The remaining API clarifications concern grid/gridsize tuples in 2D/3D and the distinction between host waiting and races inside a kernel."
+    }
+  ],
+  "sections": [
+    {
+      "section": "model",
+      "video_id": null,
+      "start": 0,
+      "end": 0,
+      "lecture_material": "Chapter objects motivated by both recordings.",
+      "research_extension": "Address-set, mask and layout distinction.",
+      "teaching_construction": "Normalized eight-field particle and idempotent coordinate map.",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "divergence",
+      "video_id": "to-o44bgGcg",
+      "start": 6,
+      "end": 342,
+      "lecture_material": "Within-warp even/odd path serialization.",
+      "research_extension": "CUDA 13.0 \u00a77.1 architecture qualification.",
+      "teaching_construction": "Lane-slot utilization equation and grouping counterfactual.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "rewrites",
+      "video_id": "to-o44bgGcg",
+      "start": 342,
+      "end": 722,
+      "lecture_material": "Parity multiplier and half-warp rewrites; ternary discussion.",
+      "research_extension": "PTX \u00a79.3 comparison, predication and branch distinction.",
+      "teaching_construction": "Semantic counterexamples and bounded valid arithmetic selection.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "loops",
+      "video_id": "to-o44bgGcg",
+      "start": 722,
+      "end": 1063,
+      "lecture_material": "Variable trip-count loop and restructuring.",
+      "research_extension": "Compiler and scheduling qualification.",
+      "teaching_construction": "Masked-loop utilization and checked logical-particle permutation experiment.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "sectors",
+      "video_id": "to-o44bgGcg",
+      "start": 1063,
+      "end": 1757,
+      "lecture_material": "Warehouse analogy, stride two and misaligned access.",
+      "research_extension": "Best Practices Guide \u00a710.2.1 requested 32-byte sectors.",
+      "teaching_construction": "Byte-interval set union, useful fraction and permuted-access proof.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "cache-accounting",
+      "video_id": "to-o44bgGcg",
+      "start": 1757,
+      "end": 2528,
+      "lecture_material": "3x3 matrix-vector product and assumed 8/16-byte lines.",
+      "research_extension": "Separate request, cache-miss and DRAM levels.",
+      "teaching_construction": "Unique-line versus row-incidence accounting, Python checks and Jacobi connection.",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "layouts",
+      "video_id": "o0KYMgx2pic",
+      "start": 6,
+      "end": 528,
+      "lecture_material": "Language orders, 1D sequences and matrix maps.",
+      "research_extension": "NumPy strides, order and view documentation.",
+      "teaching_construction": "Leading-dimension injectivity proof and allocation-adjacency qualification.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "particles",
+      "video_id": "o0KYMgx2pic",
+      "start": 528,
+      "end": 702,
+      "lecture_material": "Memory-order practice motivates the access map.",
+      "research_extension": "Requested-sector assumptions from CUDA.",
+      "teaching_construction": "Original AoS/SoA full-payload experiment and conversion-cost model.",
+      "evidence_class": "empirical result"
+    },
+    {
+      "section": "transpose",
+      "video_id": "o0KYMgx2pic",
+      "start": 702,
+      "end": 1164,
+      "lecture_material": "Matrix product and packed-transpose locality idea.",
+      "research_extension": "NumPy view versus physical packing.",
+      "teaching_construction": "Composed warp mapping and transpose ownership/barrier proof.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "banks",
+      "video_id": null,
+      "start": 0,
+      "end": 0,
+      "lecture_material": "Research extension to lecture layout discussion.",
+      "research_extension": "Shared banks and broadcast from the Best Practices Guide.",
+      "teaching_construction": "Greatest-common-divisor proof and checked padded-transpose CUDA comparison.",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "python",
+      "video_id": "o0KYMgx2pic",
+      "start": 1164,
+      "end": 2058,
+      "lecture_material": "Numba decorators, launch, indexing, memory and synchronization.",
+      "research_extension": "Numba-CUDA documentation and deprecation; scope of Python alternatives.",
+      "teaching_construction": "Explicitly unexecuted particle API fragment and semantic corrections.",
+      "evidence_class": "definition"
+    }
+  ],
+  "references": [
+    {
+      "title": "CUDA C++ Programming Guide 13.0",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-programming-guide/index.html#simt-architecture",
+      "supports": "Warp issue, masks, warp membership and independent thread scheduling; architecture qualification of original issue-work model.",
+      "page_checked": "\u00a77.1 SIMT Architecture; full relevant section opened"
+    },
+    {
+      "title": "CUDA C++ Best Practices Guide 13.0",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-best-practices-guide/index.html",
+      "supports": "32-byte requested-sector rule for compute capability 6.0 and later, control-flow predication, shared-memory bank mapping, broadcasts and padded column access.",
+      "page_checked": "\u00a710.2.1; \u00a710.2.3.1\u20133; \u00a712.1.2 opened"
+    },
+    {
+      "title": "PTX ISA9.0",
+      "url": "https://docs.nvidia.com/cuda/archive/13.0.0/parallel-thread-execution/index.html#predicated-execution",
+      "supports": "Comparison predicates, guarded instructions and conditional branches are distinct operations.",
+      "page_checked": "\u00a79.3 Predicated Execution opened"
+    },
+    {
+      "title": "NumPy ndarray.strides",
+      "url": "https://numpy.org/doc/stable/reference/generated/numpy.ndarray.strides.html",
+      "supports": "General byte-stride dot-product address map.",
+      "page_checked": "Attribute definition, Notes and examples opened"
+    },
+    {
+      "title": "NumPy array constructor",
+      "url": "https://numpy.org/doc/stable/reference/generated/numpy.array.html",
+      "supports": "Explicit order argument; language name alone does not fix every array layout.",
+      "page_checked": "order parameter opened"
+    },
+    {
+      "title": "NumPy transpose",
+      "url": "https://numpy.org/doc/stable/reference/generated/numpy.transpose.html",
+      "supports": "Axes permutation and view behavior; a transpose does not imply physically packed changed bytes.",
+      "page_checked": "Definition, Returns and Notes opened"
+    },
+    {
+      "title": "Numba-CUDA Writing CUDA Kernels",
+      "url": "https://nvidia.github.io/numba-cuda/user/kernels.html",
+      "supports": "Restricted Python subset, kernel output through arguments, launch syntax and asynchronous execution.",
+      "page_checked": "Kernel declaration and invocation opened"
+    },
+    {
+      "title": "Numba-CUDA CUDA Kernel API",
+      "url": "https://nvidia.github.io/numba-cuda/reference/kernel.html#thread-indexing",
+      "supports": "threadIdx/blockIdx/blockDim/gridDim; cuda.grid and cuda.gridsize return scalar for 1D and tuples for 2D/3D.",
+      "page_checked": "Thread Indexing section opened; synchronization section also inspected"
+    },
+    {
+      "title": "Numba-CUDA Memory Management",
+      "url": "https://nvidia.github.io/numba-cuda/reference/memory.html",
+      "supports": "Device allocation, device_array_like, to_device and copy_to_host semantics.",
+      "page_checked": "device_array/device_array_like/to_device/copy_to_host entries opened"
+    },
+    {
+      "title": "Numba deprecation of built-in CUDA target",
+      "url": "https://numba.readthedocs.io/en/stable/reference/deprecation.html#deprecation-of-the-built-in-cuda-target",
+      "supports": "Development moved to separate numba-cuda package while familiar namespace can remain.",
+      "page_checked": "Deprecation of the built-in CUDA target section opened, 2026-10-28"
+    },
+    {
+      "title": "CuPy overview",
+      "url": "https://docs.cupy.dev/en/stable/overview.html",
+      "supports": "NumPy/SciPy-style GPU arrays and operations.",
+      "page_checked": "Overview opened, 2026-10-28"
+    },
+    {
+      "title": "PyCUDA documentation",
+      "url": "https://documen.tician.de/pycuda/",
+      "supports": "Python access to CUDA interfaces and kernel compilation.",
+      "page_checked": "Documentation introduction opened, 2026-10-28"
+    },
+    {
+      "title": "CUDA Python overview",
+      "url": "https://nvidia.github.io/cuda-python/latest/",
+      "supports": "Multiple Python components including low-level bindings; latest page labels itself a development-branch build.",
+      "page_checked": "Overview and development-build warning opened, 2026-10-28"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "N",
+      "first_section": "model",
+      "definition": "Number of logical particles."
+    },
+    {
+      "symbol": "P_i",
+      "first_section": "model",
+      "definition": "Eight-field particle record with normalized position and velocity fields."
+    },
+    {
+      "symbol": "Delta t",
+      "first_section": "model",
+      "definition": "Normalized update interval, one quarter."
+    },
+    {
+      "symbol": "ell",
+      "first_section": "model",
+      "definition": "Warp lane number, 0 through 31."
+    },
+    {
+      "symbol": "pi",
+      "first_section": "model",
+      "definition": "Permutation from execution position to logical particle label."
+    },
+    {
+      "symbol": "c_A,c_B,n_A,n_B",
+      "first_section": "divergence",
+      "definition": "Path issue costs and lane participant counts."
+    },
+    {
+      "symbol": "U_lane",
+      "first_section": "divergence",
+      "definition": "Useful requested lane-instructions divided by issued lane slots."
+    },
+    {
+      "symbol": "L_ell,L_max,U_loop",
+      "first_section": "loops",
+      "definition": "Per-lane iteration count, maximum count and modeled loop utilization."
+    },
+    {
+      "symbol": "A,a_ell,w,s,S,n_s",
+      "first_section": "sectors",
+      "definition": "Active lanes, byte address, per-lane width, sector width, requested sector set and cardinality."
+    },
+    {
+      "symbol": "eta",
+      "first_section": "sectors",
+      "definition": "Unique requested bytes divided by requested sector bytes."
+    },
+    {
+      "symbol": "M,K,r,c,p_r,p_c",
+      "first_section": "layouts",
+      "definition": "Matrix dimensions, indices and row/column pitches in elements."
+    },
+    {
+      "symbol": "varphi",
+      "first_section": "particles",
+      "definition": "Particle field index, 0 through 7."
+    },
+    {
+      "symbol": "C,Delta T,R",
+      "first_section": "particles",
+      "definition": "Conversion time, per-kernel saving and number of reuses; C is a local cost symbol."
+    },
+    {
+      "symbol": "J,k",
+      "first_section": "transpose",
+      "definition": "Output matrix column count and reduction index."
+    },
+    {
+      "symbol": "p_s,b_ell,g",
+      "first_section": "banks",
+      "definition": "Shared row pitch in 32-bit words, bank index and greatest common divisor with 32."
+    }
+  ],
+  "exercises": 6,
+  "code_check": {
+    "command": "python3 -B tools/check_chapter_code.py --file work/ch22-sol/chapter-22-thread-divergence-and-memory-layouts.html --report work/ch22-sol/code-validation.json",
+    "listings": 4,
+    "all_passed": true,
+    "status": "Fresh final selective execution passed",
+    "fingerprint_sha256": "0849fd5c75b58e521c19a0702bfa7a3d83cd84f968cb548d0c151acc11e8146d",
+    "checked_at_utc": "2026-10-28T07:40:38.108154+00:00",
+    "report": "work/ch22-sol/code-validation.json",
+    "retained_after_R1_prose_repairs": true,
+    "execution_rerun_for_R1_repairs": false
+  },
+  "measurement_provenance": {
+    "date_utc": "2026-10-28",
+    "machine": "RTX 3050 Laptop GPU, 4 GB, sm_86; CUDA 13.3; WSL 2 Ubuntu 24.04",
+    "manual_captures": "work/ch22-sol/captures/capture-index.json",
+    "captures_per_cuda_listing": 3,
+    "batches_per_capture_per_variant": 3,
+    "displayed_output_capture": 3,
+    "largest_combined_device_allocation_bytes": 67108864,
+    "timing_boundary": "CUDA events around repeated launches; allocations, initial transfers and host validation excluded. Submission gaps may contribute.",
+    "hardware_counters_collected": false
+  },
+  "author_validation": {
+    "prose_words": 8122,
+    "content_sections": 12,
+    "total_h2": 15,
+    "exercises": 6,
+    "listings": 4,
+    "static_issues": [],
+    "source_sha256_matches_captured_code": true,
+    "full_program_contract_unchanged_after_R1_repairs": true,
+    "independent_round_2_pending": true,
+    "review_round_1_actual_counts": {
+      "blocking": 1,
+      "major": 2,
+      "minor": 0
+    }
+  },
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT WITH FIXES",
+      "blocking": 1,
+      "major": 2,
+      "minor": 0,
+      "report": "work/reviews/ch22-r1.md",
+      "reviewed_html_sha256": "2192faea1093cf9e288db178e29118cf41999e3b97a500dc11e22ada826b5a65",
+      "reviewed_meta_sha256": "8e1c4453494281335d7ad769f5171c4c59bb4ad2f4eef408af05fa8186bda8f8",
+      "author_repairs": [
+        "B1: correct the device-array slide attribution; original frames specify GPU/device memory.",
+        "M1: define MiB, compute capability, predicate/predicated instruction, NaN, bank and dyadic fraction before substantive use; replace occupancy terminology with direct simultaneous-block wording.",
+        "M2: remove unverified spoken-error claims for strict loop count and cache-line byte capacity; qualify source reconciliation."
+      ],
+      "post_repair_status": "pending independent round 2; not accepted"
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch22-r2.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    }
+  ]
+}

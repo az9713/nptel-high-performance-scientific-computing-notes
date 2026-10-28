@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="book-content-sha256" content="879565e5c294c8cfde9769255ed90a7a33d05b0832d45813fa1e18d517a72f49"><title>OpenACC II: loop optimization, asynchrony, and multiple devices · High Performance Scientific Computing</title>
+<link rel="stylesheet" href="assets/book.css"><script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']],processEscapes:true},svg:{fontCache:'local'},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script defer src="assets/mathjax-tex-svg.js"></script><script defer src="assets/book.js"></script></head>
+<body><a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="index.html">High Performance Scientific Computing · January 2025</a><nav class="course-nav" aria-label="Book"><a href="index.html">Lectures</a><a href="source-map.html">Source map</a><a href="references.html">References</a><a href="code-lab.html">Code lab</a></nav></header>
+<div class="layout"><aside class="toc" id="chapter-toc" aria-label="On this page"><h2>On this page</h2></aside><main id="main">
+<div class="reading-tools" aria-label="Reading controls"><button id="theme-toggle" aria-pressed="false">Light theme</button><button id="text-toggle" aria-pressed="false">Larger text</button><button id="solutions-toggle" aria-pressed="false">Expand solutions</button><button id="print-page">Print with solutions</button></div>
+<article id="chapter-content"><!-- BOOK-CONTENT-START --><h1>OpenACC II: loop optimization, asynchrony, and multiple devices</h1>
+<p class="lead">A Jacobi sweep on a grid with 512 interior points per side updates 262,144 temperatures. Twenty sweeps perform 5,242,880 updates. The same mathematical work can be assigned by rows, flattened into one loop, or partitioned into tiles. A second choice is whether the host waits after each launch or enqueues independent work ahead of time. A third is which device owns each allocation. These choices affect different things: iteration ownership, completion order, and memory location. Confusing them can produce a fast wrong answer. The running case keeps two temperature arrays resident on one graphics processing unit (GPU), checks every output against a serial calculation, and treats timing as an observation about a specified execution.</p>
+<p class="source-note">Grounded in <a href="https://www.youtube.com/watch?v=dw3t1H34E-A">W9L6, OpenACC loop optimizations</a>, <a href="https://www.youtube.com/watch?v=sybbWNJunRA">W9L7, asynchronous behavior</a>, and <a href="https://www.youtube.com/watch?v=yIPHreoMz1s">W9L8, multiple-device programming</a>. <strong>Lecture material:</strong> loop correctness clauses, private variables, collapse and tiling, gang/worker/vector execution, device-specific tuning, asynchronous queues and waits, device routines, Mandelbrot image partitioning, and OpenACC-only, OpenMP, and MPI device ownership. <strong>Research extensions:</strong> the OpenACC 3.3 specification supplies the reference semantics; the specification catalogue and 3.4 document identify the newer published edition; the OpenACC consortium's loop and advanced-feature guides supply engineering interpretations; the GNU Compiler Collection (GCC) 13.3 nvptx documentation supplies its particular mapping; NVIDIA's compiler and CUDA guides supply vendor-specific compiler targeting and transfer boundaries. <strong>Original teaching constructions:</strong> the ownership proof, non-square tile arithmetic, resident Jacobi comparison, task-graph and pipeline derivations, bounded image and device-partition programs, and all six worked exercises. The examples are independently written. They are not reproductions of the lecture programs.</p>
+
+<h2 id="model">The objects of the chapter: iterations, storage, and completion</h2>
+<p>Let \(N\) denote the number of interior points along either side of a square grid. Include one fixed boundary layer on all sides, giving two arrays of \((N+2)^2\) doubles. A double occupies eight bytes in the checked implementation and uses binary64, also called FP64, floating-point arithmetic. Store the arrays in row-major order: the column index changes fastest. Set \(s=N+2\), and define \(\operatorname{IDX}(i,j)=is+j\). The interior index set is \(\mathcal J=\{(i,j):1\leq i,j\leq N\}\). The old iterate is \(u\), the new iterate is \(\mathrm{unew}\), and the two allocations do not overlap.</p>
+<p>For the steady heat equation without a source, a Jacobi update writes the average of four neighboring old values. The top edge, at row zero, has value one except at the corners; the other edges and the initial interior have value zero. Both arrays carry the same fixed boundary values. The iteration therefore implements</p>
+\[
+\mathrm{unew}_{i,j}=\tfrac14\left(u_{i-1,j}+u_{i+1,j}+u_{i,j-1}+u_{i,j+1}\right),\qquad (i,j)\in\mathcal J. \tag{25.1}
+\]
+<p>A sweep is the entire transformation in (25.1), not one cell update. Only after the sweep completes may the next sweep consume its results. Swapping the host pointer variables changes which allocation is called old; it does not move an array and does not finish outstanding device work. This distinction becomes central when synchronous launches are replaced with queues. The numerical dependency remains even when a host pointer assignment takes almost no time.</p>
+<p>For an iteration \(a\), define its read set \(R_a\) and write set \(Z_a\) as the memory locations it reads and writes during that iteration. Two ordinary iterations can run without ordering when neither writes a location accessed by the other. In symbols, require \(Z_a\cap Z_b=\varnothing\), \(Z_a\cap R_b=\varnothing\), and \(R_a\cap Z_b=\varnothing\) for distinct \(a,b\). Shared reads are harmless. Reductions and atomic updates require their own semantics and are exceptions to this simple disjointness test.</p>
+<p>Within one Jacobi sweep, every iteration writes one distinct location of unew and reads only u. The disjointness conditions follow from the two-array assumption. Across successive sweeps, they do not hold: the next sweep reads the allocation just written. Parallelizing all cells of one sweep is therefore legitimate, while executing two successive sweeps concurrently without an ordering edge is not. An in-place update also changes the argument, because one cell can then read a neighbor while that neighbor is being overwritten.</p>
+<p>The execution model has a host thread running on a central processing unit (CPU) that submits work, one or more devices with separate allocations, and activity queues attached to devices. A task is a computation, transfer, or ordering operation. A dependency edge means that its destination must not use the source's result until that source has completed. The graph describes legal execution orders; it does not promise that two ready tasks physically overlap. The compiler, runtime, and hardware choose among legal schedules.</p>
+<p>Keep three checks separate throughout. Mathematical validity asks whether the transformation preserves the intended discrete algorithm. Implementation correctness asks whether the actual program respects its memory and synchronization contracts. Performance asks how long that correct program takes in a particular environment. A checksum alone cannot answer all three: a race can occasionally produce the right checksum, and a faster twenty-sweep computation does not imply a faster solve to a prescribed tolerance.</p>
+
+<h2 id="ownership">Prove ownership before choosing a loop clause <a class="timestamp" href="https://www.youtube.com/watch?v=dw3t1H34E-A&amp;t=104s">W9L6 1:44</a></h2>
+<p>The first tuning decision is whether a loop is safe to partition. The <code>auto</code>, <code>independent</code>, and <code>seq</code> clauses express different responsibilities. <a href="https://www.openacc.org/sites/default/files/inline-images/Specification/OpenACC-3.3-final.pdf">OpenACC 3.3, §2.9.5–2.9.7, p. 61</a>, distinguishes compiler analysis, the programmer's independence assertion, and sequential execution. Under kernels, auto is the default for a loop construct without independent or seq. These are correctness contracts, not interchangeable performance hints.</p>
+<p>Consider matrix multiplication, which introduces the issue before the Jacobi tuning. Let A, B, and C be non-overlapping \(N\)-by-\(N\) matrices. The desired output is \(C_{ij}=\sum_{k=0}^{N-1}A_{ik}B_{kj}\). Different pairs \((i,j)\) write different outputs and share only reads of A and B. But different k iterations contributing to the same pair all update one sum. The outer two loops and the innermost accumulation therefore have different dependency structures.</p>
+<p>A reliable construction gives one logical owner to each output pair, initializes a scalar sum inside that owner's iteration, accumulates k sequentially, and writes C once. This is not a claim that a dot product cannot be parallelized. A reduction can split the k work and combine partial sums, provided it is explicitly expressed at the appropriate level. That alternative changes the addition order and can change floating-point rounding. The sequential inner loop supplies a transparent reference ownership scheme.</p>
+<p>The reason initialization belongs inside the owning iteration is semantic. If sum is shared by several concurrent output owners, each owner can overwrite another's partial result. If sum is private but uninitialized, every owner has its own undefined starting value. Private storage solves an ownership problem; initialization solves a value problem. Neither substitutes for the other. A declaration such as <code>double sum=0</code> inside the output loop makes both decisions visible to a reader.</p>
+<p>Private also has an execution level. A temporary private to a gang can still be shared among that gang's workers or vector lanes. The OpenACC 3.3 loop-private rules in §2.9.10 describe this distinction. One cannot mechanically translate every occurrence of private as “one variable per CUDA thread.” CUDA is NVIDIA's accelerator programming platform; an OpenACC implementation may map its abstract levels differently. Place a temporary at the level that owns the value, then inspect the compiler's realization if resources or races remain unclear.</p>
+<p>The related <code>firstprivate</code> clause gives each private instance an initial value from the corresponding host-side value. For example, each independent owner can start with the same supplied threshold without sharing a writable threshold variable. It differs from <code>private</code>, which supplies storage without copying that initial value. Neither clause copies a final private result back as an automatic reduction. A private pointer value also does not, by itself, allocate or copy the array it points to; pointed-to storage needs an appropriate data mapping.</p>
+<p>A useful counterexample is a prefix recurrence, \(x_i=x_{i-1}+a_i\). Even with a private loop index, iteration i reads an output from iteration i−1. Adding independent does not manufacture disjoint read and write sets. A compiler may accept that assertion and produce an invalid result, or diagnose a limitation, but acceptance is not a proof of independence. A parallel prefix algorithm must reorganize the dependency graph; it is a different construction from putting a directive on the original recurrence.</p>
+<p>The following complete program tests output ownership for a 17-by-17 matrix product. Inputs are small nonnegative integers represented exactly as doubles. The largest possible dot product is at most \(17\cdot4\cdot6=408\), so all products and partial sums fit exactly in binary64. Exact elementwise comparison is justified for this test, rather than chosen because a tolerance happened to pass. Its effects are allocation-free local array computations and one printed line; an accelerator witness returns failure if the compute region did not execute on an NVIDIA device.</p>
+<pre><code class="language-c" data-file="acc_loop_ownership.c" data-build="gcc -fopenacc -foffload=nvptx-none -foffload-options=nvptx-none=-march=sm_80 -fcf-protection=none -O2 -ffp-contract=off acc_loop_ownership.c -lm -o acc_loop_ownership" data-run="ACC_DEVICE_TYPE=nvidia timeout 20 ./acc_loop_ownership" data-needs="gpu" data-check="exact">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;openacc.h&gt;
+int main(void) {
+  enum { N=17, M=N*N };
+  double a[M], b[M], c[M], ref[M];
+  for(int i=0;i&lt;N;i++) for(int j=0;j&lt;N;j++) {
+    a[i*N+j]=(i+j)%5; b[i*N+j]=(2*i+j)%7;
+    c[i*N+j]=ref[i*N+j]=0;
+  }
+  for(int i=0;i&lt;N;i++) for(int j=0;j&lt;N;j++)
+    for(int k=0;k&lt;N;k++) ref[i*N+j]+=a[i*N+k]*b[k*N+j];
+  int gpu=0;
+  #pragma acc serial copyout(gpu)
+  { gpu=acc_on_device(acc_device_nvidia); }
+  if(!gpu) return 2;
+  #pragma acc parallel loop collapse(2) copyin(a[0:M],b[0:M]) copyout(c[0:M])
+  for(int i=0;i&lt;N;i++) for(int j=0;j&lt;N;j++) {
+    double sum=0;
+    #pragma acc loop seq
+    for(int k=0;k&lt;N;k++) sum+=a[i*N+k]*b[k*N+j];
+    c[i*N+j]=sum;
+  }
+  int errors=0; long checksum=0;
+  for(int i=0;i&lt;M;i++) { errors+=(c[i]!=ref[i]); checksum+=(long)c[i]; }
+  printf(&quot;nvidia_execution=%d matmul_errors=%d checksum=%ld\n&quot;,gpu,errors,checksum);
+  return errors?1:0;
+}
+</code></pre>
+<pre><code class="output">nvidia_execution=1 matmul_errors=0 checksum=29287
+</code></pre>
+<p>Zero mismatches checks every matrix entry, while the checksum is an additional compact record of this particular input. The example proves neither numerical accuracy for ill-conditioned downstream calculations nor efficiency of the sequential dot product. It isolates ownership so later scheduling changes have a known starting point. For general real-valued matrices, use a justified error criterion rather than importing this exact-integer comparison.</p>
+<p>The final device-type slide in W9L6 visibly shows <code>collapse(3)</code> around the i, j, and k loops of an accumulating matrix product. As written, multiple collapsed iterations update the same <code>c[i][j]</code> without a displayed reduction or atomic operation. That snippet does not satisfy the independence contract. The corrected construction above collapses only i and j and keeps one accumulation per owner. This is a limitation of the displayed snippet, established from the frame and the read/write argument; it is not a claim about unverified spoken wording.</p>
+
+<h2 id="transform">Collapse exposes work; tiling changes its organization <a class="timestamp" href="https://www.youtube.com/watch?v=dw3t1H34E-A&amp;t=500s">W9L6 8:20</a></h2>
+<p>For a rectangular loop with rows \(0\leq i\lt n_i\) and columns \(0\leq j\lt n_j\), define a flattened index \(q=in_j+j\). Its inverse is \(i=\lfloor q/n_j\rfloor\), \(j=q\bmod n_j\). Division with remainder guarantees uniqueness, and \(0\leq q\lt n_in_j\) covers every pair. Thus collapse can expose \(n_in_j\) independent iterations to the implementation instead of exposing only the outer loop's \(n_i\) iterations. The bijection says nothing by itself about which processor executes a pair.</p>
+<p>For Jacobi's one-based interior, use \(q=(i-1)N+(j-1)\). With \(N=4\), q runs from zero through fifteen and the pair sequence begins (1,1), (1,2), (1,3), (1,4), (2,1). This is a conceptual enumeration, not a guarantee that runtime execution follows that order. The purpose of proving the bijection is to check that no interior cell is omitted or assigned twice. Boundary cells remain outside the iteration domain.</p>
+<p>Collapse is attractive when the outer trip count is small relative to the available parallel resources. A grid with four rows and 1,024 columns has only four outer-loop iterations but 4,096 cell updates. Flattening makes it possible to partition the entire domain more finely. It does not create new mathematical work. Nor does it automatically improve locality: the original row-major inner traversal was already contiguous, and a compiler's actual distribution may preserve or alter how neighboring logical iterations are grouped.</p>
+<p>The <a href="https://openacc-best-practices-guide.readthedocs.io/en/latest/06-Loops.html">consortium loop-optimization guide</a> treats collapse as a way to expose parallelism when individual loop dimensions are insufficient. For the running Jacobi case, the practical question is whether flattened scheduling improves use of the machine enough to offset its indexing and mapping costs. There is no need to infer an answer from the word collapse. Compare complete correct variants and retain the observed scope.</p>
+<p>Tiling decomposes each index into a tile coordinate and an element coordinate. For row tile size \(t_i\) and column tile size \(t_j\), write \(i=b_it_i+e_i\), \(j=b_jt_j+e_j\), with \(0\leq e_i\lt t_i\) and \(0\leq e_j\lt t_j\). Edge tiles clip the index range to the original domain. Reordering tile loops outside element loops changes which neighboring updates are considered together. This may help reuse, but a tile directive alone is not a promise to stage values in a GPU's shared memory.</p>
+<p>The argument order matters for non-square tiles. OpenACC's <code>tile</code> size list starts with the innermost associated loop. With i outside j, <code>tile(32,4)</code> means up to 32 j values and four i values per tile. Reversing those numbers makes a different shape. The rule is specified in <a href="https://www.openacc.org/sites/default/files/inline-images/Specification/OpenACC-3.3-final.pdf">OpenACC 3.3, §2.9.8, pp. 61–62</a>. Square demonstration tiles conceal this possible mistake.</p>
+<p>For a 10-row by 13-column domain and tiles of four rows by five columns, there are \(\lceil10/4\rceil\lceil13/5\rceil=9\) tiles. Six tiles have full row extent, three have two rows, and the last tile column contains only three columns. Counting the clipped extents gives \((4+4+2)(5+5+3)=130\) valid elements. A rectangular launch envelope of nine full tiles would have 180 element slots, so fifty slots must be masked or otherwise avoided. Edge handling is part of correctness.</p>
+<p>A five-point Jacobi tile with both dimensions at least two and \(a\) rows and \(b\) columns needs the tile interior plus two row strips and two column strips from the old array. Ignoring corner values that the stencil does not read, there are \(ab+2a+2b\) distinct old values. For a four-by-32 tile this is 200 old values for 128 updates. Independent scalar updates request four old loads each, or 512 load operands. This arithmetic identifies potential reuse; it does not establish 512 physical memory transactions or prove that a compiler loads only 200 values.</p>
+<p>Actual traffic depends on caches, coalescing, boundary behavior, and the generated code. Coalescing means that accesses by neighboring GPU lanes can be serviced together as memory transactions. The row-major j direction gives adjacent locations, so mapping vector lanes along j is a plausible starting point. The tile calculation supplies a hypothesis to investigate, not a measured bandwidth saving. Avoid treating a logical load count as an observed number of bytes fetched from device memory.</p>
+
+<h2 id="hierarchy">Gang, worker, and vector describe a mapping hierarchy <a class="timestamp" href="https://www.youtube.com/watch?v=dw3t1H34E-A&amp;t=632s">W9L6 10:32</a></h2>
+<p>A gang is a coarse independent group, a worker is a subdivision within a gang, and vector lanes provide the finest partitioning. Their significance is which iterations and private values belong together. Gangs have no portable global barrier inside one compute region. A program that makes one gang spin until another gang writes a flag can deadlock if the producer gang is not scheduled. Express a global phase boundary with completion of one compute operation before the next dependent operation.</p>
+<p>A vector length specifies a logical width, not the total number of data items the operation can process. A vector can execute several strips of an inner loop. For an inner trip count n and logical width v, a simple utilization model gives \(\eta=n/[v\lceil n/v\rceil]\), assuming each strip costs the same and every lane has equal work. For \(n=4,v=8\), \(\eta=1/2\); for \(n=12,v=8\), it is 3/4. This is a count of useful lane slots, not a prediction that wall time is exactly doubled or multiplied by 4/3.</p>
+<p>The small vector diagrams in W9L6 are useful for that counting exercise. Real NVIDIA hardware executes a warp, a scheduling group of 32 threads. A streaming multiprocessor is the GPU hardware unit that hosts and schedules resident thread blocks and their warps. On this platform's GCC backend, choosing a logical vector width of four does not create a physical four-thread warp. The <a href="https://gcc.gnu.org/onlinedocs/gcc-13.3.0/libgomp/nvptx.html">GCC 13.3 nvptx manual, §12.2</a>, describes the implementation's mapping: vector execution uses threads, workers use warps, and the warp size is 32. Treat that as implementation evidence, not universal OpenACC terminology.</p>
+<p>For Jacobi, a natural first map partitions rows across gangs and columns across vector lanes. Adjacent column indices give adjacent doubles, and each row has the same arithmetic count. Collapse gives the compiler a larger combined domain. Tiling requests a rectangular organization. Workers may help when a small inner loop leaves too little work at the finest level, but adding them also changes resources and sharing. The logical hierarchy constrains legality; register use, residency, and the compiler's choices affect throughput.</p>
+<p>A register is a fast per-thread storage location in the GPU execution model. Register pressure is the amount demanded by the generated code. If demand exceeds the chosen allocation, values can spill to memory-backed storage. Occupancy is the fraction of a hardware unit's supported thread or warp capacity that is resident. More occupancy can help hide memory latency, but it does not change the number of arithmetic operations and does not guarantee higher useful throughput. None of these hardware quantities is measured by a source-level count of gangs.</p>
+<p>The practical stopping rule is to tune a small justified set, preserve correctness, and compare the same work with the same timing boundary. Do not specify every launch dimension merely because a directive permits it. A fixed gang count can restrict a larger device, while a larger vector length can change resource use or leave short dimensions underfilled. The <a href="https://openacc-best-practices-guide.readthedocs.io/en/latest/06-Loops.html">consortium guide's hardware-mapping discussion</a> explains why extra mapping detail can reduce performance portability.</p>
+<p>The next program compares three mappings for twenty resident Jacobi sweeps. It allocates four arrays on the host, about 8.45 MB total, and two on the device, about 4.23 MB. Each variant starts from the same boundary and interior values. The serial reference uses the same two-array recurrence. The name jacobi_step denotes one reference sweep and returns the maximum change; the fixed-sweep driver intentionally does not use that change as a convergence test. A production solve would stop at a specified tolerance or max_iter.</p>
+<p>The timer uses a monotonic wall clock, which advances independently of changes to civil time. Its interval begins after the data region has copied arrays to the device and ends before its copyout. It includes twenty synchronous kernel submissions, their completions, host loop control, and pointer swaps. It excludes allocation, initialization, the serial reference, the initial transfer, and the final transfer. There is no per-variant warmup outside the interval. Runtime startup is exercised by the witness, but first encounters with a particular kernel remain within the timing boundary.</p>
+<pre><code class="language-c" data-file="acc_jacobi_tune.c" data-build="gcc -fopenacc -foffload=nvptx-none -foffload-options=nvptx-none=-march=sm_80 -fcf-protection=none -O2 -ffp-contract=off acc_jacobi_tune.c -lm -o acc_jacobi_tune" data-run="ACC_DEVICE_TYPE=nvidia timeout 20 ./acc_jacobi_tune" data-needs="gpu" data-check="returncode">#define _POSIX_C_SOURCE 200809L
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;math.h&gt;
+#include &lt;time.h&gt;
+#include &lt;openacc.h&gt;
+#define N 512
+#define S (N+2)
+#define M (S*S)
+#define IDX(i,j) ((i)*S+(j))
+#define STEPS 20
+static double wall(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&amp;t); return t.tv_sec+1e-9*t.tv_nsec; }
+static void init(double *u,double *v) {
+  for(int k=0;k&lt;M;k++) u[k]=v[k]=0;
+  for(int j=1;j&lt;=N;j++) u[IDX(0,j)]=v[IDX(0,j)]=1;
+}
+static double jacobi_step(const double *u,double *unew) {
+  double delta=0;
+  for(int i=1;i&lt;=N;i++) for(int j=1;j&lt;=N;j++) {
+    int k=IDX(i,j); unew[k]=0.25*(u[k-S]+u[k+S]+u[k-1]+u[k+1]);
+    delta=fmax(delta,fabs(unew[k]-u[k]));
+  }
+  return delta;
+}
+int main(void) {
+  double *u=malloc(M*sizeof *u), *unew=malloc(M*sizeof *unew);
+  double *ref=malloc(M*sizeof *ref), *tmp=malloc(M*sizeof *tmp);
+  if(!u||!unew||!ref||!tmp) return 3;
+  init(ref,tmp);
+  for(int t=0;t&lt;STEPS;t++){ jacobi_step(ref,tmp); double *s=ref;ref=tmp;tmp=s; }
+  int gpu=0;
+  #pragma acc serial copyout(gpu)
+  { gpu=acc_on_device(acc_device_nvidia); }
+  if(!gpu) return 2;
+  printf(&quot;nvidia_execution=%d N=%d steps=%d\n&quot;,gpu,N,STEPS);
+  const char *names[]={&quot;row-vector32&quot;,&quot;collapse-vector128&quot;,&quot;tile32x4&quot;};
+  for(int mode=0;mode&lt;3;mode++) {
+    init(u,unew); double elapsed=0;
+    #pragma acc data copy(u[0:M],unew[0:M])
+    {
+      double begin=wall();
+      for(int t=0;t&lt;STEPS;t++) {
+        if(mode==0) {
+          #pragma acc parallel loop gang vector_length(32) present(u[0:M],unew[0:M])
+          for(int i=1;i&lt;=N;i++) {
+            #pragma acc loop vector
+            for(int j=1;j&lt;=N;j++) { int k=IDX(i,j); unew[k]=0.25*(u[k-S]+u[k+S]+u[k-1]+u[k+1]); }
+          }
+        } else if(mode==1) {
+          #pragma acc parallel loop collapse(2) gang vector vector_length(128) present(u[0:M],unew[0:M])
+          for(int i=1;i&lt;=N;i++) for(int j=1;j&lt;=N;j++) { int k=IDX(i,j); unew[k]=0.25*(u[k-S]+u[k+S]+u[k-1]+u[k+1]); }
+        } else {
+          #pragma acc parallel loop tile(32,4) gang vector vector_length(128) present(u[0:M],unew[0:M])
+          for(int i=1;i&lt;=N;i++) for(int j=1;j&lt;=N;j++) { int k=IDX(i,j); unew[k]=0.25*(u[k-S]+u[k+S]+u[k-1]+u[k+1]); }
+        }
+        double *s=u;u=unew;unew=s;
+      }
+      elapsed=wall()-begin;
+    }
+    double error=0;
+    for(int k=0;k&lt;M;k++) error=fmax(error,fabs(u[k]-ref[k]));
+    printf(&quot;%s ms=%.3f max_error=%.3g\n&quot;,names[mode],1e3*elapsed,error);
+    if(error&gt;1e-12) return 1;
+  }
+  free(u);free(unew);free(ref);free(tmp); return 0;
+}
+</code></pre>
+<pre><code class="output">nvidia_execution=1 N=512 steps=20
+row-vector32 ms=10.180 max_error=0
+collapse-vector128 ms=9.699 max_error=0
+tile32x4 ms=9.919 max_error=0
+</code></pre>
+<p>The displayed output is one actual sample from the NVIDIA GeForce RTX 3050 Laptop GPU with GCC 13.3 under WSL, the Windows Subsystem for Linux. The return-code check accepts different timings but requires successful completion and the program's error checks. Three separately launched captures gave the following observed ranges; these are minima and maxima of three observations, not confidence intervals.</p>
+<table><caption>Twenty sweeps, 512-by-512 interior; milliseconds within the resident region.</caption><thead><tr><th>Mapping</th><th>Observed range</th><th>Maximum element error in all three captures</th></tr></thead><tbody><tr><td>Rows, vector length 32</td><td>10.180–11.755 ms</td><td>0</td></tr><tr><td>Collapsed, vector length 128</td><td>9.357–9.699 ms</td><td>0</td></tr><tr><td>32-column by 4-row tiles</td><td>9.503–10.198 ms</td><td>0</td></tr></tbody></table>
+<p>All three mappings implement the same finite recurrence. The collapsed and tiled ranges overlap, and the measurements do not identify why any time differs. The row and tile ranges also overlap slightly. Fixed execution order, first kernel encounters, laptop power behavior, and runtime overhead prevent a general ranking. No cache, bandwidth, register, or occupancy measurements were taken. Twenty-sweep parity establishes implementation agreement for this input, not convergence to the steady solution.</p>
+<p>PTX is NVIDIA's intermediate virtual instruction-set representation. The build explicitly selects <code>-foffload-options=nvptx-none=-march=sm_80</code>. This passes the architecture choice to GCC's NVIDIA offload compiler rather than to the host compiler. Compute capability is NVIDIA's hardware feature-level designation; this machine is 8.6, while sm_80 selects the 8.0 target supported by this GCC release. It is separate from a CUDA toolkit version. The <a href="https://gcc.gnu.org/onlinedocs/gcc-13.3.0/gcc/Nvidia-PTX-Options.html">GCC 13.3 NVIDIA PTX options, §3.19.35</a>, list supported targets through sm_80.</p>
+<p>This explicit target matters in the checked environment. The chapter-code launcher adds the installed CUDA tools to its search path, making a CUDA 13 assembler visible; the default older target can then be rejected during offload assembly. The final programs were rebuilt and rerun with the explicit sm_80 target and that same search-path setting. The reported timing ranges belong to those final builds. Selecting a compiler-supported target is a build contract; it does not establish performance on a different GPU.</p>
+<p>The compilation uses <code>-ffp-contract=off</code> to suppress contraction of separate multiply and add expressions into a fused multiply-add, an instruction that combines them with one final rounding. A fused multiply-add conventionally counts as two floating-point operations. This flag makes arithmetic comparison easier to interpret; it is not a recommendation to disable a useful instruction in all applications. The dyadic values generated by this short Jacobi run are especially suitable for an exact check, while the code still enforces an absolute tolerance of 10<sup>−12</sup>.</p>
+<p>As checked on 28 October 2026, the OpenACC catalogue lists version 3.4 as the latest published specification. This chapter uses the explicitly identified 3.3 edition for section references. The installed GCC 13.3 reports <code>_OPENACC=201711</code>, corresponding to its OpenACC 2.6-era advertised macro. Successful tests of collapse, tile, routine, async, update, and device selection establish those particular programs on that toolchain. They do not establish full 3.3 or 3.4 conformance. The <a href="https://www.openacc.org/specification">catalogue</a> and <a href="https://www.openacc.org/sites/default/files/inline-files/OpenACC_3.4.pdf">3.4 specification</a> describe the standard's publication state, rather than the capability of this installation.</p>
+<p>The <code>device_type</code> clause can restrict following tuning clauses to a selected architecture. It does not select a numbered physical GPU, repair a dependency, or create a missing compiler feature. The GCC measurements above use directly specified mappings and do not test device_type specialization. Likewise, NVIDIA HPC compiler options documented in its <a href="https://docs.nvidia.com/hpc-sdk/compilers/openacc-gs/index.html">Getting Started Guide</a> belong to that compiler family. They are not flags to append to GCC.</p>
+
+<h2 id="async">Asynchrony is an ordering graph, not a speed promise <a class="timestamp" href="https://www.youtube.com/watch?v=sybbWNJunRA&amp;t=139s">W9L7 2:19</a></h2>
+<p>Suppose task A fills array a, task B fills array b, and task C computes their sum. A and B have disjoint writes and can be submitted independently; C depends on both. A correct synchronous schedule A, B, C is one topological order of the graph. An asynchronous implementation can allow A and B to overlap while retaining the two edges into C. The optimization removes unnecessary ordering between independent tasks and keeps necessary ordering between producers and consumers.</p>
+<p>Operations submitted to one numbered activity queue by the same host thread retain their submission order. Different queue numbers do not establish an order between their operations. An explicit wait supplies the missing relation when the consumer needs another queue's result. These are the central rules of the <a href="https://openacc-best-practices-guide.readthedocs.io/en/latest/08-Advanced.html">OpenACC advanced-feature guide's asynchronous section</a>. Multiple queues express opportunity; execution resources can still serialize them.</p>
+<p>Use <code>async(1)</code> to place work in queue one and allow the submitting host thread to continue. A following ordinary host read is not thereby delayed until the device result arrives. A blocking <code>wait</code> waits for the relevant previously submitted work on the current device before that thread proceeds. It does not stop every host thread in the process, and a wait on device zero does not silently drain device one's queues. The scope is an essential part of the synchronization contract.</p>
+<p>There are two distinct ways to join the example. A blocking wait for both producers lets the host submit C after both finish. Alternatively, enqueue <code>wait(1) async(2)</code> after B in queue two, then enqueue C in queue two. B precedes C through queue order; A precedes C through the inserted queue dependency. The host can keep running. A later update of c in queue two followed by a blocking wait makes c safe to read on the host.</p>
+<table><caption>A queue-based join for two input producers on one device.</caption><thead><tr><th>Submission</th><th>Queue</th><th>Required predecessor</th></tr></thead><tbody><tr><td>Fill a</td><td>1</td><td>None</td></tr><tr><td>Fill b</td><td>2</td><td>None</td></tr><tr><td>Wait for queue 1</td><td>2</td><td>Fill a; follows fill b</td></tr><tr><td>Add a and b</td><td>2</td><td>Both fills</td></tr><tr><td>Update c to host</td><td>2</td><td>Addition</td></tr><tr><td>Host wait and consume c</td><td>Host</td><td>Update</td></tr></tbody></table>
+<p>This table specifies a dependency design, not an additional executed listing. A queue wait has a direction. Inserting a wait on queue one for queue two, then launching C in queue two without an edge from one, does not necessarily enforce A before C. A dependency graph makes the error visible without relying on a race to manifest during a run. The graph should remain acyclic; mutually waiting queues are not an overlap strategy.</p>
+<p>Data lifetime extends through completion, not merely submission. If an asynchronous kernel reads a host buffer through a later transfer, the host must preserve that buffer until the transfer is done. If an asynchronous update writes host memory, ordinary host code must not inspect or overwrite it prematurely. A device allocation must survive all queued uses. Put the final wait before freeing memory, leaving a mapped data lifetime, or reusing a staging buffer. A pointer staying in scope is insufficient when its allocation has already been released.</p>
+<p>Jacobi exposes a subtler trap. Within a sweep the cells are independent, but sweep t+1 requires results from sweep t. Enqueueing successive sweeps into one queue preserves this relation. Alternating sweeps between queues one and two without waits does not. Alternating independent image blocks between two queues is valid because the blocks write disjoint pixel ranges. The same queue pattern can therefore be valid for one algorithm and invalid for another; the dependency graph, rather than the syntax, determines correctness.</p>
+<p>For a simple pipeline model, divide independent work into m equal chunks. Let c seconds be the compute time per chunk and d seconds the output-transfer time. Assume one compute engine and one transfer engine, negligible submission overhead, enough buffering, and the ability to overlap these engines. A synchronous schedule costs \(m(c+d)\). The first chunk takes c+d to emerge; each additional completed chunk costs the slower stage, giving</p>
+\[
+T_{\mathrm{pipe}}=c+d+(m-1)\max(c,d). \tag{25.2}
+\]
+<p>For four chunks with c=3 ms and d=2 ms, the serial stage sum is 20 ms and the ideal pipeline time is 14 ms. The model's speed ratio is 20/14, about 1.43. If c=d, the large-m limit approaches two; if one stage dominates, the limit approaches one. The result follows from shared engine capacity, not from the number of queue identifiers. Four queues cannot make the single compute engine finish four equal compute stages simultaneously.</p>
+<p>These are hypothetical numbers, not measurements on the laptop. Real transfers may require pinned host memory, meaning pages kept resident for device transfer, and suitable hardware engines. Pageable host memory can require staging or synchronization. NVIDIA's <a href="https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#asynchronous-and-overlapping-transfers-with-computation">CUDA Best Practices Guide, §10.1.2</a>, describes those CUDA-level conditions. An OpenACC runtime can implement transfers differently; source-level async alone does not prove physical overlap. A device timeline or equivalent instrumentation would be needed to establish it here.</p>
+
+<h2 id="routine">Device routines and a bounded image pipeline <a class="timestamp" href="https://www.youtube.com/watch?v=sybbWNJunRA&amp;t=680s">W9L7 11:20</a></h2>
+<p>The image example supplies independent work with unequal costs. A pixel represents the complex number \(c=c_r+\mathrm{i}c_i\), where \(\mathrm{i}^2=-1\). Starting at \(z_0=0\), iterate \(z_{k+1}=z_k^2+c\) while its squared magnitude does not exceed four, up to a fixed cap of 64 steps. Writing \(z_k=x_k+\mathrm{i}y_k\) gives \(x_{k+1}=x_k^2-y_k^2+c_r\) and \(y_{k+1}=2x_ky_k+c_i\). Save the old x before updating either component.</p>
+<p>The returned escape count is a finite computation. A pixel that reaches the cap has not been proved to belong to the Mandelbrot set; it merely did not escape within this budget. Near the boundary, floating-point rounding can change the iteration at which a threshold is crossed. For a transparent scalar check, c=1 gives successive z values 0, 1, 2, 5, so the program's count is three. For c=−2, the orbit reaches 2 and stays there, so a test using magnitude strictly greater than two reaches the cap. Changing a less-than-or-equal comparison would change that boundary behavior.</p>
+<p>A host function is not automatically available as a device-callable implementation in every compiler situation. <code>routine seq</code> requests a device routine whose internal work is sequential at the calling lane. That does not serialize all pixels: different callers can execute the same sequential function on different inputs. It also does not grant arbitrary host-library or operating-system access inside the function. The example uses only bounded arithmetic and control flow, keeping the device-call contract small.</p>
+<p>The <a href="https://www.openacc.org/sites/default/files/inline-images/Specification/OpenACC-3.3-final.pdf">OpenACC 3.3, §2.15.1, pp. 82–87</a>, give the routine model; the checked code places its routine directive before the definition and device call. Other routine levels describe internal gang, worker, or vector parallelism and require compatible calling contexts. They are not independent choices of a new accelerator for every call. A routine that consumes a hierarchy level can constrain which parallelism remains available to its caller.</p>
+<p>Partition the 97 image rows into four strips using endpoints \(y_b=\lfloor97b/4\rfloor\). Their row counts are 24, 24, 24, and 25. The last row is therefore included even though the height is not divisible by four. Assign strip b to queue \(b\bmod2\). The percent operation in C means remainder; it produces queue IDs zero and one here. It does not divide the image into a number of queues equal to half the number of blocks as a general rule. The original W9L7 frame shows this remainder-based reuse.</p>
+<p>Each strip's kernel and output update use the same queue. The update consequently waits for its own kernel, and reusing that queue for a later strip keeps its earlier operations ordered. Different strips use disjoint memory ranges, so no cross-queue dependence is needed. The final wait precedes data-region exit and host verification. The host output array remains allocated throughout. These are the facts that make the pipeline legal, regardless of whether transfers actually overlap kernels.</p>
+<p>The complete listing has no input files and produces no image file. It computes 12,416 pixel counts, transfers them in strips, and compares every pixel with host execution of the same routine. Maximum device image storage is 49,664 bytes when int is four bytes, as on this implementation. Its finite cap bounds even pixels whose orbit never escapes. The comparison tests CPU/device agreement and partition coverage, while the c=1 and c=−2 reasoning checks the intended scalar convention.</p>
+<pre><code class="language-c" data-file="acc_async_image.c" data-build="gcc -fopenacc -foffload=nvptx-none -foffload-options=nvptx-none=-march=sm_80 -fcf-protection=none -O2 -ffp-contract=off acc_async_image.c -lm -o acc_async_image" data-run="ACC_DEVICE_TYPE=nvidia timeout 20 ./acc_async_image" data-needs="gpu" data-check="exact">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;openacc.h&gt;
+#define WIDTH 128
+#define HEIGHT 97
+#define PIXELS (WIDTH*HEIGHT)
+#pragma acc routine seq
+static int escape_count(int x,int y) {
+  double cr=-2.0+3.0*x/(WIDTH-1), ci=-1.0+2.0*y/(HEIGHT-1);
+  double zr=0,zi=0; int it=0;
+  while(it&lt;64 &amp;&amp; zr*zr+zi*zi&lt;=4.0) {
+    double next=zr*zr-zi*zi+cr; zi=2.0*zr*zi+ci; zr=next; it++;
+  }
+  return it;
+}
+int main(void) {
+  int *image=malloc(PIXELS*sizeof *image); if(!image) return 3;
+  int gpu=0;
+  #pragma acc serial copyout(gpu)
+  { gpu=acc_on_device(acc_device_nvidia); }
+  if(!gpu) return 2;
+  #pragma acc data create(image[0:PIXELS])
+  {
+    for(int block=0;block&lt;4;block++) {
+      int y0=block*HEIGHT/4, y1=(block+1)*HEIGHT/4;
+      int start=y0*WIDTH, count=(y1-y0)*WIDTH, queue=block%2;
+      #pragma acc parallel loop collapse(2) present(image[0:PIXELS]) async(queue)
+      for(int y=y0;y&lt;y1;y++) for(int x=0;x&lt;WIDTH;x++)
+        image[y*WIDTH+x]=escape_count(x,y);
+      #pragma acc update self(image[start:count]) async(queue)
+    }
+    #pragma acc wait
+  }
+  long sum=0; int errors=0;
+  for(int y=0;y&lt;HEIGHT;y++) for(int x=0;x&lt;WIDTH;x++) {
+    int k=y*WIDTH+x; errors+=(image[k]!=escape_count(x,y)); sum+=image[k];
+  }
+  printf(&quot;nvidia_execution=%d pixels=%d queues=2 errors=%d checksum=%ld\n&quot;,gpu,PIXELS,errors,sum);
+  free(image); return errors?1:0;
+}
+</code></pre>
+<pre><code class="output">nvidia_execution=1 pixels=12416 queues=2 errors=0 checksum=257269
+</code></pre>
+<p>The checksum of 257,269 records the tested grid and cap. The full elementwise comparison is stronger than that checksum because distinct erroneous images can have the same sum. With contraction disabled, this grid produced exact integer-count agreement between host and device. A different grid close to a fractal boundary may require interpreting discrepancies rather than forcing agreement by changing a tolerance on integer counts. The code checks the computation it actually defines.</p>
+<p>No timeline or asynchronous speedup is claimed for this listing. It demonstrates a correct two-queue submission pattern with a device routine, not physical concurrency. A meaningful overlap study would compare synchronous and asynchronous versions with identical initialization, transfers, cap, image dimensions, and completion boundary, then inspect the execution timeline. A shorter host submission interval alone would only show that the host returned sooner; it would not show that the completed image became available sooner.</p>
+<p>Chunk size is an engineering variable. Very small chunks multiply launches and update calls; very large chunks reduce opportunities to interleave work. Equal row counts also need not mean equal execution times: pixels near a complicated boundary can use the full iteration cap while other pixels escape quickly. A balance model should therefore consider measured chunk costs or a justified workload proxy. Row count is a storage measure, not a direct measure of arithmetic work.</p>
+
+<h2 id="devices">Device selection creates separate ownership domains <a class="timestamp" href="https://www.youtube.com/watch?v=yIPHreoMz1s&amp;t=108s">W9L8 1:48</a></h2>
+<p>A device number is local to a device type and its visible runtime inventory. It is not an MPI rank, a host-thread number, or a globally unique physical identifier. Query the available devices of the intended type, validate the count, and select a legal index. The runtime calls <code>acc_get_num_devices</code> and <code>acc_set_device_num</code> implement those operations. <a href="https://www.openacc.org/sites/default/files/inline-images/Specification/OpenACC-3.3-final.pdf">OpenACC 3.3, §3.2.1 and §3.2.4–3.2.5</a>, specifies the inventory and current-thread selection interface.</p>
+<p>Moving the current selection from device zero to device one does not migrate device zero's allocations or synchronize its queues. A host address can correspond to separate mappings on separate devices. Queue one on device zero and queue one on device one are different activity queues. Thus allocation, submission, waiting, and deletion must all occur with the intended device selected. This is the memory-location analogue of proving iteration ownership before choosing a loop map.</p>
+<p>For an independent one-dimensional output of n elements and p selected devices, assign device d the half-open interval \([\lfloor dn/p\rfloor,\lfloor(d+1)n/p\rfloor)\). Adjacent intervals meet at the same integer endpoint, so they neither overlap nor leave a gap. The first endpoint is zero and the last is n. Summing interval lengths telescopes to n. A half-open interval contains its first index and excludes its last, matching C's less-than loop convention.</p>
+<p>The lengths differ by at most one, because division with remainder writes \(n=ap+r\), with \(0\leq r\lt p\), and every interval has a or a+1 elements. This balances element counts, not arbitrary per-element work. For a Mandelbrot image it may still leave unequal execution times; for the affine integer output below each element has the same simple operation count. The decomposition proof is independent of whether one or several devices are available.</p>
+<p>The following example uses at most four devices and just 301 output elements. It explicitly requires the NVIDIA device type. With one physical GPU, p is one and the entire output belongs to device zero. That is the tested one-device path, not host fallback. The same source contains a p-greater-than-one path, but that path was not executed on this machine and remains an unvalidated multi-device template. No multi-GPU speedup, transfer between GPUs, or peer-link behavior is inferred.</p>
+<p>The first loop selects each device, creates only its chunk mapping, enqueues computation and an update, and moves on. The second loop revisits each selected device, waits for its outstanding operations, then deletes its mapping. The host allocation survives both loops. Output values use global indices despite chunk-local storage, making an offset mistake detectable. The witness is checked on every selected device. Memory consumption is a few kilobytes, and the program performs a fixed amount of work.</p>
+<pre><code class="language-c" data-file="acc_device_partition.c" data-build="gcc -fopenacc -foffload=nvptx-none -foffload-options=nvptx-none=-march=sm_80 -fcf-protection=none -O2 -ffp-contract=off acc_device_partition.c -lm -o acc_device_partition" data-run="ACC_DEVICE_TYPE=nvidia timeout 20 ./acc_device_partition" data-needs="gpu" data-check="returncode">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;openacc.h&gt;
+#define N 301
+int main(void) {
+  int devices=acc_get_num_devices(acc_device_nvidia);
+  if(devices&lt;1) return 2;
+  int p=devices&lt;4?devices:4;
+  int *out=malloc(N*sizeof *out), witness[4]={0}; if(!out) return 3;
+  for(int d=0;d&lt;p;d++) {
+    int lo=d*N/p, hi=(d+1)*N/p, count=hi-lo;
+    int *chunk=out+lo;
+    acc_set_device_num(d,acc_device_nvidia);
+    #pragma acc serial copyout(witness[d:1])
+    { witness[d]=acc_on_device(acc_device_nvidia); }
+    #pragma acc enter data create(chunk[0:count])
+    #pragma acc parallel loop present(chunk[0:count]) async(1)
+    for(int j=0;j&lt;count;j++) chunk[j]=3*(lo+j)+1;
+    #pragma acc update self(chunk[0:count]) async(1)
+  }
+  for(int d=0;d&lt;p;d++) {
+    int lo=d*N/p, hi=(d+1)*N/p, count=hi-lo; int *chunk=out+lo;
+    acc_set_device_num(d,acc_device_nvidia);
+    #pragma acc wait
+    #pragma acc exit data delete(chunk[0:count])
+  }
+  int errors=0, gpu=1; long sum=0;
+  for(int d=0;d&lt;p;d++) gpu=gpu&amp;&amp;witness[d];
+  for(int i=0;i&lt;N;i++){ errors+=(out[i]!=3*i+1);sum+=out[i]; }
+  printf(&quot;nvidia_devices=%d selected=%d nvidia_execution=%d errors=%d checksum=%ld\n&quot;,devices,p,gpu,errors,sum);
+  free(out); return errors||!gpu?1:0;
+}
+</code></pre>
+<pre><code class="output">nvidia_devices=1 selected=1 nvidia_execution=1 errors=0 checksum=135751
+</code></pre>
+<p>The actual run observed one NVIDIA device, selected that one, and checked all 301 values. The checksum follows independently from \(\sum_{i=0}^{300}(3i+1)=3(300\cdot301/2)+301=135,751\). That arithmetic verifies the displayed sum without assuming that a successful launch implies correct indexing. The program also compares each element, so a compensating pair of wrong outputs cannot pass merely by preserving the total.</p>
+<p>The return-code check allows the printed inventory to differ on another machine; the program still requires a positive inventory, successful NVIDIA execution, and zero element errors. A machine with more than four devices intentionally uses only four, preserving the stated bounds. Running that path would require new multi-device evidence. The present result establishes selection, allocation, submission, update, and completion on device zero only.</p>
+<p>For a real multi-device application, separate memory costs from work costs. Replicating a large read-only input on p devices uses p times that input's storage, even if the output is partitioned. A stencil additionally needs halo values, neighboring data outside a device's owned interior. The independent affine example has no such communication. Its clean decomposition cannot be transferred to Jacobi without adding halo exchange and a global convergence decision when required.</p>
+
+<h2 id="hybrid">OpenMP and MPI change who owns a device <a class="timestamp" href="https://www.youtube.com/watch?v=yIPHreoMz1s&amp;t=302s">W9L8 5:02</a></h2>
+<p>OpenMP, the shared-memory threading interface, can assign one host thread to each device on a node. A node is one computer with its own operating system, host memory, and attached accelerators. Each thread selects a device before establishing mappings or submitting work. The shared host output array can hold disjoint subimages from different threads, but shared memory does not make overlapping writes safe. Ownership of both the host ranges and the device mappings must remain explicit.</p>
+<p>An OpenMP barrier means that the participating host threads have arrived. If each thread has merely submitted asynchronous device work, its arrival need not mean that work has completed. Each thread must wait for its device work before exposing those results to the host phase or finishing a lifetime that owns the mapping. With synchronous device operations, that completion is already part of returning from the operation. Retaining the same rule when async is later added prevents a previously correct host barrier from becoming an incomplete substitute.</p>
+<p>Creating p requested host threads does not always guarantee a team of exactly p under every runtime configuration. A robust design partitions according to the actual team or distributes device indices through a host worksharing loop, so every intended device assignment is covered. Thread-to-device selection is local execution state, so set it in the thread that will submit the operations. The single-thread program above deliberately avoids claiming that any OpenMP/device interaction was tested.</p>
+<p>MPI, the Message Passing Interface, instead gives each rank a separate process address space. A rank is its identifier within a communicator, a group and communication context. Each rank can own a subimage, compute it on an assigned device, transfer it to its host memory, and gather host subimages into a root process. A gather collects the distributed contributions; unequal subimage lengths require counts and displacements appropriate to the chosen collective, such as Gatherv rather than an equal-count Gather.</p>
+<p>On multiple nodes, a global rank is not automatically a legal local device index. If every node has four GPUs, global rank five must not blindly select device five on its node. Derive a node-local rank, meaning its ordinal among ranks on that same node, and map it against the node's visible device inventory. Mapping by local rank modulo device count allows sharing but can cause contention. It is a policy decision, not evidence that sharing improves utilization.</p>
+<p><code>host_data use_device</code> exposes the device address of a mapped object to host code. It does not move the data, wait for its producer, or make an ordinary MPI library understand GPU pointers. The <a href="https://www.openacc.org/sites/default/files/inline-images/Specification/OpenACC-3.3-final.pdf">OpenACC 3.3 host-data construct, §2.8, pp. 55–56</a>, defines this address substitution. Device-buffer communication requires a suitable GPU-aware communication implementation and compatible runtime support. Even accepting a device pointer does not prove that a direct peer path or a particular interconnect was used.</p>
+<p>A conservative host-staged send first completes the device producer, updates the sending host buffer, and sends that host buffer. The receiver completes reception, updates the corresponding device mapping, and only then launches a consumer. A GPU-aware send can avoid the explicit staging steps, but still needs producer completion and buffer lifetimes through communication completion. An asynchronous OpenACC queue and an MPI nonblocking request are two different completion mechanisms; neither automatically completes the other.</p>
+<p>This chapter tests neither MPI/device communication nor OpenMP multi-device submission. They are architectural extensions that preserve the recording's progression toward multiple nodes. The tested single-device APIs establish a small foundation; the next implementation step must add and verify communication contracts rather than interpret one physical GPU as a hidden multi-GPU system. Rank multiplicity and device multiplicity measure different resources.</p>
+
+<h2 id="limits">What the verified examples establish</h2>
+<p>The numerical checks establish the four printed programs on the stated single-GPU installation. Every program rejects execution that lacks its NVIDIA witness. That distinguishes actual accelerator execution from a successful host fallback. The integer matrix product and affine partition have exact arithmetic checks; Jacobi compares every grid value with a serial twenty-sweep reference; the image compares every escape count. These checks are deliberately bounded and reproducible. They are not a general compiler validation suite.</p>
+<table><caption>Lecture ideas and their evidence boundaries.</caption><thead><tr><th>Idea</th><th>Status in this chapter</th></tr></thead><tbody><tr><td>Independence enables parallel loop execution</td><td>Derived from read/write sets; checked with one-owner matrix outputs and two-array Jacobi.</td></tr><tr><td>Collapse and tile can help loop execution</td><td>All three Jacobi mappings agree; three observed timing ranges do not establish a general winner or a traffic mechanism.</td></tr><tr><td>Small-vector diagrams explain underfilled work</td><td>Logical lane-slot model; physical GCC/NVIDIA warp width is a separate implementation fact.</td></tr><tr><td>The device-type matmul snippet collapses all three loops</td><td>Displayed accumulation lacks a reduction or atomic operation; corrected example assigns an owner to each output pair.</td></tr><tr><td>Async permits compute/transfer overlap</td><td>Queue semantics demonstrated; physical overlap and speedup unmeasured.</td></tr><tr><td>Multiple devices have separate queues</td><td>Ownership design explained; only the one-device path was executed.</td></tr></tbody></table>
+<p>The largest experiment uses less than five megabytes of device arrays and a fixed twenty-sweep budget. It does not establish steady-state solver convergence, large-input bandwidth, or sustained laptop performance. No result measures a peer link, a second GPU, a network, or communication through an MPI device pointer. A newer specification does not expand an installed compiler's supported feature set by itself. Preserve these boundaries when adapting the code.</p>
+<p>The strongest transferable method is to record the intended outputs, their owners, their physical allocation domains, and the edges needed before each consumer. A loop transformation changes the owner map; an asynchronous transformation changes submission and completion order; a multi-device transformation adds allocation domains and communication. Re-check each changed contract. Retain the simplest adequate mapping until measurements with an appropriate completion boundary justify a more specific one.</p>
+
+<h2 id="exercises">Six exercises with full worked solutions</h2>
+<h3>1. Derive the collapse bijection for the interior</h3>
+<p>A Jacobi grid has five interior rows and five interior columns. Give an explicit flattening and inverse, locate q=17, and explain whether flattening permits two consecutive sweeps to execute independently.</p>
+<details><summary>Solution</summary>
+<p>Use \(q=5(i-1)+(j-1)\), with \(1\leq i,j\leq5\). The range is zero through 24. Integer division gives \(i=\lfloor q/5\rfloor+1\) and \(j=(q\bmod5)+1\). For q=17, quotient three and remainder two give i=4 and j=3. Substitution returns \(5\cdot3+2=17\), checking both the offset and the ordering convention.</p>
+<p>Uniqueness follows because every nonnegative q has one quotient and remainder with remainder between zero and four. Thus no pair is duplicated and all 25 pairs are covered. The flattened domain contains only one sweep. The next sweep reads the outputs of the first, so changing the enumeration does not remove that dependency. Keep a completion or same-queue ordering edge between them.</p>
+</details>
+<h3>2. Compute tiles and the limit of a reuse estimate</h3>
+<p>Partition a 9-row by 10-column Jacobi interior into tiles of four rows by eight columns. How many tiles and valid elements result? Which tile arguments correspond to i outside j? For a full tile, compare independent old-value load operands with distinct old values needed by the five-point update.</p>
+<details><summary>Solution</summary>
+<p>There are \(\lceil9/4\rceil\lceil10/8\rceil=3\cdot2=6\) tiles. Row extents are four, four, and one; column extents are eight and two. The total count is \((4+4+1)(8+2)=90\). The six full launch rectangles would have \(6\cdot32=192\) slots, so an implementation must avoid or mask 102 out-of-domain positions. Specify <code>tile(8,4)</code>, since the first tile argument belongs to the inner j loop.</p>
+<p>A full four-by-eight tile has 32 updates. Four old loads per update give 128 logical load operands. Unique old values are \(32+2\cdot4+2\cdot8=56\); corners are not stencil neighbors. The ratio 128/56 is about 2.29. It is a potential reuse factor under ideal sharing, not a measured reduction in memory transactions. Cache behavior and the compiler's staging determine physical traffic.</p>
+</details>
+<h3>3. Give a counterexample to unsafe accumulation</h3>
+<p>Two collapsed k iterations execute <code>C += a[k]*b[k]</code> for one matrix output. Take C initially zero and the two products to be three and five. Show a lost-update execution and repair the ownership without atomics.</p>
+<details><summary>Solution</summary>
+<p>Both iterations can read zero. One forms three and the other forms five. If the writes occur in that order, the final value is five; reversing them leaves three. Neither equals the required eight. Having different k values does not imply different write locations. Independent does not prevent either schedule because the assertion supplied incorrect information.</p>
+<p>Assign one output pair to one logical owner, initialize its private sum to zero, and execute both k contributions sequentially before the single output store. This gives zero plus three plus five, hence eight. Alternatively, an explicitly supported reduction can generate private partial sums and combine them. That repair introduces a reduction operation and its arithmetic-order consequences; simply collapsing another loop is insufficient.</p>
+</details>
+<h3>4. Diagnose an asynchronous graph and a buffer lifetime</h3>
+<p>A fills a in queue one. B fills b in queue two. C adds a and b in queue two, followed by an asynchronous update of c in queue two. The host immediately reads c and frees all buffers. State the two missing edges and a correct repair that permits the host to do unrelated work.</p>
+<details><summary>Solution</summary>
+<p>Queue order already supplies B before C and C before the update. It does not supply A before C, nor update completion before the host read and free. Enqueue <code>wait(1) async(2)</code> between B and C. This joins A into queue two without requiring the host to block at that point. Then enqueue C and the update in queue two as before.</p>
+<p>The host may perform unrelated work that touches none of the pending buffers. Before reading c or freeing any mapped allocation used by the queued tasks, execute a blocking <code>wait(2)</code>. Now both producers, C, and the update have completed. Waiting only for queue one would still leave queue two outstanding. Freeing after submission rather than after completion violates lifetime even if the host never reads the numerical output.</p>
+</details>
+<h3>5. Make a design judgment about the pipeline</h3>
+<p>Eight equal independent chunks each require 1 ms of computation and 4 ms of output transfer. Under the two-engine assumptions of (25.2), compare synchronous and ideal pipelined completion times. Would adding eight queues rather than two remove the transfer bottleneck? Name evidence needed before calling the model an observed speedup.</p>
+<details><summary>Solution</summary>
+<p>The synchronous time is \(8(1+4)=40\) ms. The ideal pipeline time is \(1+4+7\cdot4=33\) ms, giving a ratio \(40/33\approx1.21\). The eight transfers alone occupy the transfer engine for 32 ms, so there is little compute time to hide. As chunk count grows with unchanged per-chunk costs, the ratio approaches \((1+4)/4=1.25\).</p>
+<p>Extra queues do not create transfer-engine bandwidth. Two can express an alternating pipeline if buffers and scheduling permit it, while eight may add management overhead without increasing engine capacity. To claim an observed speedup, time the completed output with identical work, transfers, and initialization boundaries in both versions. Capture a timeline showing actual overlap if overlap is the asserted explanation. Correctness, pinned-memory or staging behavior, and chunk imbalance also require inspection; none follows from queue count.</p>
+</details>
+<h3>6. Design the next bounded implementation check</h3>
+<p>For n=301 and p=4, compute the device intervals used by the partition program. Explain what the actual one-device run verifies and design a bounded extension that could validate p=4 when four devices become available.</p>
+<details><summary>Solution</summary>
+<p>The endpoints are \(\lfloor301d/4\rfloor\) for d=0 through four: 0, 75, 150, 225, 301. Thus the intervals are [0,75), [75,150), [150,225), and [225,301), with lengths 75, 75, 75, and 76. They contain all 301 indices exactly once. Their global affine values sum to 135,751, matching the closed-form sum derived above.</p>
+<p>The actual p=1 run verifies only device zero's selection, mapping, kernel, update, wait, deletion, and complete output. It does not execute transitions between devices or validate simultaneous mappings. With four available devices, retain the same small n, initialize host outputs to a sentinel, record a witness and selected index on each device, submit all chunks, and revisit every device for wait and cleanup. Compare all values and ownership ranges after completion. Retain per-device identities and complete outputs or checks. This would validate a bounded four-device correctness case; measuring speedup would require a separate workload and timing design, and it would still not establish a peer-transfer path.</p>
+</details>
+
+<h2 id="primary-sources">Primary sources and the claims they support</h2>
+<ul>
+<li><a href="https://www.youtube.com/watch?v=dw3t1H34E-A">W9L6: OpenACC loop optimizations</a>, 24:32. Sequence from correctness clauses through private variables, collapse, tile, hierarchy, and device-specific tuning.</li>
+<li><a href="https://www.youtube.com/watch?v=sybbWNJunRA">W9L7: asynchronous behavior in OpenACC</a>, 19:17. Independent producers, queues, wait, device routines, and strip-based Mandelbrot pipelining.</li>
+<li><a href="https://www.youtube.com/watch?v=yIPHreoMz1s">W9L8: multiple-device OpenACC</a>, 15:28. OpenACC device selection, per-device waits, OpenMP ownership, MPI data distribution, and multi-node organization.</li>
+<li><a href="https://www.openacc.org/sites/default/files/inline-images/Specification/OpenACC-3.3-final.pdf">OpenACC API 3.3, November 2022</a>. §§2.9.1–2.9.11 (collapse, hierarchy, tile and private storage), §2.15 (routine calls), §2.16 (asynchronous behavior), §§3.2.1 and 3.2.4–3.2.5 (device enumeration and selection), and §2.8 (device-address interoperability).</li>
+<li><a href="https://www.openacc.org/specification">OpenACC specification catalogue</a> and <a href="https://www.openacc.org/sites/default/files/inline-files/OpenACC_3.4.pdf">OpenACC API 3.4</a>. Publication state checked on 28 October 2026; this is separate from installed-compiler support.</li>
+<li><a href="https://openacc-best-practices-guide.readthedocs.io/en/latest/06-Loops.html">OpenACC Programming and Best Practices Guide: Optimize Loops</a>. Mapping hierarchy, exposed parallelism, and portability costs of fixed mapping choices.</li>
+<li><a href="https://openacc-best-practices-guide.readthedocs.io/en/latest/08-Advanced.html">OpenACC Programming and Best Practices Guide: Advanced Features</a>. Queue ordering, cross-queue joins, per-device queues, and lifetime/completion considerations.</li>
+<li><a href="https://gcc.gnu.org/onlinedocs/gcc-13.3.0/libgomp/nvptx.html">GCC 13.3 libgomp manual, §12.2 nvptx</a>. GCC's NVIDIA mapping and warp size. The installed compiler's macro and actual program runs provide the local support evidence.</li>
+<li><a href="https://gcc.gnu.org/onlinedocs/gcc-13.3.0/gcc/Nvidia-PTX-Options.html">GCC 13.3 NVIDIA PTX options, §3.19.35</a>. Supported architecture targets, the -misa alias, and the distinction between the explicit device target and the host compilation.</li>
+<li><a href="https://docs.nvidia.com/hpc-sdk/compilers/openacc-gs/index.html">NVIDIA HPC SDK OpenACC Getting Started Guide</a>, version 26.9 as served on 28 October 2026. NVIDIA-compiler targeting options; not a statement that the NVIDIA compiler is installed here.</li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#asynchronous-and-overlapping-transfers-with-computation">NVIDIA CUDA Best Practices Guide, §10.1.2</a>, version 13.4 as served on 28 October 2026. Hardware and pinned-host-memory conditions for CUDA transfer/computation overlap; not measured OpenACC overlap.</li>
+</ul>
+<!-- BOOK-CONTENT-END --></article><nav class="page-turn" aria-label="Chapter navigation"><a rel="prev" href="chapter-24-openacc-directives-loops-data-management.html">Previous available chapter</a><a href="index.html">Lecture index</a><span>Further chapters pending</span></nav></main></div>
+<footer class="site-footer">Independent study notes. NPTEL IIT Bombay course recordings supply the topic sequence; added explanations and teaching constructions are separately attributed. Public reading edition; final independent review sign-offs remain pending. See the editorial record in this repository.</footer></body></html>

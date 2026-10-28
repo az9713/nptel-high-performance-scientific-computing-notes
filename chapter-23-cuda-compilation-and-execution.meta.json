@@ -1,0 +1,362 @@
+{
+  "chapter": 23,
+  "title": "CUDA compilation and execution: artifacts, allocations, errors and evidence",
+  "status": "reviewed and locally validated; independent round 2 ACCEPT",
+  "transcript_provenance": "Local machine transcription (faster-whisper small.en); not publisher captions",
+  "recordings": [
+    {
+      "video_id": "Xi-yMwssHPc",
+      "label": "W9L1",
+      "playlist_index": 50,
+      "duration_seconds": 1570
+    },
+    {
+      "video_id": "jM3Q6tftc6A",
+      "label": "W9L2",
+      "playlist_index": 51,
+      "duration_seconds": 1524
+    }
+  ],
+  "frames_viewed": {
+    "Xi-yMwssHPc": [
+      "f0008",
+      "f0012",
+      "f0016",
+      "f0019",
+      "f0022",
+      "f0026",
+      "f0033",
+      "f0041"
+    ],
+    "jM3Q6tftc6A": [
+      "f0001",
+      "f0014",
+      "f0017",
+      "f0023",
+      "f0026",
+      "f0033",
+      "f0038",
+      "f0039",
+      "f0040",
+      "f0041",
+      "f0042",
+      "f0045",
+      "f0046",
+      "f0047",
+      "f0048"
+    ]
+  },
+  "source_uncertainties": [
+    "No cluster scheduler is installed locally; scheduler template is explicitly unsubmitted, with no claimed local job allocation. The recorded interactive/batch visibility difference is site-specific.",
+    "The course-provided example repository URL was not established from the inspected frames; examples were reconstructed from visible source rather than claiming a clone or audit of that repository.",
+    "The displayed precision timings are retained as lecture observations; their cause is not independently established. No peak ratio inferred.",
+    "The recorded later SM-counter job environment is not fully established; array indexing is identified as a potential out-of-bounds defect rather than a reproduced memory fault.",
+    "Current online manuals identify CUDA13.4/PTX9.4; installed tools areCUDA13.3/PTX9.3. Local generated-artifact and execution claims use actual captures.",
+    "Three complete timing captures retained. A60secondNode wrapper reset after artifact and two repetitions were saved; an unretained third repetition is excluded from results. No trace-based copy/compute overlap was measured."
+  ],
+  "sections": [
+    {
+      "section": "model",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Foundations that support both lecture execution examples",
+      "research_extension": "Artifact terminology and independent contracts",
+      "teaching_construction": "42probe and Jacobi failure model",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "environment",
+      "video_id": "Xi-yMwssHPc",
+      "start": 6,
+      "end": 510,
+      "lecture_material": "Compiler/path/version inspection; compile on login node and try execution",
+      "research_extension": "NVCC phases, artifacts, target flags, driver/PTX limits",
+      "teaching_construction": "Checked42 and actual image comparison plus captured unsafe variant",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "allocation",
+      "video_id": "Xi-yMwssHPc",
+      "start": 510,
+      "end": 1313,
+      "lecture_material": "Interactive request, queue/node discovery and SSH; batch script and submission, two versus one visible device",
+      "research_extension": "salloc/sbatch/GRES semantics and percentj correction",
+      "teaching_construction": "Allocation/build/load/numerics boundary analysis and unsubmitted adapted template",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "properties",
+      "video_id": "Xi-yMwssHPc",
+      "start": 1313,
+      "end": 1570,
+      "lecture_material": "Device properties and APIs; earlier A100 query contextualized",
+      "research_extension": "Runtime query errors and reported-versus-measured distinction",
+      "teaching_construction": "Use device-specific count instead of copying lecture assumptions",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "hello",
+      "video_id": "jM3Q6tftc6A",
+      "start": 6,
+      "end": 371,
+      "lecture_material": "OneCPU greeting plus<<<1,10>>>device greetings and synchronization",
+      "research_extension": "Runtime completion/error semantics",
+      "teaching_construction": "Ten disjoint checkedwrites; quotient/remainder coverage proof",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "precision",
+      "video_id": "jM3Q6tftc6A",
+      "start": 371,
+      "end": 1072,
+      "lecture_material": "1024element precision variants, allocations/copies/events; displayed39.54/0.05ms",
+      "research_extension": "FMA rounding and event units/resolution",
+      "teaching_construction": "Coverage repair, warmup/batch/full-array validation and interval/traffic models",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "placement",
+      "video_id": "jM3Q6tftc6A",
+      "start": 1072,
+      "end": 1524,
+      "lecture_material": "680 one-thread blocks; constant40counter array; sampledSMID and output",
+      "research_extension": "PTXsmid/nsmid noncontiguous range and preemption caveat",
+      "teaching_construction": "Safe bounded per-block log and host map; work conservation versus occupancy",
+      "evidence_class": "engineering check"
+    },
+    {
+      "section": "streams",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "No stream-overlap experiment in assigned recordings; explicit research extension",
+      "research_extension": "Ordered streams, pinned buffers and conditional concurrency",
+      "teaching_construction": "Independentchunk dependency graph, bounded one/twostream elapsed comparison and pipeline model",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "limits",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Course-era hardware observations separated from local experiments",
+      "research_extension": "Current13.4docs versus installed13.3 qualification",
+      "teaching_construction": "Finite-oracle and measurement-scope limits",
+      "evidence_class": "definition"
+    },
+    {
+      "section": "exercises",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Exercises grounded in launch, precision and SM examples",
+      "research_extension": "Artifact/driver and stream requirements",
+      "teaching_construction": "Exactlysix derive, compute, counterexample, diagnose, design and implementation exercises",
+      "evidence_class": "derivation"
+    },
+    {
+      "section": "primary-sources",
+      "video_id": null,
+      "start": null,
+      "end": null,
+      "lecture_material": "Assigned recordings listed first",
+      "research_extension": "All 13 relied-upon primary documentation pages opened and listed with supported claims",
+      "teaching_construction": "Attribution index",
+      "evidence_class": "definition"
+    }
+  ],
+  "references": [
+    {
+      "title": "NVIDIA CUDA Compiler Driver 13.4",
+      "url": "https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html",
+      "supports": "Host/device split; stable phases; native, virtual and repeated code-generation selections",
+      "page_checked": "\u00a7\u00a71.1.2\u20132.4; \u00a74.2.7",
+      "opened_at_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA Binary Utilities 13.4",
+      "url": "https://docs.nvidia.com/cuda/cuda-binary-utilities/index.html",
+      "supports": "Cubin and embedded host artifacts; cuobjdump listing, extraction and disassembly",
+      "page_checked": "\u00a7\u00a71.1\u20131.2; \u00a72.1",
+      "opened_at_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA Programming Guide: NVCC",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/nvcc.html",
+      "supports": "Virtual and real targets, native discovery and retained PTX",
+      "page_checked": "\u00a7\u00a72.7.1\u20132.7.3",
+      "opened_at_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA Compatibility: Minor Version Compatibility",
+      "url": "https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html",
+      "supports": "Newer-toolkit/older-driver limitations, PTX caveat and explicit target requirement",
+      "page_checked": "Application Considerations",
+      "opened_at_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA Runtime API: Error Handling",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__ERROR.html",
+      "supports": "cudaGetLastError retrieval/reset, error name and earlier asynchronous-error caveat",
+      "page_checked": "\u00a76.13",
+      "opened_at_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA Runtime API: Device Management",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__DEVICE.html",
+      "supports": "Device queries; checked cudaDeviceSynchronize waits for prior tasks and reports failures",
+      "page_checked": "\u00a76.3; cudaDeviceSynchronize description",
+      "opened_at_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA Runtime API: Event Management",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__EVENT.html",
+      "supports": "Event recording/completion and elapsed milliseconds with about0.5microsecond resolution",
+      "page_checked": "\u00a76.15; cudaEventElapsedTime and cudaEventRecord",
+      "opened_at_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA Programming Guide: Floating-Point Computation",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/mathematical-functions.html",
+      "supports": "FP32/FP64 formats; fused multiply-add has one final rounding",
+      "page_checked": "\u00a75.5.1, especially\u00a75.5.1.5",
+      "opened_at_utc_date": "2026-10-28"
+    },
+    {
+      "title": "PTX ISA9.4",
+      "url": "https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#special-registers-smid",
+      "supports": "Noncontiguous SM identifiers; nsmid range can exceed physical count; rescheduling can change sampled ID",
+      "page_checked": "\u00a7\u00a710.8\u201310.9",
+      "opened_at_utc_date": "2026-10-28"
+    },
+    {
+      "title": "CUDA Programming Guide: Asynchronous Execution",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/asynchronous-execution.html",
+      "supports": "In-order streams, host completion, pinned transfers, nonblocking/default-stream semantics; concurrency conditional",
+      "page_checked": "\u00a7\u00a72.5.2\u20132.5.3 and2.5.5\u20132.5.8",
+      "opened_at_utc_date": "2026-10-28"
+    },
+    {
+      "title": "SchedMD salloc manual",
+      "url": "https://slurm.schedmd.com/salloc.html",
+      "supports": "Allocation and command/shell lifetime differ from starting a task on an assigned node",
+      "page_checked": "Description",
+      "opened_at_utc_date": "2026-10-28"
+    },
+    {
+      "title": "SchedMD sbatch manual",
+      "url": "https://slurm.schedmd.com/sbatch.html",
+      "supports": "Submission acceptance differs from job execution; directives; percentj is jobID, percentx jobname",
+      "page_checked": "Description and Filename Pattern",
+      "opened_at_utc_date": "2026-10-28"
+    },
+    {
+      "title": "SchedMD Generic Resource Scheduling",
+      "url": "https://slurm.schedmd.com/gres.html",
+      "supports": "GPU requests supported by salloc/sbatch/srun; CUDA_VISIBLE_DEVICES set for jobsteps; device index remapping",
+      "page_checked": "Running Jobs and GPU Management",
+      "opened_at_utc_date": "2026-10-28"
+    }
+  ],
+  "symbol_ledger": [
+    {
+      "symbol": "\\mathcal C",
+      "first_section": "model",
+      "definition": "Execution contract tuple (s,calB,calA,e,v)"
+    },
+    {
+      "symbol": "s,\\mathcal B,\\mathcal A,e,v",
+      "first_section": "model",
+      "definition": "Exact source text, build command, resulting artifacts, execution environment and validation rule"
+    },
+    {
+      "symbol": "n,b,g,i,k,t",
+      "first_section": "hello",
+      "definition": "Elementcount,threads/block,blocks,index,blockindex,threadindex"
+    },
+    {
+      "symbol": "F,Q,I,w",
+      "first_section": "precision",
+      "definition": "Floatingoperation count,requestedbytes,arithmeticintensity,elementwidth"
+    },
+    {
+      "symbol": "r,t_batch,t_fixed,t_kernel,t_gap",
+      "first_section": "precision",
+      "definition": "Batchlaunchcount and elapsed/fixed/kernel/gap times in seconds"
+    },
+    {
+      "symbol": "c_j",
+      "first_section": "placement",
+      "definition": "Sample count at observedSMidentifierj"
+    },
+    {
+      "symbol": "H_k,K_k,R_k,V_k",
+      "first_section": "streams",
+      "definition": "Chunkk outboundcopy,kernel,inboundcopy,hostvalidation"
+    },
+    {
+      "symbol": "t_H,t_K,t_R,m,T_pipe",
+      "first_section": "streams",
+      "definition": "Perchunk stage times,chunkcount,pipeline elapsedmodel"
+    }
+  ],
+  "lecture_corrections": [
+    {
+      "evidence": "Xi-yMwssHPc f0033",
+      "correction": "%j expands tojobID,notjobname; %x isjobname."
+    },
+    {
+      "evidence": "Xi-yMwssHPc f0026/f0041",
+      "correction": "Two-versus-one GPUvisibility is an observation,not inherentinteractive/batch semantics."
+    },
+    {
+      "evidence": "jM3Q6tftc6A f0014/f0017",
+      "correction": "<<<1,128>>>withN1024 updates128entries; use8blocks or differentalgorithm."
+    },
+    {
+      "evidence": "jM3Q6tftc6A f0033",
+      "correction": "Displayedsizeof(int)=4bytes; preserve outputratherthan8byte spoken explanation."
+    },
+    {
+      "evidence": "jM3Q6tftc6A f0033",
+      "correction": "39.54/0.05=790.8cannot establishFP64/FP32throughputratio."
+    },
+    {
+      "evidence": "jM3Q6tftc6A f0038\u2013f0042",
+      "correction": "numSMs40sizescounterarray,doesnot restrictscheduler; IDscanexceed arraybound."
+    }
+  ],
+  "exercises": 6,
+  "prose_words": 7902,
+  "code_check": {
+    "command": "python -B tools/check_chapter_code.py --file work/ch23-sol/chapter-23-cuda-compilation-and-execution.html --report work/ch23-sol/chapter-code-validation.json",
+    "listings": 6,
+    "all_passed": true,
+    "status": "Fresh final extracted listing checker passed all 6; report copied unchanged to code-validation.json for integration",
+    "checked_at_utc": "2026-10-28T08:07:48.237788+00:00",
+    "fingerprint_sha256": "3f2d109c9e746fd3517b8225c433290185875ea254f5068ae76e01a30c233b24"
+  },
+  "measurement_scope": "OnevisibleRTX3050LaptopGPU; max8MiBdeviceallocation perlisting; timeout20s; exclusiveagentmeasurement slot; remainingOS/clockvariation uncontrolled",
+  "private_capture_provenance": "Retained commands, source/script hashes, rawstdout/stderr, processreturncodes, UTC andmonotonicendpoints underwork/ch23-sol; checksums collected before submission",
+  "review_rounds": [
+    {
+      "round": 1,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch23-r1.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    },
+    {
+      "round": 2,
+      "verdict": "ACCEPT",
+      "blocking": 0,
+      "major": 0,
+      "minor": 0,
+      "report": "ch23-r2.md",
+      "changes": "Recorded independent review; final report verifies the frozen chapter and all remaining repairs."
+    }
+  ]
+}
